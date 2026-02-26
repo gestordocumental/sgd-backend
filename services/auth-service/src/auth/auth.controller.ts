@@ -7,8 +7,6 @@ import {
   UnauthorizedException,
   BadRequestException,
 } from "@nestjs/common";
-import { JwtService } from "@nestjs/jwt";
-import { ConfigService } from "@nestjs/config";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
@@ -35,7 +33,7 @@ export class AuthController {
   @Post("login")
   login(@Headers("x-company-id") companyId: string, @Body() dto: LoginDto) {
     if (!companyId) {
-      throw new BadRequestException('Falta header x-company-id');
+      throw new BadRequestException('Missing header x-company-id');
     }
     return this.authService.login(companyId, dto);
   }
@@ -45,18 +43,18 @@ export class AuthController {
     return this.authService.refresh(dto.refreshToken);
   }
 
-  // ── Rutas PROTEGIDAS (Kong valida JWT antes de llegar aquí) ───────────────
+  // ── PROTECTED routes (Kong validates JWT before arriving here) ───────────────
 
   @Get("me")
   async me(@Headers("authorization") auth: string) {
-    // Kong ya validó la firma del JWT. Decodificamos para obtener el sub.
+    // Kong has already validated the JWT signature. We decoded it to obtain the sub.
     if (!auth?.startsWith("Bearer ")) throw new UnauthorizedException();
 
     const token = auth.split(" ")[1];
     const payload: any = this.decodeJwt(token);
 
      if (!payload?.sub || !payload?.companyId) {
-      throw new UnauthorizedException('Token inválido (claims faltantes)');
+      throw new UnauthorizedException('Invalid token (missing claims)');
     }
 
     return this.authService.getIdentity(payload.companyId, payload.sub);
