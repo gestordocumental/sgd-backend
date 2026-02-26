@@ -1,0 +1,83 @@
+# Chart: kong/kong
+# Namespace: gestor-documental
+# Instalación:
+#   helm install api-gateway kong/kong \
+#     --namespace gestor-documental \
+#     --values helm/values/kong-values.yaml
+#
+# NOTA: Este values es alternativa al deployment manual en k8s/api-gateway/.
+# Ambos enfoques son válidos. El manual tiene más control sobre la config declarativa.
+
+image:
+  repository: kong
+  tag: "3.4"
+
+# ── Modo DB-less con configuración declarativa ────────────────────────────────
+env:
+  database: "off"
+  declarative_config: /etc/kong/kong.yaml
+  proxy_access_log: /dev/stdout
+  proxy_error_log: /dev/stderr
+  admin_access_log: /dev/stdout
+  admin_error_log: /dev/stderr
+
+# ── Admin API (solo interna, no expuesta) ─────────────────────────────────────
+admin:
+  enabled: true
+  http:
+    enabled: true
+    servicePort: 8001
+    containerPort: 8001
+  type: ClusterIP
+
+# ── Proxy (punto de entrada al sistema) ───────────────────────────────────────
+proxy:
+  enabled: true
+  type: ClusterIP
+  http:
+    enabled: true
+    servicePort: 80
+    containerPort: 8000
+  tls:
+    enabled: false    # TLS deshabilitado en local
+
+# Kong no actúa como Ingress Controller (usamos manifiestos propios)
+ingressController:
+  enabled: false
+
+# ── Montar la configuración declarativa desde el ConfigMap ────────────────────
+# Requiere que el ConfigMap kong-config esté desplegado previamente.
+deployment:
+  kong:
+    enabled: true
+
+volumes:
+  - name: kong-config-volume
+    configMap:
+      name: kong-config
+      items:
+        - key: kong.yaml
+          path: kong.yaml
+
+volumeMounts:
+  - name: kong-config-volume
+    mountPath: /etc/kong
+    readOnly: true
+
+# ── Recursos ──────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# ── Afinidad al nodo control-plane de Kind (para hostPorts) ──────────────────
+nodeSelector:
+  ingress-ready: "true"
+
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Equal
+    effect: NoSchedule

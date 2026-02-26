@@ -1,0 +1,38 @@
+# Chart: bitnami/redis
+# Namespace: sgd-infra
+# Instalación:
+#   helm install redis bitnami/redis \
+#     --namespace sgd-infra \
+#     --values helm/values/redis-values.yaml
+#
+# El Service queda como redis-master.sgd-infra.svc.cluster.local
+# que es exactamente lo que usan los ConfigMaps de auth y notification service.
+
+# Arquitectura standalone (sin sentinel para local)
+architecture: standalone
+
+auth:
+  enabled: false    # Sin contraseña en local (REDIS_PASSWORD: "" en secrets)
+
+master:
+  # ── Recursos ajustados para Kind local ───────────────────────────────────
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+
+  # ── Persistencia ───────────────────────────────────────────────────────────
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: "standard"
+
+  # ── Configuración de Redis ──────────────────────────────────────────────────
+  configuration: |
+    save 60 1
+    loglevel warning
+    maxmemory 100mb
+    maxmemory-policy allkeys-lru

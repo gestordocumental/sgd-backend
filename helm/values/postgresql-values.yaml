@@ -1,0 +1,81 @@
+# Chart: bitnami/postgresql
+# Namespace: sgd-infra
+# Instalación:
+#   helm install postgresql bitnami/postgresql \
+#     --namespace sgd-infra \
+#     --values helm/values/postgresql-values.yaml
+
+global:
+  postgresql:
+    auth:
+      postgresPassword: "postgres_local"
+      username: "postgres"
+      password: "postgres_local"
+      database: "postgres"
+
+primary:
+  # ── Init: crea las 4 bases de datos y sus usuarios ─────────────────────────
+  initdb:
+    scripts:
+      01-init-databases.sql: |
+        CREATE DATABASE auth_db;
+        CREATE DATABASE org_db;
+        CREATE DATABASE user_db;
+        CREATE DATABASE workflow_db;
+
+        CREATE USER auth_user     WITH PASSWORD 'auth_pass_local';
+        CREATE USER org_user      WITH PASSWORD 'org_pass_local';
+        CREATE USER user_svc_user WITH PASSWORD 'user_pass_local';
+        CREATE USER workflow_user WITH PASSWORD 'workflow_pass_local';
+
+        -- Permisos a nivel de base de datos
+        GRANT ALL PRIVILEGES ON DATABASE auth_db     TO auth_user;
+        GRANT ALL PRIVILEGES ON DATABASE org_db      TO org_user;
+        GRANT ALL PRIVILEGES ON DATABASE user_db     TO user_svc_user;
+        GRANT ALL PRIVILEGES ON DATABASE workflow_db TO workflow_user;
+
+        -- PostgreSQL 15+: GRANT DATABASE no otorga permisos sobre schema public.
+        -- Sin esto TypeORM/Prisma fallan con "permission denied for schema public".
+        \c auth_db
+        GRANT ALL ON SCHEMA public TO auth_user;
+
+        \c org_db
+        GRANT ALL ON SCHEMA public TO org_user;
+
+        \c user_db
+        GRANT ALL ON SCHEMA public TO user_svc_user;
+
+        \c workflow_db
+        GRANT ALL ON SCHEMA public TO workflow_user;
+
+  # ── Recursos ajustados para Kind local ─────────────────────────────────────
+  resources:
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+  # ── Persistencia con el StorageClass de Kind (local-path) ──────────────────
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: "standard"    # StorageClass por defecto de Kind
+
+  # ── Health probes ───────────────────────────────────────────────────────────
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 6
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 6
+
+# Sin réplicas en local
+readReplicas:
+  replicaCount: 0

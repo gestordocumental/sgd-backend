@@ -1,0 +1,50 @@
+# Chart: bitnami/minio
+# Namespace: sgd-infra
+# Instalación:
+#   helm install minio bitnami/minio \
+#     --namespace sgd-infra \
+#     --values helm/values/minio-values.yaml
+#
+# API S3 interna: http://minio.sgd-infra.svc.cluster.local:9000
+# que es exactamente lo que usa el ConfigMap del document-service.
+
+auth:
+  rootUser: "minio_admin"
+  rootPassword: "minio_secret_local"
+
+# Modo standalone para local (sin distribuido)
+mode: standalone
+
+# ── Bucket inicial ─────────────────────────────────────────────────────────────
+# Crea el bucket 'documentos' automáticamente al instalar
+defaultBuckets: "documentos"
+
+# ── Recursos ajustados para Kind local ────────────────────────────────────────
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "300m"
+    memory: "256Mi"
+
+# ── Persistencia ──────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: "standard"
+
+# ── Servicio (API S3 + Consola) ───────────────────────────────────────────────
+service:
+  type: ClusterIP
+  ports:
+    api: 9000
+    console: 9001
+
+# ── Consola web (acceso via port-forward) ────────────────────────────────────
+# kubectl port-forward svc/minio 9001:9001 -n sgd-infra
+# → http://localhost:9001  (minio_admin / minio_secret_local)
+consoleService:
+  type: ClusterIP
+  ports:
+    console: 9001

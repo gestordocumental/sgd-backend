@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: gestor-documental
+  labels:
+    app: auth-service
+    project: sgd
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+        project: sgd
+        version: "1.0.0"
+    spec:
+      containers:
+        - name: auth-service
+          image: auth-service:1.0.0
+          imagePullPolicy: IfNotPresent  # Usa imagen local en Kind
+          ports:
+            - containerPort: 3000
+              name: http
+
+          # Variables desde ConfigMap
+          envFrom:
+            - configMapRef:
+                name: auth-service-config
+
+          # Variables sensibles desde Secret
+          env:
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secret
+                  key: DB_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secret
+                  key: REDIS_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secret
+                  key: JWT_SECRET
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secret
+                  key: JWT_REFRESH_SECRET
+
+          # ── Health Probes (sección 8 del documento) ─────────────────────
+          # startupProbe: da tiempo al servicio para arrancar antes de activar
+          # las otras probes. NestJS tarda ~10-15s en inicializar.
+          startupProbe:
+            httpGet:
+              path: /health/startup
+              port: 3000
+            failureThreshold: 10   # 10 intentos × 5s = 50s máximo para arrancar
+            periodSeconds: 5
+
+          # livenessProbe: Kubernetes reinicia el pod si falla.
+          # Verifica que el proceso no está bloqueado (deadlock).
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3000
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          # readinessProbe: Kubernetes retira el pod del balanceador si falla.
+          # Verifica conexión a PostgreSQL y Redis antes de recibir tráfico.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3000
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          # ── Recursos ─────────────────────────────────────────────────────
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+
+      restartPolicy: Always

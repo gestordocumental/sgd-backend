@@ -1,0 +1,48 @@
+# ── Node.js ───────────────────────────────────────────────────────────────────
+**/node_modules/
+**/dist/
+**/build/
+**/.npm
+**/*.tsbuildinfo
+
+# ── Variables de entorno (NUNCA subir al repo) ────────────────────────────────
+**/.env
+**/.env.local
+**/.env.*.local
+# Permitir el ejemplo de referencia
+!**/.env.example
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+**/logs/
+**/*.log
+npm-debug.log*
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ── Sistema operativo ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+# Ignorar overrides locales pero conservar docker-compose.yml base
+docker-compose.override.yml
+
+# ── Kubernetes — secrets con valores reales ───────────────────────────────────
+# Los archivos *secret.yaml del repo son plantillas con valores de desarrollo.
+# En producción los secrets se gestionan con Vault o Sealed Secrets.
+# Si generas overrides locales con valores reales, nómbralos *.secret.local.yaml
+**/*.secret.local.yaml
+
+# ── Helm ──────────────────────────────────────────────────────────────────────
+**/charts/*.tgz
+
+# ── Cobertura de tests ────────────────────────────────────────────────────────
+**/coverage/
+**/.nyc_output/

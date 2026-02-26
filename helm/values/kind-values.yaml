@@ -1,0 +1,121 @@
+# kind-values.yaml — Referencia de instalación completa para Kind local
+#
+# Este archivo documenta el orden y los comandos Helm para desplegar
+# toda la infraestructura del SGD en el cluster Kind (sgd-local).
+#
+# PRE-REQUISITO: tener el cluster Kind corriendo:
+#   kind create cluster --config kind-config.yaml
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PASO 1 — Aplicar namespaces
+# ─────────────────────────────────────────────────────────────────────────────
+#   kubectl apply -f k8s/namespaces/
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PASO 2 — Agregar repos Helm (solo la primera vez)
+# ─────────────────────────────────────────────────────────────────────────────
+#   helm repo add bitnami              https://charts.bitnami.com/bitnami
+#   helm repo add kong                 https://charts.konghq.com
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo add elastic              https://helm.elastic.co
+#   helm repo update
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PASO 3 — Instalar infraestructura en sgd-infra (orden recomendado)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   # 3.1 PostgreSQL
+#   helm install postgresql bitnami/postgresql \
+#     --namespace sgd-infra \
+#     --values helm/values/postgresql-values.yaml
+#
+#   # 3.2 MongoDB
+#   helm install mongodb bitnami/mongodb \
+#     --namespace sgd-infra \
+#     --values helm/values/mongodb-values.yaml
+#
+#   # 3.3 Redis
+#   helm install redis bitnami/redis \
+#     --namespace sgd-infra \
+#     --values helm/values/redis-values.yaml
+#
+#   # 3.4 Kafka (KRaft — crea tópicos automáticamente)
+#   helm install kafka bitnami/kafka \
+#     --namespace sgd-infra \
+#     --values helm/values/kafka-values.yaml
+#
+#   # 3.5 MinIO
+#   helm install minio bitnami/minio \
+#     --namespace sgd-infra \
+#     --values helm/values/minio-values.yaml
+#
+#   # 3.6 Elasticsearch
+#   helm install elasticsearch elastic/elasticsearch \
+#     --namespace sgd-infra \
+#     --values helm/values/elasticsearch-values.yaml
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PASO 4 — Instalar stack de monitoreo en sgd-monitoring
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     --namespace sgd-monitoring \
+#     --values helm/values/monitoring-values.yaml
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PASO 5 — Desplegar microservicios en gestor-documental
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   kubectl apply -f k8s/auth-service/
+#   kubectl apply -f k8s/org-service/
+#   kubectl apply -f k8s/user-service/
+#   kubectl apply -f k8s/workflow-service/
+#   kubectl apply -f k8s/document-service/
+#   kubectl apply -f k8s/notification-service/
+#   kubectl apply -f k8s/audit-service/
+#   kubectl apply -f k8s/api-gateway/
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PASO 6 — Verificación
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   kubectl get pods -n gestor-documental
+#   kubectl get pods -n sgd-infra
+#   kubectl get pods -n sgd-monitoring
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSOLAS WEB (via port-forward)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   # Kong Admin API
+#   kubectl port-forward svc/kong-admin 8001:8001 -n gestor-documental
+#   → http://localhost:8001
+#
+#   # Grafana
+#   kubectl port-forward svc/monitoring-grafana 3000:80 -n sgd-monitoring
+#   → http://localhost:3000  (admin / grafana_local)
+#
+#   # Kafka UI
+#   kubectl port-forward svc/kafka-ui 8090:8080 -n sgd-infra
+#   → http://localhost:8090
+#
+#   # MinIO Console
+#   kubectl port-forward svc/minio 9001:9001 -n sgd-infra
+#   → http://localhost:9001  (minio_admin / minio_secret_local)
+#
+#   # Elasticsearch
+#   kubectl port-forward svc/elasticsearch-master 9200:9200 -n sgd-infra
+#   → http://localhost:9200
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# DESINSTALAR TODO
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   helm uninstall postgresql mongodb redis kafka minio elasticsearch -n sgd-infra
+#   helm uninstall monitoring -n sgd-monitoring
+#   kubectl delete -f k8s/api-gateway/ -f k8s/auth-service/ ... (resto de servicios)
+
+# StorageClass de Kind (local-path provisioner)
+# Todos los charts usan "standard" que es el default en Kind.
+global:
+  storageClass: "standard"

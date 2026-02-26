@@ -1,0 +1,104 @@
+# ExternalName Services — Puente entre pods en Kind y servicios en docker-compose.
+#
+# Los pods usan *.sgd-infra.svc.cluster.local como host (ver ConfigMaps).
+# Estos Services resuelven esos nombres hacia host.docker.internal,
+# que Docker Desktop mapea al host Windows/Mac automáticamente.
+#
+# Aplicar: kubectl apply -f k8s/external-services/
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: sgd-infra
+  labels:
+    project: sgd
+    type: external
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - port: 5432
+      targetPort: 5432
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: sgd-infra
+  labels:
+    project: sgd
+    type: external
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - port: 27017
+      targetPort: 27017
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-master
+  namespace: sgd-infra
+  labels:
+    project: sgd
+    type: external
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - port: 6379
+      targetPort: 6379
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: sgd-infra
+  labels:
+    project: sgd
+    type: external
+spec:
+  type: ExternalName
+  # Los pods alcanzan Kafka por el puerto EXTERNAL (9094)
+  externalName: host.docker.internal
+  ports:
+    - port: 9092
+      targetPort: 9094
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: sgd-infra
+  labels:
+    project: sgd
+    type: external
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - port: 9000
+      targetPort: 9000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: sgd-infra
+  labels:
+    project: sgd
+    type: external
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - port: 9200
+      targetPort: 9200

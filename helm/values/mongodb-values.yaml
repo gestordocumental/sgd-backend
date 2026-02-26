@@ -1,0 +1,48 @@
+# Chart: bitnami/mongodb
+# Namespace: sgd-infra
+# Instalación:
+#   helm install mongodb bitnami/mongodb \
+#     --namespace sgd-infra \
+#     --values helm/values/mongodb-values.yaml
+
+auth:
+  enabled: true
+  rootUser: "mongo_admin"
+  rootPassword: "mongo_pass_local"
+  usernames:
+    - "document_user"
+  passwords:
+    - "document_pass_local"
+  databases:
+    - "document_db"
+
+# Arquitectura standalone para local (sin réplicas)
+architecture: standalone
+
+# ── Recursos ajustados para Kind local ─────────────────────────────────────
+resources:
+  requests:
+    cpu: "150m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# ── Persistencia ─────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClass: "standard"
+
+# ── Health probes ─────────────────────────────────────────────────────────────
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 20
+  failureThreshold: 6
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 6

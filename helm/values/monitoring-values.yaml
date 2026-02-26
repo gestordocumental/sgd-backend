@@ -1,0 +1,137 @@
+# Chart: prometheus-community/kube-prometheus-stack
+# Namespace: sgd-monitoring
+# Instalación:
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     --namespace sgd-monitoring \
+#     --values helm/values/monitoring-values.yaml
+#
+# Stack incluye (sección 5.3 del documento):
+#   - Prometheus  → métricas de todos los servicios vía /metrics
+#   - Grafana     → dashboards de disponibilidad, latencia P95/P99, throughput
+#   - Alertmanager → alertas por email/Slack ante eventos críticos
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    # Retención de métricas (sección 5.3: 15 días por defecto)
+    retention: 15d
+
+    # Descubrir ServiceMonitors en todos los namespaces del proyecto
+    serviceMonitorNamespaceSelector:
+      matchLabels:
+        project: sgd
+    serviceMonitorSelector: {}
+
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "500m"
+        memory: "1Gi"
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "standard"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+# ── Grafana ───────────────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+  adminPassword: "grafana_local"    # Cambiar en producción
+
+  # Acceso local via port-forward:
+  #   kubectl port-forward svc/monitoring-grafana 3000:80 -n sgd-monitoring
+  service:
+    type: ClusterIP
+    port: 80
+
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "300m"
+      memory: "256Mi"
+
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: "standard"
+
+  # Dashboards predefinidos útiles para el SGD
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: sgd
+          orgId: 1
+          folder: "SGD"
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/sgd
+
+# ── Alertmanager ─────────────────────────────────────────────────────────────
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "100m"
+        memory: "128Mi"
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "standard"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+  # Configuración de alertas (personalizar canales en producción)
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: "null"
+      routes:
+        - matchers:
+            - alertname = "Watchdog"
+          receiver: "null"
+    receivers:
+      - name: "null"
+    # Agregar receivers de email/Slack aquí para producción:
+    # - name: slack
+    #   slack_configs:
+    #     - api_url: <SLACK_WEBHOOK_URL>
+    #       channel: '#alertas-sgd'
+
+# ── Componentes del nodo (reducidos para local) ───────────────────────────────
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
+# Deshabilitar componentes que consumen recursos y no son críticos en local
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false

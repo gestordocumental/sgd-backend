@@ -1,0 +1,261 @@
+# IMPORTANTE (sección 9 del documento técnico):
+# Este archivo levanta ÚNICAMENTE la infraestructura de datos en local.
+# Los 8 microservicios de la aplicación siempre se despliegan en Kubernetes (Kind).
+#
+# Flujo de trabajo local:
+#   1. docker compose up -d        → levanta infra (DBs, Kafka, Redis, MinIO, ES)
+#   2. kubectl apply -f k8s/       → despliega microservicios en Kind
+#
+# Los pods en Kind acceden a estos servicios via ExternalName (k8s/external-services/).
+
+name: sgd-infra
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PostgreSQL — Auth, Org, User, Workflow services
+  # ─────────────────────────────────────────────────────────────────────────────
+  postgresql:
+    image: postgres:15-alpine
+    container_name: sgd-postgresql
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_local
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # MongoDB — Document Service
+  # ─────────────────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: sgd-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo_admin
+      MONGO_INITDB_ROOT_PASSWORD: mongo_pass_local
+      MONGO_INITDB_DATABASE: document_db
+    volumes:
+      - mongodata:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Redis — Auth Service (tokens) + Notification Service (cola)
+  # ─────────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: sgd-redis
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Kafka — Comunicación asíncrona entre servicios (sección 3.2)
+  # Imagen: apache/kafka (bitnami/kafka fue descontinuado en Docker Hub)
+  # Modo KRaft: sin Zookeeper
+  # ─────────────────────────────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:latest
+    container_name: sgd-kafka
+    environment:
+      # KRaft (sin Zookeeper) — apache/kafka usa KAFKA_ sin prefijo CFG_
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # PLAINTEXT: comunicación interna docker-compose
+      # EXTERNAL:  acceso desde Kind (via host.docker.internal:9094)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://host.docker.internal:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    ports:
+      - "9094:9094"     # Puerto externo para Kind y herramientas del host
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Kafka Init — Crea los tópicos necesarios al arrancar (se ejecuta una vez)
+  # ─────────────────────────────────────────────────────────────────────────────
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: sgd-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    # Cada kafka-topics.sh en UNA sola línea: el YAML '>' preserva newlines
+    # para líneas con mayor indentación, lo que rompe los argumentos del comando.
+    command: >
+      /bin/bash -c "
+      echo '>>> Creando tópicos SGD...' &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic service.health.event --partitions 1 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic document.created --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic document.approved --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic document.rejected --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.step.completed --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.send --partitions 2 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.log --partitions 3 --replication-factor 1 &&
+      echo '>>> Tópicos creados correctamente.' &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+      "
+    restart: "no"
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Kafka UI — Panel visual de tópicos, consumer groups y lag (sección 5.3)
+  # Acceso: http://localhost:8090
+  # ─────────────────────────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: sgd-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: sgd-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8090:8080"
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # MinIO — Object storage para PDFs (equivalente local a AWS S3, sección 4.1)
+  # API S3:      http://localhost:9000
+  # Consola web: http://localhost:9001  (admin / minio_secret_local)
+  # ─────────────────────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: sgd-minio
+    environment:
+      MINIO_ROOT_USER: minio_admin
+      MINIO_ROOT_PASSWORD: minio_secret_local
+    command: server /data --console-address ":9001"
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # MinIO Init — Crea el bucket 'documentos' al arrancar (se ejecuta una vez)
+  # ─────────────────────────────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: sgd-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 minio_admin minio_secret_local &&
+        mc mb local/documentos --ignore-existing &&
+        mc anonymous set none local/documentos &&
+        echo '>>> Bucket documentos creado correctamente.'
+      "
+    restart: "no"
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Elasticsearch — Audit Service (sección 5.3)
+  # Nodo único para local. Acceso: http://localhost:9200
+  # ─────────────────────────────────────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: sgd-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false      # Deshabilitado en local (habilitar en prod)
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=sgd-local
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Volúmenes persistentes
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  pgdata:
+  mongodata:
+  redisdata:
+  kafkadata:
+  miniodata:
+  esdata:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Red interna para comunicación entre servicios de infraestructura
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  sgd-local:
+    driver: bridge

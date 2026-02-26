@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: document-service-config
+  namespace: gestor-documental
+  labels:
+    app: document-service
+    project: sgd
+data:
+  NODE_ENV: "development"
+  PORT: "3000"
+
+  # MongoDB
+  MONGODB_HOST: "mongodb.sgd-infra.svc.cluster.local"
+  MONGODB_PORT: "27017"
+  MONGODB_DB: "document_db"
+
+  # MinIO — URLs pre-firmadas con expiración de 1h (sección 4.1)
+  MINIO_ENDPOINT: "minio.sgd-infra.svc.cluster.local"
+  MINIO_PORT: "9000"
+  MINIO_USE_SSL: "false"
+  MINIO_BUCKET: "documentos"
+  MINIO_URL_EXPIRY_SECONDS: "3600"
+
+  # Kafka
+  KAFKA_BROKERS: "kafka.sgd-infra.svc.cluster.local:9092"
+  KAFKA_GROUP_ID: "document-service-group"
+  KAFKA_CLIENT_ID: "document-service"
+
+  HEALTH_PATH: "/health"

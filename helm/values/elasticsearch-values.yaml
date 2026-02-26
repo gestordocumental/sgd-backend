@@ -1,0 +1,50 @@
+# Chart: elastic/elasticsearch
+# Namespace: sgd-infra
+# Instalación:
+#   helm install elasticsearch elastic/elasticsearch \
+#     --namespace sgd-infra \
+#     --values helm/values/elasticsearch-values.yaml
+#
+# Acceso interno: http://elasticsearch.sgd-infra.svc.cluster.local:9200
+# que es exactamente lo que usa el ConfigMap del audit-service.
+
+# Nodo único para local
+replicas: 1
+# minimumMasterNodes eliminado: deprecated en ES 8.x.
+# Con discovery.type: single-node el cluster lo gestiona automáticamente.
+
+# ── Seguridad deshabilitada en local ─────────────────────────────────────────
+# En producción: xpack.security.enabled=true con TLS y autenticación
+esConfig:
+  elasticsearch.yml: |
+    xpack.security.enabled: false
+    cluster.name: sgd-local
+    discovery.type: single-node
+
+# ── Recursos ajustados para Kind local ───────────────────────────────────────
+resources:
+  requests:
+    cpu: "300m"
+    memory: "1Gi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+esJavaOpts: "-Xmx768m -Xms768m"
+
+# ── Persistencia ─────────────────────────────────────────────────────────────
+volumeClaimTemplate:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: "standard"
+  resources:
+    requests:
+      storage: 5Gi
+
+# ── Health probes ─────────────────────────────────────────────────────────────
+# Elasticsearch tarda más en arrancar
+readinessProbe:
+  failureThreshold: 10
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  successThreshold: 3
+  timeoutSeconds: 5

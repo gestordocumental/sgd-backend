@@ -1,0 +1,23 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: sgd-local
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80      # Kong HTTP
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 443     # Kong HTTPS
+        hostPort: 8443
+        protocol: TCP
+      - containerPort: 8001    # Kong Admin API
+        hostPort: 8001
+        protocol: TCP
+  - role: worker               # Worker para microservicios
+  - role: worker               # Worker para infraestructura (Kafka, DBs)

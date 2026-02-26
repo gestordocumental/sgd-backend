@@ -1,0 +1,44 @@
+---
+# Servicio proxy: acceso interno al cluster desde otros pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-proxy
+  namespace: gestor-documental
+  labels:
+    app: api-gateway
+    project: sgd
+spec:
+  type: ClusterIP
+  selector:
+    app: api-gateway
+  ports:
+    - name: proxy-http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+    - name: proxy-https
+      port: 443
+      targetPort: 8443
+      protocol: TCP
+
+---
+# Servicio admin: solo para kubectl port-forward en local
+# NUNCA exponer este servicio externamente en producción
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-admin
+  namespace: gestor-documental
+  labels:
+    app: api-gateway
+    project: sgd
+spec:
+  type: ClusterIP
+  selector:
+    app: api-gateway
+  ports:
+    - name: admin-http
+      port: 8001
+      targetPort: 8001
+      protocol: TCP

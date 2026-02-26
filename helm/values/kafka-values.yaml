@@ -1,0 +1,93 @@
+# Chart: bitnami/kafka
+# Namespace: sgd-infra
+# NOTA: bitnami/kafka fue descontinuado en Docker Hub.
+#       Para docker-compose se usa apache/kafka (ver docker-compose.yml).
+#       Para Helm, bitnami/kafka sigue disponible via el repo Helm de Bitnami.
+# Instalación:
+#   helm install kafka bitnami/kafka \
+#     --namespace sgd-infra \
+#     --values helm/values/kafka-values.yaml
+#
+# El broker queda en: kafka.sgd-infra.svc.cluster.local:9092
+# que es exactamente lo que usan los ConfigMaps de workflow, document,
+# notification y audit services.
+
+# KRaft mode (sin Zookeeper, Kafka 3.6+)
+kraft:
+  enabled: true
+
+controller:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: "standard"
+
+broker:
+  replicaCount: 0    # En modo KRaft con 1 nodo, el controller actúa como broker
+
+listeners:
+  client:
+    protocol: PLAINTEXT
+  controller:
+    protocol: PLAINTEXT
+  interbroker:
+    protocol: PLAINTEXT
+
+# ── Tópicos SGD creados automáticamente ──────────────────────────────────────
+provisioning:
+  enabled: true
+  topics:
+    # Heartbeat (sección 5.1 — monitoreo continuo)
+    - name: service.health.event
+      partitions: 1
+      replicationFactor: 1
+      config:
+        retention.ms: "86400000"    # 24h
+
+    # Eventos de documentos
+    - name: document.created
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"   # 7 días
+
+    - name: document.approved
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+
+    - name: document.rejected
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+
+    # Eventos de flujo de aprobación
+    - name: workflow.step.completed
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+
+    # Notificaciones
+    - name: notification.send
+      partitions: 2
+      replicationFactor: 1
+      config:
+        retention.ms: "86400000"
+
+    # Auditoría (retención extendida para cumplimiento normativo)
+    - name: audit.log
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "2592000000"  # 30 días
