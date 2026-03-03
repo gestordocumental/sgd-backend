@@ -8,8 +8,10 @@ name: Deploy — Microservicios
 #   test   → Railway env: staging    / GitHub env: staging
 #   master → Railway env: production / GitHub env: production  (requiere aprobación)
 #
-# Secret requerido en GitHub:
-#   RAILWAY_TOKEN → Account Settings → Tokens en railway.app
+# Secrets requeridos en GitHub (Settings → Secrets → Actions):
+#   Environment: dev        → secret RAILWAY_TOKEN (token Railway para develop)
+#   Environment: staging    → secret RAILWAY_TOKEN (token Railway para staging)
+#   Environment: production → secret RAILWAY_TOKEN (token Railway para production)
 
 on:
   push:
@@ -73,6 +75,7 @@ jobs:
     outputs:
       railway_env: ${{ steps.env.outputs.railway_env }}
       github_env:  ${{ steps.env.outputs.github_env }}
+      token_name:  ${{ steps.env.outputs.token_name }}
     steps:
       - name: Mapear rama a entorno
         id: env
@@ -176,7 +179,6 @@ jobs:
         working-directory: services/document-service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
           railway up \
             --service document-service \
             --environment ${{ needs.set-env.outputs.railway_env }} \
