@@ -47,10 +47,16 @@ services:
         methods: [GET]
         strip_path: false
         plugins:
-          - name: request-termination
+          - name: rate-limiting
             config:
-              status_code: 200
-              message: "OK"
+              minute: 1000000
+              policy: local
+              fault_tolerant: true
+    plugins:
+      - name: request-termination
+        config:
+          status_code: 200
+          message: "OK"
 
   # ── auth-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
   - name: auth-public
@@ -81,8 +87,8 @@ services:
         paths:
           - /api/auth
         strip_path: false
-        plugins:
-          - name: jwt
+    plugins:
+      - name: jwt
 
   # ── org-service ────────────────────────────────────────────────────────
   - name: org-service
@@ -92,8 +98,8 @@ services:
         paths:
           - /api/org
         strip_path: false
-        plugins:
-          - name: jwt
+    plugins:
+      - name: jwt
 
   # ── user-service ───────────────────────────────────────────────────────
   - name: user-service
@@ -103,8 +109,8 @@ services:
         paths:
           - /api/users
         strip_path: false
-        plugins:
-          - name: jwt
+    plugins:
+      - name: jwt
 
   # ── workflow-service ───────────────────────────────────────────────────
   - name: workflow-service
@@ -114,8 +120,8 @@ services:
         paths:
           - /api/workflows
         strip_path: false
-        plugins:
-          - name: jwt
+    plugins:
+      - name: jwt
 
   # ── document-service ───────────────────────────────────────────────────
   - name: document-service
@@ -125,8 +131,8 @@ services:
         paths:
           - /api/documents
         strip_path: false
-        plugins:
-          - name: jwt
+    plugins:
+      - name: jwt
 
   # ── notification-service ───────────────────────────────────────────────
   - name: notification-service
@@ -136,8 +142,8 @@ services:
         paths:
           - /api/notifications
         strip_path: false
-        plugins:
-          - name: jwt
+    plugins:
+      - name: jwt
 
   # ── audit-service ──────────────────────────────────────────────────────
   - name: audit-service
@@ -147,5 +153,5 @@ services:
         paths:
           - /api/audit
         strip_path: false
-        plugins:
-          - name: jwt
+    plugins:
+      - name: jwt
