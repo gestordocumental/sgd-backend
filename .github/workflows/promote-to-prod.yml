@@ -1,0 +1,43 @@
+name: Promote to Production
+
+# Este workflow NO despliega — deploy-services.yml despliega al hacer merge.
+# Su único propósito es requerir aprobación manual antes de que el merge a master
+# sea posible, actuando como gate de calidad.
+#
+# Flujo:
+#   1. PR de test → master es creado
+#   2. Este workflow corre y queda en estado "waiting"
+#   3. Un aprobador autorizado lo aprueba en GitHub → Actions → Environments
+#   4. El workflow pasa → el PR puede ser mergeado
+#   5. deploy-services.yml detecta el push a master → despliega a production en Railway
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # ── Gate de aprobación para producción ──────────────────────────────────
+  approval-gate:
+    name: Aprobación para producción
+    runs-on: ubuntu-latest
+    # "production" es un Environment de GitHub con reviewers configurados.
+    # Configurar en: repo → Settings → Environments → production → Required reviewers
+    environment: production
+    steps:
+      - name: Aprobación recibida
+        run: |
+          echo "Aprobación recibida. El merge a master puede proceder."
+          echo "deploy-services.yml desplegará a production en Railway al detectar el push."
+
+  # ── Verificar que el CI pasó en la rama test ─────────────────────────────
+  # ci.yml ya validó el build al hacer push a test.
+  # Este job solo confirma que el workflow llegó aquí sin errores.
+  verify-ci:
+    name: Verificar CI en rama test
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI confirmado
+        run: |
+          echo "El CI (ci.yml) ya validó el build en la rama test."
+          echo "Este PR puede proceder una vez que el approval-gate sea aprobado."

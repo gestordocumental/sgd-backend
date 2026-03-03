@@ -1,6 +1,7 @@
 # Sistema de Gestión Documental — Backend
 
-Plataforma de gestión documental multi-tenant basada en microservicios, desplegada en Kubernetes (KinD para local, cualquier proveedor cloud en producción).
+Plataforma de gestión documental multi-tenant basada en microservicios.
+Cuatro ambientes: local (KinD), dev, test y prod (los tres últimos en Railway).
 
 ---
 
@@ -204,61 +205,213 @@ Las rutas marcadas con `JWT` requieren header `Authorization: Bearer <token>`.
 
 ---
 
-## Ejecución en Producción
+## Ambientes en Railway (dev / test / prod)
 
-> Los secrets de producción NUNCA se almacenan en el repositorio.
-> Usar un gestor de secretos (HashiCorp Vault, AWS Secrets Manager, Sealed Secrets).
+Railway es un PaaS: no usa Kubernetes. Cada microservicio es un servicio
+independiente dentro de un proyecto Railway con 3 entornos separados.
 
-### Infraestructura
+> Los secrets NUNCA se almacenan en el repositorio.
+> Se configuran por entorno en el dashboard de Railway o vía Railway CLI.
 
-En producción la infraestructura se despliega con Helm en lugar de Docker Compose.
-Los `values/` en `helm/values/` son la base de configuración para cada chart.
+### Estrategia de ramas → entornos
 
-```bash
-# Ejemplo: PostgreSQL con Bitnami chart
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm install postgresql bitnami/postgresql \
-  -f helm/values/postgresql-values.yaml \
-  -n sgd-infra
+```
+Rama git          Entorno Railway    Uso
+─────────────────────────────────────────────────────
+develop     ──►   dev                Desarrollo activo, datos de prueba
+test        ──►   test               QA, pruebas de integración
+main        ──►   prod               Producción, datos reales
+local       ──►   (KinD)             Máquina del desarrollador
 ```
 
-### Microservicios
-
-1. **Build y push** de imágenes a un registry (ECR, GCR, Docker Hub):
-
-```bash
-docker build -t <registry>/auth-service:1.0.0 ./services/auth-service
-docker push <registry>/auth-service:1.0.0
+**Flujo de trabajo:**
+```
+feature/xxx  →  develop  →  test  →  main
+                  │            │        │
+                 dev          test     prod
+             (Railway)   (Railway)  (Railway)
 ```
 
-2. **Actualizar** el campo `image` en `k8s/auth-service/deployment.yaml`:
+Railway despliega automáticamente cuando se hace push/merge a cada rama.
 
-```yaml
-image: <registry>/auth-service:1.0.0
+### Diferencias clave: Local vs Railway
+
+| Aspecto | Local (KinD) | Producción (Railway) |
+|---|---|---|
+| Orquestación | Kubernetes (KinD) | Railway (PaaS interno) |
+| DNS interno | `service.namespace.svc.cluster.local` | `service.railway.internal:3000` |
+| Infraestructura | Docker Compose fuera del cluster | Plugins nativos de Railway |
+| Kong config | `k8s/api-gateway/configmap.yaml` | `railway/api-gateway/kong.yaml` |
+| Secrets | `k8s/*/secret.yaml` (valores dev) | Variables de entorno en Railway dashboard |
+| Imágenes | `kind load` (sin registry) | Railway construye desde el repo git |
+
+### Estructura de archivos para Railway
+
+```
+railway/
+└── api-gateway/
+    ├── kong.yaml         # Rutas con DNS interno de Railway
+    ├── Dockerfile        # Imagen Kong con kong.yaml embebido
+    ├── entrypoint.sh     # Sustituye env vars en kong.yaml al arrancar
+    └── railway.json      # Health check config para Railway
+
+services/
+└── auth-service/
+    ├── Dockerfile        # El mismo Dockerfile (Railway lo usa directamente)
+    └── railway.json      # Health check: /health/ready
 ```
 
-3. **Aplicar** los manifiestos en el cluster de producción:
+### Paso 1 — Crear el proyecto y los 3 entornos en Railway
 
-```bash
-kubectl apply -f k8s/namespaces/
-kubectl apply -f k8s/api-gateway/
-kubectl apply -f k8s/auth-service/
-# ... resto de servicios
+1. Ir a [railway.app](https://railway.app) → **New Project**
+2. Conectar el repositorio de GitHub
+3. En Railway → **Environments** → crear los 3 entornos:
+
+```
+Nombre      Rama git    NODE_ENV
+──────────────────────────────────
+dev         develop     development
+test        test        test
+prod        main        production
 ```
 
-### Variables de entorno en producción
+4. Para cada entorno, en **Settings → Branch**, asignar la rama correspondiente.
+   Railway redesplegará automáticamente en cada push a esa rama.
 
-Los `secret.yaml` del repositorio contienen valores de desarrollo.
-En producción reemplazarlos con un pipeline CI/CD que inyecte los valores reales:
+### Paso 2 — Agregar infraestructura por entorno
+
+**Cada entorno (dev, test, prod) necesita su propia instancia de cada servicio.**
+Esto garantiza aislamiento total: dev nunca toca datos de prod.
+
+**Plugins nativos de Railway** (agregar en cada entorno):
+
+| Plugin | Entornos | Uso |
+|---|---|---|
+| **PostgreSQL** | dev + test + prod | auth, user, org, workflow |
+| **Redis** | dev + test + prod | auth, user, notification |
+| **MongoDB** | dev + test + prod | document-service |
+
+**Servicios con imagen Docker** (no son plugins nativos):
+
+| Servicio | Imagen | Entornos |
+|---|---|---|
+| Kafka | `apache/kafka:latest` | dev + test + prod |
+| MinIO | `minio/minio:latest` | dev + test + prod |
+| Elasticsearch | `docker.elastic.co/elasticsearch/elasticsearch:8.11.0` | dev + test + prod |
+
+> **Alternativas externas para reducir costos:**
+> - Kafka → [Upstash Kafka](https://upstash.com) (tier gratuito disponible)
+> - MinIO → [Cloudflare R2](https://developers.cloudflare.com/r2) (S3-compatible, 10GB gratis)
+> - Elasticsearch → solo en test y prod (dev puede omitirlo si no usas auditoría)
+
+### Paso 3 — Desplegar el API Gateway (Kong)
+
+1. En Railway, crear un nuevo servicio → **Empty Service**
+2. Conectar al repo, establecer **Root Directory**: `railway/api-gateway`
+3. Railway detecta el `Dockerfile` automáticamente
+4. Configurar las variables de entorno del servicio:
+
+```
+KONG_JWT_SECRET   = <mismo valor que JWT_SECRET de auth-service>
+FRONTEND_URL      = https://<tu-dominio-frontend>
+```
+
+### Paso 4 — Desplegar cada microservicio
+
+Para cada servicio (ejemplo con auth-service):
+
+1. En Railway crear un nuevo servicio → conectar repo
+2. **Root Directory**: `services/auth-service`
+3. Railway usa el `Dockerfile` y el `railway.json` (health check en `/health/ready`)
+4. Configurar variables de entorno en el dashboard de Railway:
+
+**auth-service — variables de entorno en Railway (por entorno):**
+
+Railway usa la sintaxis `${{Plugin.VARIABLE}}` para referenciar automáticamente
+los valores de los plugins conectados al mismo entorno.
+
+```
+# ── Común a todos los entornos ─────────────────────────────────────────
+PORT                   = 3000
+JWT_EXPIRATION         = 3600s
+JWT_REFRESH_EXPIRATION = 7d
+DB_NAME                = auth_db
+
+# ── Varía por entorno ──────────────────────────────────────────────────
+
+# dev
+NODE_ENV               = development
+
+# test
+NODE_ENV               = test
+
+# prod
+NODE_ENV               = production
+
+# ── Generadas automáticamente por Railway al conectar los plugins ──────
+DB_HOST                = ${{Postgres.PGHOST}}
+DB_PORT                = ${{Postgres.PGPORT}}
+DB_USERNAME            = ${{Postgres.PGUSER}}
+DB_PASSWORD            = ${{Postgres.PGPASSWORD}}
+REDIS_HOST             = ${{Redis.REDISHOST}}
+REDIS_PORT             = ${{Redis.REDISPORT}}
+REDIS_PASSWORD         = ${{Redis.REDISPASSWORD}}
+
+# ── Secrets — valor diferente por entorno (nunca compartir entre entornos) ──
+JWT_SECRET             = <openssl rand -base64 32>
+JWT_REFRESH_SECRET     = <openssl rand -base64 32>
+INTERNAL_TOKEN         = <openssl rand -base64 32>
+```
+
+> **Regla de oro de los secrets:**
+> `JWT_SECRET` de dev ≠ `JWT_SECRET` de test ≠ `JWT_SECRET` de prod.
+> Un token de dev nunca debe ser válido en prod.
+
+### Paso 5 — URLs públicas por entorno
+
+Railway asigna URLs automáticamente a cada entorno del API Gateway:
+
+```
+Entorno   URL generada por Railway                          Dominio propio (opcional)
+───────────────────────────────────────────────────────────────────────────────────
+dev       https://api-gateway-dev-xxxx.up.railway.app       api-dev.tudominio.com
+test      https://api-gateway-test-xxxx.up.railway.app      api-test.tudominio.com
+prod      https://api-gateway-prod-xxxx.up.railway.app      api.tudominio.com
+```
+
+Configurar dominio propio: Railway → servicio api-gateway → **Settings → Domains**.
+
+### Paso 6 — Railway CLI (flujo diario)
 
 ```bash
-# Ejemplo con kubectl + variables de CI
-kubectl create secret generic auth-service-secret \
-  --from-literal=DB_USERNAME="$PROD_DB_USER" \
-  --from-literal=DB_PASSWORD="$PROD_DB_PASS" \
-  --from-literal=JWT_SECRET="$PROD_JWT_SECRET" \
-  --from-literal=JWT_REFRESH_SECRET="$PROD_JWT_REFRESH_SECRET" \
-  -n gestor-documental
+# Instalar Railway CLI
+npm install -g @railway/cli
+
+# Login
+railway login
+
+# Enlazar el proyecto local
+railway link
+
+# Ver variables del entorno dev
+railway variables --environment dev
+
+# Ver logs del auth-service en dev
+railway logs --service auth-service --environment dev
+
+# Cambiar entre entornos
+railway environment dev
+railway environment test
+railway environment prod
+```
+
+### Generar secrets seguros
+
+```bash
+# Generar un secret diferente para cada entorno
+openssl rand -base64 32   # JWT_SECRET
+openssl rand -base64 32   # JWT_REFRESH_SECRET
+openssl rand -base64 32   # INTERNAL_TOKEN
 ```
 
 ---
