@@ -1,5 +1,29 @@
+# Dependencias
 node_modules/
+
+# Build
 dist/
+build/
+*.tsbuildinfo
+
+# Variables de entorno
 .env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# Logs
+logs/
 *.log
+npm-debug.log*
+
+# Cobertura de tests
 coverage/
+.nyc_output/
+
+# Temporales
+tmp/
+temp/

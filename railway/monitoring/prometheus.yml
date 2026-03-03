@@ -1,0 +1,43 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: "${ENVIRONMENT}"   # dev | test | prod
+
+# ── Scrape de cada microservicio vía DNS interno de Railway ────────────────
+scrape_configs:
+
+  - job_name: auth-service
+    static_configs:
+      - targets: ["auth-service.railway.internal:3000"]
+    metrics_path: /metrics
+
+  - job_name: user-service
+    static_configs:
+      - targets: ["user-service.railway.internal:3000"]
+    metrics_path: /metrics
+
+  - job_name: org-service
+    static_configs:
+      - targets: ["org-service.railway.internal:3000"]
+    metrics_path: /metrics
+
+  - job_name: document-service
+    static_configs:
+      - targets: ["document-service.railway.internal:3000"]
+    metrics_path: /metrics
+
+  - job_name: workflow-service
+    static_configs:
+      - targets: ["workflow-service.railway.internal:3000"]
+    metrics_path: /metrics
+
+  - job_name: notification-service
+    static_configs:
+      - targets: ["notification-service.railway.internal:3000"]
+    metrics_path: /metrics
+
+  - job_name: audit-service
+    static_configs:
+      - targets: ["audit-service.railway.internal:3000"]
+    metrics_path: /metrics
