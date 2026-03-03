@@ -9,7 +9,7 @@ name: Deploy — Microservicios
 #   master → Railway env: production / GitHub env: production  (requiere aprobación)
 #
 # Secrets requeridos en GitHub (Settings → Secrets → Actions):
-#   Environment: dev        → secret RAILWAY_TOKEN (token Railway para develop)
+#   Environment: develop        → secret RAILWAY_TOKEN (token Railway para develop)
 #   Environment: staging    → secret RAILWAY_TOKEN (token Railway para staging)
 #   Environment: production → secret RAILWAY_TOKEN (token Railway para production)
 
@@ -75,7 +75,6 @@ jobs:
     outputs:
       railway_env: ${{ steps.env.outputs.railway_env }}
       github_env:  ${{ steps.env.outputs.github_env }}
-      token_name:  ${{ steps.env.outputs.token_name }}
     steps:
       - name: Mapear rama a entorno
         id: env
@@ -88,7 +87,7 @@ jobs:
             echo "github_env=staging"   >> $GITHUB_OUTPUT
           else
             echo "railway_env=develop"  >> $GITHUB_OUTPUT
-            echo "github_env=dev"       >> $GITHUB_OUTPUT
+            echo "github_env=develop"       >> $GITHUB_OUTPUT
           fi
 
   # ── 3. Deploy auth-service ─────────────────────────────────────────────────
