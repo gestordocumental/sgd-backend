@@ -75,6 +75,7 @@ jobs:
     outputs:
       railway_env: ${{ steps.env.outputs.railway_env }}
       github_env:  ${{ steps.env.outputs.github_env }}
+      token_name:  ${{ steps.env.outputs.token_name }}
     steps:
       - name: Mapear rama a entorno
         id: env
@@ -82,12 +83,15 @@ jobs:
           if [ "${{ github.ref_name }}" = "master" ]; then
             echo "railway_env=production"  >> $GITHUB_OUTPUT
             echo "github_env=production"   >> $GITHUB_OUTPUT
+            echo "token_name=RAILWAY_TOKEN_PROD" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_name }}" = "test" ]; then
             echo "railway_env=staging"  >> $GITHUB_OUTPUT
             echo "github_env=staging"   >> $GITHUB_OUTPUT
+            echo "token_name=RAILWAY_TOKEN_TEST" >> $GITHUB_OUTPUT
           else
             echo "railway_env=develop"  >> $GITHUB_OUTPUT
             echo "github_env=dev"       >> $GITHUB_OUTPUT
+            echo "token_name=RAILWAY_TOKEN_DEV" >> $GITHUB_OUTPUT
           fi
 
   # ── 3. Deploy auth-service ─────────────────────────────────────────────────
