@@ -4,6 +4,10 @@
 
 set -e
 
+# Railway inyecta PORT. Kong debe escuchar en ese puerto.
+# Si PORT no está seteado (local), usar 8000 como fallback.
+export KONG_PROXY_LISTEN="0.0.0.0:${PORT:-8000}"
+
 # envsubst reemplaza ${VARIABLE} en la plantilla con el valor de la env var
 envsubst '${KONG_JWT_SECRET} ${FRONTEND_URL}' \
   < /etc/kong/kong.yaml.template \
