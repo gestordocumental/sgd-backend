@@ -179,6 +179,7 @@ jobs:
         working-directory: services/document-service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
           railway up \
             --service document-service \
             --environment ${{ needs.set-env.outputs.railway_env }} \
