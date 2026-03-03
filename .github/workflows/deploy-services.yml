@@ -83,10 +83,10 @@ jobs:
             echo "railway_env=production"  >> $GITHUB_OUTPUT
             echo "github_env=production"   >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_name }}" = "test" ]; then
-            echo "railway_env=staging"  >> $GITHUB_OUTPUT
+            echo "railway_env=Staging"  >> $GITHUB_OUTPUT
             echo "github_env=staging"   >> $GITHUB_OUTPUT
           else
-            echo "railway_env=develop"  >> $GITHUB_OUTPUT
+            echo "railway_env=Develop"  >> $GITHUB_OUTPUT
             echo "github_env=develop"       >> $GITHUB_OUTPUT
           fi
 
