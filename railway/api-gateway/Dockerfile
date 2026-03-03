@@ -12,6 +12,8 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV KONG_DATABASE=off
+# Railway inyecta PORT automáticamente. Kong lo usa para el proxy listener.
+# Si PORT no viene de Railway, usa 8000 como fallback.
 ENV KONG_PROXY_LISTEN=0.0.0.0:8000
 # Admin solo accesible internamente (nunca exponer en prod)
 ENV KONG_ADMIN_LISTEN=127.0.0.1:8001

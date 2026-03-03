@@ -22,7 +22,7 @@ plugins:
   - name: cors
     config:
       origins:
-        - "${FRONTEND_URL}"        # URL del frontend en Railway o dominio propio
+        - "${FRONTEND_URL}" # URL del frontend en Railway o dominio propio
       methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       headers: [Authorization, Content-Type, Accept, x-company-id]
       exposed_headers: [X-Request-Id]
@@ -35,6 +35,28 @@ plugins:
 # El PORT de cada microservicio es 3000 (definido en su Dockerfile/env var).
 
 services:
+  # ── Health check para Railway ───────────────────────────────────────────
+  # Railway hace GET /health para verificar que Kong está vivo.
+  # request-termination responde 200 sin llegar a ningún upstream.
+  - name: health-service
+    url: http://127.0.0.1:8001
+    routes:
+      - name: health-route
+        paths:
+          - /health
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1000000
+              policy: local
+              fault_tolerant: true
+    plugins:
+      - name: request-termination
+        config:
+          status_code: 200
+          message: "OK"
 
   # ── auth-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
   - name: auth-public
