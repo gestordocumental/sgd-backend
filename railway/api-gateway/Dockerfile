@@ -21,6 +21,8 @@ RUN chmod +x /entrypoint.sh && \
     chmod 755 /etc/kong
 
 ENV KONG_DATABASE=off
+# Railway inyecta PORT automáticamente. Kong lo usa para el proxy listener.
+# Si PORT no viene de Railway, usa 8000 como fallback.
 ENV KONG_PROXY_LISTEN=0.0.0.0:8000
 ENV KONG_ADMIN_LISTEN=127.0.0.1:8001
 ENV KONG_NGINX_WORKER_PROCESSES=1
