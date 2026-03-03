@@ -9,9 +9,9 @@ name: Deploy — Microservicios
 #   master → Railway env: production / GitHub env: production  (requiere aprobación)
 #
 # Secrets requeridos en GitHub (Settings → Secrets → Actions):
-#   RAILWAY_TOKEN_DEV  → Project Token de Railway para entorno develop
-#   RAILWAY_TOKEN_TEST → Project Token de Railway para entorno staging
-#   RAILWAY_TOKEN_PROD → Project Token de Railway para entorno production
+#   Environment: dev        → secret RAILWAY_TOKEN (token Railway para develop)
+#   Environment: staging    → secret RAILWAY_TOKEN (token Railway para staging)
+#   Environment: production → secret RAILWAY_TOKEN (token Railway para production)
 
 on:
   push:
@@ -83,15 +83,12 @@ jobs:
           if [ "${{ github.ref_name }}" = "master" ]; then
             echo "railway_env=production"  >> $GITHUB_OUTPUT
             echo "github_env=production"   >> $GITHUB_OUTPUT
-            echo "token_name=RAILWAY_TOKEN_PROD" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_name }}" = "test" ]; then
             echo "railway_env=staging"  >> $GITHUB_OUTPUT
             echo "github_env=staging"   >> $GITHUB_OUTPUT
-            echo "token_name=RAILWAY_TOKEN_TEST" >> $GITHUB_OUTPUT
           else
             echo "railway_env=develop"  >> $GITHUB_OUTPUT
             echo "github_env=dev"       >> $GITHUB_OUTPUT
-            echo "token_name=RAILWAY_TOKEN_DEV" >> $GITHUB_OUTPUT
           fi
 
   # ── 3. Deploy auth-service ─────────────────────────────────────────────────
@@ -112,7 +109,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: services/auth-service
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
             --service auth-service \
@@ -135,7 +132,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: services/user-service
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
             --service user-service \
@@ -158,7 +155,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: services/org-service
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
             --service org-service \
@@ -181,8 +178,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: services/document-service
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
-        run: |
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           railway up \
             --service document-service \
             --environment ${{ needs.set-env.outputs.railway_env }} \
@@ -204,7 +200,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: services/workflow-service
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
             --service workflow-service \
@@ -227,7 +223,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: services/notification-service
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
             --service notification-service \
@@ -250,7 +246,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: services/audit-service
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
             --service audit-service \
@@ -273,7 +269,7 @@ jobs:
       - name: Deploy a Railway
         working-directory: railway/api-gateway
         env:
-          RAILWAY_TOKEN: ${{ github.ref_name == 'master' && secrets.RAILWAY_TOKEN_PROD || github.ref_name == 'test' && secrets.RAILWAY_TOKEN_TEST || secrets.RAILWAY_TOKEN_DEV }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
             --service api-gateway \
