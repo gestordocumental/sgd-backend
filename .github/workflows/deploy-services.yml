@@ -14,6 +14,13 @@ name: Deploy — Microservicios
 on:
   push:
     branches: [dev, test, master]
+  # Permite lanzar el deploy manualmente desde GitHub Actions → Run workflow
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Servicio a desplegar (ej: auth-service)'
+        required: true
+        default: 'auth-service'
 
 jobs:
   # ── 1. Detectar qué servicios cambiaron ────────────────────────────────────
@@ -31,11 +38,16 @@ jobs:
       api-gateway:  ${{ steps.filter.outputs.api-gateway }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Necesario para que paths-filter pueda comparar commits
 
       - name: Filtrar por carpeta modificada
         uses: dorny/paths-filter@v3
         id: filter
         with:
+          # En primer push a una rama nueva no hay HEAD~1 para comparar.
+          # initial-fetch-depth: 0 fuerza a comparar contra el merge base de la rama.
+          initial-fetch-depth: 0
           filters: |
             auth:
               - 'services/auth-service/**'
