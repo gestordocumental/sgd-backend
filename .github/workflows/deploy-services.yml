@@ -179,10 +179,11 @@ jobs:
         working-directory: services/document-service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          railway up \
-            --service document-service \
-            --environment ${{ needs.set-env.outputs.railway_env }} \
-            --detach
+          run: |
+            railway up \
+              --service document-service \
+              --environment ${{ needs.set-env.outputs.railway_env }} \
+              --detach
 
   # ── 7. Deploy workflow-service ─────────────────────────────────────────────
   deploy-workflow:
