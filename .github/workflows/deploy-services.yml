@@ -1,0 +1,328 @@
+name: Deploy — Microservicios
+
+# Corre después de un merge exitoso a dev, test o master.
+# Solo despliega los servicios cuyos archivos cambiaron en el commit.
+#
+# Mapeo rama → entorno:
+#   dev    → Railway env: develop    / GitHub env: dev
+#   test   → Railway env: staging    / GitHub env: staging
+#   master → Railway env: production / GitHub env: production  (requiere aprobación)
+#
+# Secrets requeridos en GitHub (Settings → Secrets → Actions):
+#   Environment: develop        → secret RAILWAY_TOKEN (token Railway para develop)
+#   Environment: staging    → secret RAILWAY_TOKEN (token Railway para staging)
+#   Environment: production → secret RAILWAY_TOKEN (token Railway para production)
+
+on:
+  push:
+    branches: [dev, test, master]
+  # Permite lanzar el deploy manualmente desde GitHub Actions → Run workflow
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Servicio a desplegar (ej: auth-service)'
+        required: true
+        default: 'auth-service'
+
+jobs:
+  # ── 1. Detectar qué servicios cambiaron ────────────────────────────────────
+  changes:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      auth:         ${{ steps.filter.outputs.auth }}
+      user:         ${{ steps.filter.outputs.user }}
+      org:          ${{ steps.filter.outputs.org }}
+      document:     ${{ steps.filter.outputs.document }}
+      workflow:     ${{ steps.filter.outputs.workflow }}
+      notification: ${{ steps.filter.outputs.notification }}
+      audit:        ${{ steps.filter.outputs.audit }}
+      api-gateway:  ${{ steps.filter.outputs.api-gateway }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Necesario para que paths-filter pueda comparar commits
+
+      - name: Filtrar por carpeta modificada
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # En primer push a una rama nueva no hay HEAD~1 para comparar.
+          # initial-fetch-depth: 0 fuerza a comparar contra el merge base de la rama.
+          initial-fetch-depth: 0
+          filters: |
+            auth:
+              - 'services/auth-service/**'
+            user:
+              - 'services/user-service/**'
+            org:
+              - 'services/org-service/**'
+            document:
+              - 'services/document-service/**'
+            workflow:
+              - 'services/workflow-service/**'
+            notification:
+              - 'services/notification-service/**'
+            audit:
+              - 'services/audit-service/**'
+            api-gateway:
+              - 'railway/api-gateway/**'
+
+  # ── 2. Resolver entorno según la rama ──────────────────────────────────────
+  set-env:
+    name: Resolver entorno
+    runs-on: ubuntu-latest
+    outputs:
+      railway_env: ${{ steps.env.outputs.railway_env }}
+      github_env:  ${{ steps.env.outputs.github_env }}
+    steps:
+      - name: Mapear rama a entorno
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "master" ]; then
+            echo "railway_env=production"  >> $GITHUB_OUTPUT
+            echo "github_env=production"   >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_name }}" = "test" ]; then
+            echo "railway_env=Staging"  >> $GITHUB_OUTPUT
+            echo "github_env=staging"   >> $GITHUB_OUTPUT
+          else
+            echo "railway_env=Develop"  >> $GITHUB_OUTPUT
+            echo "github_env=develop"       >> $GITHUB_OUTPUT
+          fi
+
+  # ── 3. Deploy auth-service ─────────────────────────────────────────────────
+  deploy-auth:
+    name: Deploy auth-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.auth == 'true'
+    runs-on: ubuntu-latest
+    # "production" tiene required reviewers configurados en GitHub Environments.
+    # "dev" y "test" no requieren aprobación.
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/auth-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service auth-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 4. Deploy user-service ─────────────────────────────────────────────────
+  deploy-user:
+    name: Deploy user-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.user == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/user-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service user-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 5. Deploy org-service ──────────────────────────────────────────────────
+  deploy-org:
+    name: Deploy org-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.org == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/org-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service org-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 6. Deploy document-service ─────────────────────────────────────────────
+  deploy-document:
+    name: Deploy document-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.document == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/document-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service document-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 7. Deploy workflow-service ─────────────────────────────────────────────
+  deploy-workflow:
+    name: Deploy workflow-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.workflow == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/workflow-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service workflow-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 8. Deploy notification-service ────────────────────────────────────────
+  deploy-notification:
+    name: Deploy notification-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.notification == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/notification-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service notification-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 9. Deploy audit-service ────────────────────────────────────────────────
+  deploy-audit:
+    name: Deploy audit-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.audit == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/audit-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service audit-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 10. Deploy api-gateway (Kong) ─────────────────────────────────────────
+  deploy-api-gateway:
+    name: Deploy api-gateway
+    needs: [changes, set-env]
+    if: needs.changes.outputs.api-gateway == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: railway/api-gateway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service api-gateway \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
+  # ── 11. Resumen final ──────────────────────────────────────────────────────
+  deploy-summary:
+    name: Resumen de deploy
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - changes
+      - set-env
+      - deploy-auth
+      - deploy-user
+      - deploy-org
+      - deploy-document
+      - deploy-workflow
+      - deploy-notification
+      - deploy-audit
+      - deploy-api-gateway
+    steps:
+      - name: Imprimir resumen
+        run: |
+          ENV="${{ needs.set-env.outputs.railway_env }}"
+          echo "## Deploy a entorno: $ENV" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Servicio | Cambió | Resultado |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+
+          report_service() {
+            local name=$1
+            local changed=$2
+            local result=$3
+            if [ "$changed" = "true" ]; then
+              if [ "$result" = "success" ]; then
+                echo "| $name | si | ✅ desplegado |" >> $GITHUB_STEP_SUMMARY
+              elif [ "$result" = "skipped" ]; then
+                echo "| $name | si | ⏭️ saltado (aprobación pendiente) |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| $name | si | ❌ fallido |" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "| $name | no | — sin cambios |" >> $GITHUB_STEP_SUMMARY
+            fi
+          }
+
+          report_service "auth-service"         "${{ needs.changes.outputs.auth }}"         "${{ needs.deploy-auth.result }}"
+          report_service "user-service"         "${{ needs.changes.outputs.user }}"         "${{ needs.deploy-user.result }}"
+          report_service "org-service"          "${{ needs.changes.outputs.org }}"          "${{ needs.deploy-org.result }}"
+          report_service "document-service"     "${{ needs.changes.outputs.document }}"     "${{ needs.deploy-document.result }}"
+          report_service "workflow-service"     "${{ needs.changes.outputs.workflow }}"     "${{ needs.deploy-workflow.result }}"
+          report_service "notification-service" "${{ needs.changes.outputs.notification }}" "${{ needs.deploy-notification.result }}"
+          report_service "audit-service"        "${{ needs.changes.outputs.audit }}"        "${{ needs.deploy-audit.result }}"
+          report_service "api-gateway"          "${{ needs.changes.outputs.api-gateway }}"  "${{ needs.deploy-api-gateway.result }}"
