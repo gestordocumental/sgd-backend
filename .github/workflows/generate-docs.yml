@@ -1,0 +1,51 @@
+name: Generate & Deploy API Docs
+
+on:
+  push:
+    branches: [main]          # solo en producción
+  workflow_dispatch:           # disparo manual si se necesita
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Redocly CLI
+        run: npm install -g @redocly/cli
+
+      # Espera a que los servicios de staging estén listos
+      # Los specs se obtienen del ambiente de staging (test) — nunca de prod directamente
+      - name: Generate docs from staging specs
+        env:
+          STAGING_URL: ${{ secrets.STAGING_API_URL }}    # https://api-staging.tudominio.com
+          DOCS_KEY:    ${{ secrets.STAGING_DOCS_KEY }}   # API key de Kong para /docs/*
+        run: |
+          mkdir -p railway/api-docs/public
+
+          services=("auth" "users" "org" "documents" "workflows")
+
+          for service in "${services[@]}"; do
+            echo "Generating docs for $service..."
+            redocly build-docs \
+              "$STAGING_URL/docs/$service/docs-json" \
+              --output "railway/api-docs/public/$service.html" \
+              --title "SGD — $(echo $service | sed 's/.*/\u&/') Service" \
+              --cdn \
+              -h "x-docs-key: $DOCS_KEY"
+          done
+
+      - name: Commit generated docs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add railway/api-docs/public/
+          git diff --staged --quiet || git commit -m "docs: regenerate API docs [skip ci]"
+          git push

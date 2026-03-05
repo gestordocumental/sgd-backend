@@ -23,6 +23,13 @@ data:
 
     # ── Plugins globales ───────────────────────────────────────────────────────
     plugins:
+      # Generates X-Correlation-ID for every request — enables distributed tracing
+      - name: correlation-id
+        config:
+          header_name: x-correlation-id
+          generator: uuid
+          echo_downstream: true   # returns the ID in the response header
+
       - name: rate-limiting
         config:
           minute: 100
