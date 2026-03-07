@@ -30,17 +30,17 @@ export enum PermissionAction {
 @Unique(['module', 'action'])
 export class Permission {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'enum', enum: PermissionModule })
-  module: PermissionModule;
+  module!: PermissionModule;
 
   @Column({ type: 'enum', enum: PermissionAction })
-  action: PermissionAction;
+  action!: PermissionAction;
 
   @Column({ type: 'text', nullable: true })
-  description: string | null;
+  description!: string | null;
 
   @ManyToMany(() => Role, (role) => role.permissions)
-  roles: Role[];
+  roles!: Role[];
 }

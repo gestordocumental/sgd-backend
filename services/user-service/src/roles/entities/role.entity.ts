@@ -30,27 +30,27 @@ export enum SystemRoleName {
 @Unique(['name', 'orgId']) // same role name can exist in different orgs
 export class Role {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   // System roles use SystemRoleName values; custom roles use free-form names
   @Column({ type: 'varchar', length: 100 })
-  name: string;
+  name!: string;
 
   @Column({ type: 'enum', enum: RoleScope })
-  scope: RoleScope;
+  scope!: RoleScope;
 
   @Column({ type: 'text', nullable: true })
-  description: string | null;
+  description!: string | null;
 
   // System roles cannot be modified or deleted
   @Column({ name: 'is_system', type: 'boolean', default: false })
-  isSystem: boolean;
+  isSystem!: boolean;
 
   // null = system role (available to all orgs)
   // uuid = custom role belonging to a specific org
   @Index()
   @Column({ name: 'org_id', type: 'uuid', nullable: true })
-  orgId: string | null;
+  orgId!: string | null;
 
   @ManyToMany(() => Permission, (permission) => permission.roles, {
     eager: false,
@@ -60,11 +60,11 @@ export class Role {
     joinColumn:        { name: 'role_id',       referencedColumnName: 'id' },
     inverseJoinColumn: { name: 'permission_id', referencedColumnName: 'id' },
   })
-  permissions: Permission[];
+  permissions!: Permission[];
 
   @OneToMany(() => UserOrgRole, (uor) => uor.role)
-  userOrgRoles: UserOrgRole[];
+  userOrgRoles!: UserOrgRole[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
-  createdAt: Date;
+  createdAt!: Date;
 }
