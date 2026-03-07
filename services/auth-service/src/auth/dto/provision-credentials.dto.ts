@@ -1,21 +1,13 @@
-import {
-  IsEmail,
-  IsString,
-  MinLength,
-  IsUUID,
-} from "class-validator";
+import { IsEmail, IsString, MinLength, IsUUID } from "class-validator";
 
 export class ProvisionCredentialDto {
   @IsUUID()
-  companyId: string;
-
-  @IsUUID()
-  userId: string;
+  userId!: string;
 
   @IsEmail()
-  email: string;
+  email!: string;
 
   @IsString()
   @MinLength(8)
-  password: string;
+  password!: string;
 }

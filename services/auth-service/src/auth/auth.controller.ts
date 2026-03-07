@@ -5,18 +5,16 @@ import {
   Body,
   Headers,
   UnauthorizedException,
-  BadRequestException,
 } from "@nestjs/common";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
+import { SwitchCompanyDto } from "./dto/switch-company.dto";
 
 @Controller("api/auth")
 export class AuthController {
-  constructor(
-    private readonly authService: AuthService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Post("credentials/provision")
   provisionCredentials(
@@ -26,16 +24,12 @@ export class AuthController {
     if (internalToken !== process.env.INTERNAL_TOKEN) {
       throw new UnauthorizedException();
     }
-
     return this.authService.provisionCredentials(dto);
   }
 
   @Post("login")
-  login(@Headers("x-company-id") companyId: string, @Body() dto: LoginDto) {
-    if (!companyId) {
-      throw new BadRequestException('Missing header x-company-id');
-    }
-    return this.authService.login(companyId, dto);
+  login(@Body() dto: LoginDto) {
+    return this.authService.login(dto);
   }
 
   @Post("refresh")
@@ -47,27 +41,42 @@ export class AuthController {
 
   @Get("me")
   async me(@Headers("authorization") auth: string) {
-    // Kong has already validated the JWT signature. We decoded it to obtain the sub.
-    if (!auth?.startsWith("Bearer ")) throw new UnauthorizedException();
-
-    const token = auth.split(" ")[1];
-    const payload: any = this.decodeJwt(token);
-
-     if (!payload?.sub || !payload?.companyId) {
-      throw new UnauthorizedException('Invalid token (missing claims)');
-    }
-
-    return this.authService.getIdentity(payload.companyId, payload.sub);
+    const payload = this.extractPayload(auth);
+    if (!payload?.sub) throw new UnauthorizedException("Invalid token (missing claims)");
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      ...(payload.companyId && { companyId: payload.companyId }),
+      ...(payload.isSuperAdmin && { isSuperAdmin: payload.isSuperAdmin }),
+    };
   }
 
-  private decodeJwt(jwt: string) {
+  @Get("me/companies")
+  async getMyCompanies(@Headers("authorization") auth: string) {
+    const payload = this.extractPayload(auth);
+    if (!payload?.sub) throw new UnauthorizedException("Invalid token");
+    return this.authService.getMyCompanies(payload.sub);
+  }
+
+  @Post("switch-company")
+  async switchCompany(
+    @Headers("authorization") auth: string,
+    @Body() dto: SwitchCompanyDto,
+  ) {
+    const payload = this.extractPayload(auth);
+    if (!payload?.sub) throw new UnauthorizedException("Invalid token");
+    return this.authService.switchCompany(payload.sub, dto.companyId);
+  }
+
+  private extractPayload(auth: string) {
+    if (!auth?.startsWith("Bearer ")) return null;
+    const token = auth.split(" ")[1];
     try {
-      const [, payloadB64] = jwt.split('.');
-      const json = Buffer.from(payloadB64, 'base64url').toString('utf8');
+      const [, payloadB64] = token.split(".");
+      const json = Buffer.from(payloadB64, "base64url").toString("utf8");
       return JSON.parse(json);
     } catch {
       return null;
     }
   }
-
 }

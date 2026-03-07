@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -21,6 +33,17 @@ export class UsersController {
   @Get('by-email/:email')
   findByEmail(@Param('email') email: string) {
     return this.usersService.findByEmail(email);
+  }
+
+  @Get(':id/companies')
+  getCompanies(
+    @Headers('x-internal-token') internalToken: string,
+    @Param('id') id: string,
+  ) {
+    if (internalToken !== process.env.INTERNAL_TOKEN) {
+      throw new UnauthorizedException();
+    }
+    return this.usersService.getCompanies(id);
   }
 
   @Get(':id')

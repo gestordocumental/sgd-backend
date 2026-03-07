@@ -10,12 +10,15 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ProvisionUserDto } from './dto/provision-user.dto';
 import { AuthClientService } from '../auth-client/auth-client.service';
+import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(UserOrgRole)
+    private readonly userOrgRoleRepository: Repository<UserOrgRole>,
     private readonly authClientService: AuthClientService,
   ) {}
 
@@ -69,6 +72,28 @@ export class UsersService {
   }
 
   /**
+   * Returns the list of orgIds the user belongs to, ordered by first membership (ASC).
+   * The first element is treated as the default company by auth-service / frontend.
+   */
+  async getCompanies(userId: string): Promise<string[]> {
+    const rows = await this.userOrgRoleRepository.find({
+      where: { userId },
+      order: { createdAt: 'ASC' },
+    });
+
+    // Deduplicate orgIds preserving first-occurrence order
+    const seen = new Set<string>();
+    const orgIds: string[] = [];
+    for (const row of rows) {
+      if (!seen.has(row.orgId)) {
+        seen.add(row.orgId);
+        orgIds.push(row.orgId);
+      }
+    }
+    return orgIds;
+  }
+
+  /**
    * Provisions login credentials for a user by calling auth-service.
    * Called after the user record exists and has been assigned to an org.
    * If auth-service fails the user record is NOT rolled back — the admin
@@ -78,10 +103,9 @@ export class UsersService {
     const user = await this.findOne(id);
 
     await this.authClientService.provisionCredentials({
-      companyId: dto.companyId,
-      userId:    user.id,
-      email:     user.email,
-      password:  dto.password,
+      userId:   user.id,
+      email:    user.email,
+      password: dto.password,
     });
 
     return { ok: true };

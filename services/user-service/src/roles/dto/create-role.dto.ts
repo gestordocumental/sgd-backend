@@ -3,7 +3,7 @@ import { IsString, IsNotEmpty, IsOptional, IsUUID, IsArray } from 'class-validat
 export class CreateRoleDto {
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @IsString()
   @IsOptional()

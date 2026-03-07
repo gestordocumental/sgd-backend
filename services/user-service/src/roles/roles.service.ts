@@ -4,7 +4,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, IsNull } from 'typeorm';
 import { Role, RoleScope } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
 import { CreateRoleDto } from './dto/create-role.dto';
@@ -24,7 +24,7 @@ export class RolesService {
   // Returns system roles + custom roles for the given org
   findAll(orgId: string): Promise<Role[]> {
     return this.rolesRepository.find({
-      where: [{ orgId: null }, { orgId }],
+      where: [{ orgId: IsNull() }, { orgId }],
       relations: ['permissions'],
       order: { isSystem: 'DESC', name: 'ASC' },
     });
@@ -32,7 +32,7 @@ export class RolesService {
 
   async findOne(id: string, orgId: string): Promise<Role> {
     const role = await this.rolesRepository.findOne({
-      where: [{ id, orgId: null }, { id, orgId }],
+      where: [{ id, orgId: IsNull() }, { id, orgId }],
       relations: ['permissions'],
     });
     if (!role) throw new NotFoundException(`Role ${id} not found`);

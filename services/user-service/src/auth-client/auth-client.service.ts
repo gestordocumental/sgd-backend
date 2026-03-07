@@ -7,10 +7,9 @@ import { getCorrelationId } from '../common/correlation/correlation.context';
 import { CORRELATION_ID_HEADER } from '../common/middleware/correlation.middleware';
 
 export interface ProvisionPayload {
-  companyId: string;
-  userId:    string;
-  email:     string;
-  password:  string;
+  userId:   string;
+  email:    string;
+  password: string;
 }
 
 @Injectable()
