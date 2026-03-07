@@ -23,8 +23,8 @@ export class AuthClientService {
     private readonly configService: ConfigService,
     private readonly logger: AppLogger,
   ) {
-    this.authServiceUrl = this.configService.get<string>('AUTH_SERVICE_URL');
-    this.internalToken  = this.configService.get<string>('INTERNAL_TOKEN');
+    this.authServiceUrl = this.configService.getOrThrow<string>('AUTH_SERVICE_URL');
+    this.internalToken  = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
   }
 
   async provisionCredentials(payload: ProvisionPayload): Promise<void> {
@@ -59,8 +59,9 @@ export class AuthClientService {
         message:       `← [auth-service] POST /api/auth/credentials/provision 200`,
       });
     } catch (error) {
-      const status  = error?.response?.status;
-      const message = error?.response?.data?.message ?? error.message;
+      const axiosError = error as { response?: { status?: number; data?: { message?: string } }; message?: string };
+      const status  = axiosError?.response?.status;
+      const message = axiosError?.response?.data?.message ?? axiosError?.message ?? 'Unknown error';
 
       this.logger.http({
         type:          'internal-response',

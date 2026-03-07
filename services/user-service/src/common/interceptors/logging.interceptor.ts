@@ -3,11 +3,11 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
-} from '@nestjs/common';
-import { Observable, tap } from 'rxjs';
-import { Request, Response } from 'express';
-import { AppLogger } from '../logger/app-logger.service';
-import { getCorrelationId } from '../correlation/correlation.context';
+} from "@nestjs/common";
+import { Observable, tap } from "rxjs";
+import { Request, Response } from "express";
+import { AppLogger } from "../logger/app-logger.service";
+import { getCorrelationId } from "../correlation/correlation.context";
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
@@ -20,36 +20,41 @@ export class LoggingInterceptor implements NestInterceptor {
     const startedAt = Date.now();
 
     this.logger.http({
-      type:          'request',
+      type: "request",
       method,
       path,
       ip,
       correlationId: getCorrelationId(),
-      message:       `→ ${method} ${path}`,
+      message: `→ ${method} ${path}`,
     });
 
     return next.handle().pipe(
       tap({
         next: () => {
           this.logger.http({
-            type:          'response',
+            type: "response",
             method,
             path,
-            statusCode:    res.statusCode,
-            duration:      Date.now() - startedAt,
+            statusCode: res.statusCode,
+            duration: Date.now() - startedAt,
             correlationId: getCorrelationId(),
-            message:       `← ${method} ${path} ${res.statusCode} (${Date.now() - startedAt}ms)`,
+            message: `← ${method} ${path} ${res.statusCode} (${Date.now() - startedAt}ms)`,
           });
         },
         error: (err) => {
+          const statusCode =
+            typeof err?.getStatus === "function"
+              ? err.getStatus()
+              : (err?.status ?? 500);
+
           this.logger.http({
-            type:          'response',
+            type: "response",
             method,
             path,
-            statusCode:    err?.status ?? 500,
-            duration:      Date.now() - startedAt,
+            statusCode,
+            duration: Date.now() - startedAt,
             correlationId: getCorrelationId(),
-            message:       `← ${method} ${path} ${err?.status ?? 500} (${Date.now() - startedAt}ms)`,
+            message: `← ${method} ${path} ${statusCode} (${Date.now() - startedAt}ms)`,
           });
         },
       }),

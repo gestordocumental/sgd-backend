@@ -53,7 +53,6 @@ export class Role {
   orgId: string | null;
 
   @ManyToMany(() => Permission, (permission) => permission.roles, {
-    cascade: true,
     eager: false,
   })
   @JoinTable({

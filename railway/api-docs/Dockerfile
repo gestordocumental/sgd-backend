@@ -9,11 +9,11 @@ COPY public/ /usr/share/nginx/html/
 # Copy nginx config with basic auth
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Generate basic auth credentials at build time from build args
-ARG DOCS_USER=sgd
-ARG DOCS_PASSWORD=changeme
-RUN htpasswd -cb /etc/nginx/.htpasswd "$DOCS_USER" "$DOCS_PASSWORD"
+# Entrypoint generates .htpasswd at runtime from env vars (DOCS_USER, DOCS_PASSWORD).
+# Secrets never touch image layers or build metadata.
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/entrypoint.sh"]

@@ -2,11 +2,14 @@ name: Generate & Deploy API Docs
 
 on:
   push:
-    branches: [main]          # solo en producción
-  workflow_dispatch:           # disparo manual si se necesita
+    branches: [master] # solo en producción
+  workflow_dispatch: # disparo manual si se necesita
 
 jobs:
   generate-docs:
+    permissions:
+      contents: write
+
     runs-on: ubuntu-latest
 
     steps:
@@ -25,8 +28,8 @@ jobs:
       # Los specs se obtienen del ambiente de staging (test) — nunca de prod directamente
       - name: Generate docs from staging specs
         env:
-          STAGING_URL: ${{ secrets.STAGING_API_URL }}    # https://api-staging.tudominio.com
-          DOCS_KEY:    ${{ secrets.STAGING_DOCS_KEY }}   # API key de Kong para /docs/*
+          STAGING_URL: ${{ secrets.STAGING_API_URL }} # https://api-staging.tudominio.com
+          DOCS_KEY: ${{ secrets.STAGING_DOCS_KEY }} # API key de Kong para /docs/*
         run: |
           mkdir -p railway/api-docs/public
 
@@ -39,7 +42,7 @@ jobs:
               --output "railway/api-docs/public/$service.html" \
               --title "SGD — $(echo $service | sed 's/.*/\u&/') Service" \
               --cdn \
-              -h "x-docs-key: $DOCS_KEY"
+              --header "x-docs-key: $DOCS_KEY"
           done
 
       - name: Commit generated docs

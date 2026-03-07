@@ -17,18 +17,24 @@ import { AppLogger } from './common/logger/app-logger.service';
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get<string>('DB_HOST'),
-        port: config.get<number>('DB_PORT'),
-        username: config.get<string>('DB_USERNAME'),
-        password: config.get<string>('DB_PASSWORD'),
-        database: config.get<string>('DB_NAME'),
-        entities: [User, Role, Permission, UserOrgRole],
-        synchronize: config.get('NODE_ENV') === 'development',
-        retryAttempts: 5,
-        retryDelay: 3000,
-      }),
+      useFactory: (config: ConfigService) => {
+        const dbPort = Number(config.get<string>('DB_PORT'));
+        if (!Number.isInteger(dbPort)) {
+          throw new Error(`Invalid DB_PORT value: "${config.get('DB_PORT')}"`);
+        }
+        return {
+          type: 'postgres',
+          host: config.get<string>('DB_HOST'),
+          port: dbPort,
+          username: config.get<string>('DB_USERNAME'),
+          password: config.get<string>('DB_PASSWORD'),
+          database: config.get<string>('DB_NAME'),
+          entities: [User, Role, Permission, UserOrgRole],
+          synchronize: config.get('NODE_ENV') === 'development',
+          retryAttempts: 5,
+          retryDelay: 3000,
+        };
+      },
     }),
 
     UsersModule,

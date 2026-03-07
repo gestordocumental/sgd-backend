@@ -6,12 +6,12 @@ import {
   Delete,
   Param,
   Body,
-  Headers,
 } from '@nestjs/common';
 import { RolesService } from './roles.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
+import { OrgId } from '../common/decorators/org-id.decorator';
 
 // orgId comes from the JWT payload forwarded by Kong as x-org-id header
 @Controller('api/roles')
@@ -19,17 +19,17 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Get()
-  findAll(@Headers('x-org-id') orgId: string) {
+  findAll(@OrgId() orgId: string) {
     return this.rolesService.findAll(orgId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @Headers('x-org-id') orgId: string) {
+  findOne(@Param('id') id: string, @OrgId() orgId: string) {
     return this.rolesService.findOne(id, orgId);
   }
 
   @Post()
-  create(@Body() dto: CreateRoleDto, @Headers('x-org-id') orgId: string) {
+  create(@Body() dto: CreateRoleDto, @OrgId() orgId: string) {
     return this.rolesService.create(dto, orgId);
   }
 
@@ -37,13 +37,13 @@ export class RolesController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateRoleDto,
-    @Headers('x-org-id') orgId: string,
+    @OrgId() orgId: string,
   ) {
     return this.rolesService.update(id, dto, orgId);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string, @Headers('x-org-id') orgId: string) {
+  remove(@Param('id') id: string, @OrgId() orgId: string) {
     return this.rolesService.remove(id, orgId);
   }
 
@@ -52,7 +52,7 @@ export class RolesController {
   assignPermissions(
     @Param('id') id: string,
     @Body() dto: AssignPermissionsDto,
-    @Headers('x-org-id') orgId: string,
+    @OrgId() orgId: string,
   ) {
     return this.rolesService.assignPermissions(id, dto, orgId);
   }
@@ -62,7 +62,7 @@ export class RolesController {
   removePermission(
     @Param('id') id: string,
     @Param('permissionId') permissionId: string,
-    @Headers('x-org-id') orgId: string,
+    @OrgId() orgId: string,
   ) {
     return this.rolesService.removePermission(id, permissionId, orgId);
   }

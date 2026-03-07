@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -11,6 +10,7 @@ import { Permission } from './entities/permission.entity';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
+import { RolePolicy } from './domain/role.policy';
 
 @Injectable()
 export class RolesService {
@@ -46,7 +46,7 @@ export class RolesService {
     if (existing) throw new ConflictException(`Role "${dto.name}" already exists in this organization`);
 
     const permissions = dto.permissionIds?.length
-      ? await this.permissionsRepository.findBy({ id: In(dto.permissionIds) })
+      ? await this.resolvePermissions(dto.permissionIds)
       : [];
 
     const role = this.rolesRepository.create({
@@ -63,10 +63,7 @@ export class RolesService {
 
   async update(id: string, dto: UpdateRoleDto, orgId: string): Promise<Role> {
     const role = await this.findOne(id, orgId);
-    if (role.isSystem) throw new ForbiddenException('System roles cannot be modified');
-
-    // Only allow updating roles that belong to this org
-    if (role.orgId !== orgId) throw new ForbiddenException('Cannot modify roles from another organization');
+    RolePolicy.canModify(role, orgId);
 
     Object.assign(role, dto);
     return this.rolesRepository.save(role);
@@ -74,29 +71,34 @@ export class RolesService {
 
   async remove(id: string, orgId: string): Promise<void> {
     const role = await this.findOne(id, orgId);
-    if (role.isSystem) throw new ForbiddenException('System roles cannot be deleted');
-    if (role.orgId !== orgId) throw new ForbiddenException('Cannot delete roles from another organization');
+    RolePolicy.canDelete(role, orgId);
 
     await this.rolesRepository.remove(role);
   }
 
   async assignPermissions(id: string, dto: AssignPermissionsDto, orgId: string): Promise<Role> {
     const role = await this.findOne(id, orgId);
-    if (role.isSystem) throw new ForbiddenException('System role permissions cannot be modified');
-    if (role.orgId !== orgId) throw new ForbiddenException('Cannot modify roles from another organization');
+    RolePolicy.canManagePermissions(role, orgId);
 
-    const permissions = await this.permissionsRepository.findBy({
-      id: In(dto.permissionIds),
-    });
+    const permissions = await this.resolvePermissions(dto.permissionIds);
 
     role.permissions = permissions;
     return this.rolesRepository.save(role);
   }
 
+  private async resolvePermissions(permissionIds: string[]): Promise<Permission[]> {
+    const permissions = await this.permissionsRepository.findBy({ id: In(permissionIds) });
+    if (permissions.length !== permissionIds.length) {
+      const foundIds = new Set(permissions.map((p) => p.id));
+      const missing = permissionIds.filter((id) => !foundIds.has(id));
+      throw new NotFoundException(`Permissions not found: ${missing.join(', ')}`);
+    }
+    return permissions;
+  }
+
   async removePermission(roleId: string, permissionId: string, orgId: string): Promise<Role> {
     const role = await this.findOne(roleId, orgId);
-    if (role.isSystem) throw new ForbiddenException('System role permissions cannot be modified');
-    if (role.orgId !== orgId) throw new ForbiddenException('Cannot modify roles from another organization');
+    RolePolicy.canManagePermissions(role, orgId);
 
     role.permissions = role.permissions.filter((p) => p.id !== permissionId);
     return this.rolesRepository.save(role);
