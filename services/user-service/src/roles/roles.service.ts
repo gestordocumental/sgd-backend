@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
 import { Role, RoleScope } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
+import { UserOrgRole } from './entities/user-org-role.entity';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
@@ -19,6 +20,8 @@ export class RolesService {
     private readonly rolesRepository: Repository<Role>,
     @InjectRepository(Permission)
     private readonly permissionsRepository: Repository<Permission>,
+    @InjectRepository(UserOrgRole)
+    private readonly userOrgRoleRepository: Repository<UserOrgRole>,
   ) {}
 
   // Returns system roles + custom roles for the given org
@@ -65,6 +68,15 @@ export class RolesService {
     const role = await this.findOne(id, orgId);
     RolePolicy.canModify(role, orgId);
 
+    if (dto.name && dto.name !== role.name){
+      const existing = await this.rolesRepository.findOne({
+        where: {name: dto.name, orgId}
+      });
+      if (existing && existing.id !== role.id){
+        throw new ConflictException(`Role "${dto.name}" already exist in this organization`);
+      }
+    }
+
     Object.assign(role, dto);
     return this.rolesRepository.save(role);
   }
@@ -72,6 +84,13 @@ export class RolesService {
   async remove(id: string, orgId: string): Promise<void> {
     const role = await this.findOne(id, orgId);
     RolePolicy.canDelete(role, orgId);
+
+    const assignedCount = await this.userOrgRoleRepository.countBy({ roleId: id });
+    if (assignedCount > 0) {
+      throw new ConflictException(
+        `Role "${role.name}" is still assigned to ${assignedCount} user(s) and cannot be deleted`,
+      );
+    }
 
     await this.rolesRepository.remove(role);
   }
@@ -87,10 +106,11 @@ export class RolesService {
   }
 
   private async resolvePermissions(permissionIds: string[]): Promise<Permission[]> {
-    const permissions = await this.permissionsRepository.findBy({ id: In(permissionIds) });
-    if (permissions.length !== permissionIds.length) {
+    const uniqueIds = [...new Set(permissionIds)];
+    const permissions = await this.permissionsRepository.findBy({ id: In(uniqueIds) });
+    if (permissions.length !== uniqueIds.length) {
       const foundIds = new Set(permissions.map((p) => p.id));
-      const missing = permissionIds.filter((id) => !foundIds.has(id));
+      const missing = uniqueIds.filter((id) => !foundIds.has(id));
       throw new NotFoundException(`Permissions not found: ${missing.join(', ')}`);
     }
     return permissions;

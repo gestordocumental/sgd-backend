@@ -8,6 +8,6 @@ if [ -z "$DOCS_PASSWORD" ]; then
   exit 1
 fi
 
-htpasswd -cb /etc/nginx/.htpasswd "${DOCS_USER:-sgd}" "$DOCS_PASSWORD"
+printf '%s\n' "$DOCS_PASSWORD" | htpasswd -ci /tmp/.htpasswd "${DOCS_USER:-sgd}"
 
 exec nginx -g "daemon off;"

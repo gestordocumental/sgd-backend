@@ -114,11 +114,13 @@ export class AuthService {
       throw new UnauthorizedException("Refresh token inválido o expirado");
     }
 
-    // Verify the token was not revoked in Redis
-    const exists = await this.redis.exists(
+    // Consume the token atomically: GETDEL returns the value and deletes the key
+    // in a single operation. Concurrent requests with the same token will get
+    // null on the second call, preventing replay attacks.
+    const consumed = await this.redis.getdel(
       `refresh:${payload.sub}:${payload.jti}`,
     );
-    if (!exists) throw new UnauthorizedException("Refresh token revocado");
+    if (!consumed) throw new UnauthorizedException("Refresh token revocado");
 
     const credential = await this.credentialRepo.findOne({
       where: { userId: payload.sub },
@@ -127,8 +129,7 @@ export class AuthService {
       throw new UnauthorizedException("Usuario no encontrado o inactivo");
     }
 
-    // Rotate: delete used token, issue new pair preserving scope
-    await this.redis.del(`refresh:${payload.sub}:${payload.jti}`);
+    // Token already deleted above — issue new pair preserving scope
 
     const options: TokenOptions = {};
     if (payload.companyId) options.companyId = payload.companyId;
@@ -146,10 +147,31 @@ export class AuthService {
   }
 
   /**
+   * Verifies the access token signature and expiration.
+   * Throws UnauthorizedException if the token is invalid or expired.
+   * Used by protected routes as a defense-in-depth layer (Kong already validates,
+   * but direct pod access would bypass Kong).
+   */
+  verifyAccessToken(auth: string): Record<string, any> {
+    if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
+    const token = auth.split(' ')[1];
+    try {
+      return this.jwtService.verify(token, {
+        secret: this.configService.get<string>('JWT_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+  }
+
+  /**
    * Validates the user belongs to companyId and returns a scoped token pair.
    */
   async switchCompany(userId: string, companyId: string) {
-    const companies = await this.userClientService.getUserCompanies(userId);
+    const [companies, userInfo] = await Promise.all([
+      this.userClientService.getUserCompanies(userId),
+      this.userClientService.getUserInfo(userId),
+    ]);
 
     if (!companies.includes(companyId)) {
       throw new NotFoundException(
@@ -164,7 +186,10 @@ export class AuthService {
       throw new UnauthorizedException("Usuario no encontrado o inactivo");
     }
 
-    return this.generateTokenPair(credential, { companyId });
+    return this.generateTokenPair(credential, {
+      companyId,
+      isSuperAdmin: userInfo.isSuperAdmin || undefined,
+    });
   }
 
   private async generateTokenPair(

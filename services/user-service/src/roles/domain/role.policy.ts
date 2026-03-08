@@ -13,7 +13,7 @@ export class RolePolicy {
     if (role.isSystem)
       throw new ForbiddenException('System roles cannot be deleted');
     if (role.orgId !== orgId)
-      throw new ForbiddenException('Cannot delete roles from another organization');
+      throw new ForbiddenException('Cannot manage permissions for roles from another organization');
   }
 
   static canManagePermissions(role: Role, orgId: string): void {

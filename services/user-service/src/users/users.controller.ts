@@ -11,28 +11,34 @@ import {
   HttpStatus,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ProvisionUserDto } from './dto/provision-user.dto';
+import { UserResponseDto } from './dto/user-response.dto';
 
 @Controller('api/users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Post()
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.create(dto);
+  async create(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
+    return UserResponseDto.from(await this.usersService.create(dto));
   }
 
   @Get()
-  findAll() {
-    return this.usersService.findAll();
+  async findAll(): Promise<UserResponseDto[]> {
+    return (await this.usersService.findAll()).map(UserResponseDto.from);
   }
 
   @Get('by-email/:email')
-  findByEmail(@Param('email') email: string) {
-    return this.usersService.findByEmail(email);
+  async findByEmail(@Param('email') email: string): Promise<UserResponseDto> {
+    return UserResponseDto.from(await this.usersService.findByEmail(email));
   }
 
   @Get(':id/companies')
@@ -40,20 +46,22 @@ export class UsersController {
     @Headers('x-internal-token') internalToken: string,
     @Param('id') id: string,
   ) {
-    if (internalToken !== process.env.INTERNAL_TOKEN) {
-      throw new UnauthorizedException();
-    }
+    const expected = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
+    const isValid =
+      internalToken?.length === expected.length &&
+      timingSafeEqual(Buffer.from(expected), Buffer.from(internalToken));
+    if (!isValid) throw new UnauthorizedException();
     return this.usersService.getCompanies(id);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  async findOne(@Param('id') id: string): Promise<UserResponseDto> {
+    return UserResponseDto.from(await this.usersService.findOne(id));
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(id, dto);
+  async update(@Param('id') id: string, @Body() dto: UpdateUserDto): Promise<UserResponseDto> {
+    return UserResponseDto.from(await this.usersService.update(id, dto));
   }
 
   @Delete(':id')
@@ -63,8 +71,8 @@ export class UsersController {
   }
 
   @Post(':id/restore')
-  restore(@Param('id') id: string) {
-    return this.usersService.restore(id);
+  async restore(@Param('id') id: string): Promise<UserResponseDto> {
+    return UserResponseDto.from(await this.usersService.restore(id));
   }
 
   @Post(':id/provision')

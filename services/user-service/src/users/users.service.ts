@@ -25,9 +25,19 @@ export class UsersService {
   async create(dto: CreateUserDto): Promise<User> {
     const existing = await this.usersRepository.findOne({
       where: { email: dto.email },
+      withDeleted: true,
     });
 
-    // User already exists — caller should assign them to the org via user_org_roles
+    if (existing?.deletedAt) {
+      // Soft-deleted user — the email is free at DB level but the record exists.
+      // Caller should restore the user and then assign them to the org.
+      throw new ConflictException({
+        message: 'User with this email was previously deleted. Use the restore endpoint to reactivate them.',
+        userId: existing.id,
+      });
+    }
+
+    // Active user already exists — caller should assign them to the org via user_org_roles
     if (existing) {
       throw new ConflictException({
         message: 'User with this email already exists',

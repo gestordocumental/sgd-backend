@@ -24,8 +24,8 @@ plugins:
       origins:
         - "${FRONTEND_URL}" # URL del frontend en Railway o dominio propio
       methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
-      headers: [Authorization, Content-Type, Accept]
-      exposed_headers: [X-Request-Id]
+      headers: [Authorization, Content-Type, Accept, X-Company-Id, X-Correlation-Id]
+      exposed_headers: [X-Request-Id, X-Correlation-Id]
       credentials: true
       max_age: 3600
 

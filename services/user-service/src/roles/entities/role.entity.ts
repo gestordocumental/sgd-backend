@@ -28,6 +28,9 @@ export enum SystemRoleName {
 
 @Entity('roles')
 @Unique(['name', 'orgId']) // same role name can exist in different orgs
+// Partial index: enforces name uniqueness for system roles (org_id IS NULL).
+// The @Unique above does NOT cover this case because NULL != NULL in SQL.
+@Index('roles_name_system_uniq', ['name'], { unique: true, where: '"org_id" IS NULL' })
 export class Role {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

@@ -27,8 +27,8 @@ export class Credential {
   userId!: string;
 
   // It is filled in when the user completes the invitation.
-  @Column({ name: "password_hash" })
-  passwordHash!: string;
+  @Column({ name: "password_hash", nullable: true })
+  passwordHash!: string | null;
 
   // Credential status according to the invitation cycle
   @Column({

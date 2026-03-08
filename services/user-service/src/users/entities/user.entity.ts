@@ -10,12 +10,14 @@ import {
 } from 'typeorm';
 import { UserOrgRole } from '../../roles/entities/user-org-role.entity';
 
+// Partial unique index: only active (non-deleted) users must have unique emails.
+// A plain @Index({ unique: true }) would prevent re-registering a soft-deleted email.
 @Entity('users')
+@Index('users_email_active_uniq', ['email'], { unique: true, where: '"deleted_at" IS NULL' })
 export class User {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Index({ unique: true })
   @Column({ type: 'varchar', length: 255 })
   email!: string;
 

@@ -6,6 +6,8 @@ import {
   Headers,
   UnauthorizedException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { timingSafeEqual } from "crypto";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
@@ -14,16 +16,21 @@ import { SwitchCompanyDto } from "./dto/switch-company.dto";
 
 @Controller("api/auth")
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Post("credentials/provision")
   provisionCredentials(
     @Headers("x-internal-token") internalToken: string,
     @Body() dto: ProvisionCredentialDto,
   ) {
-    if (internalToken !== process.env.INTERNAL_TOKEN) {
-      throw new UnauthorizedException();
-    }
+    const expected = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
+    const isValid =
+      internalToken?.length === expected.length &&
+      timingSafeEqual(Buffer.from(expected), Buffer.from(internalToken));
+    if (!isValid) throw new UnauthorizedException();
     return this.authService.provisionCredentials(dto);
   }
 
@@ -38,11 +45,13 @@ export class AuthController {
   }
 
   // ── PROTECTED routes (Kong validates JWT before arriving here) ───────────────
+  // verifyAccessToken() re-validates signature as a defense-in-depth measure
+  // in case the pod is reached directly (port-forward, alternative ingress, etc.)
 
   @Get("me")
-  async me(@Headers("authorization") auth: string) {
-    const payload = this.extractPayload(auth);
-    if (!payload?.sub) throw new UnauthorizedException("Invalid token (missing claims)");
+  me(@Headers("authorization") auth: string) {
+    const payload = this.authService.verifyAccessToken(auth);
+    if (!payload.sub) throw new UnauthorizedException("Invalid token (missing claims)");
     return {
       userId: payload.sub,
       email: payload.email,
@@ -52,31 +61,17 @@ export class AuthController {
   }
 
   @Get("me/companies")
-  async getMyCompanies(@Headers("authorization") auth: string) {
-    const payload = this.extractPayload(auth);
-    if (!payload?.sub) throw new UnauthorizedException("Invalid token");
+  getMyCompanies(@Headers("authorization") auth: string) {
+    const payload = this.authService.verifyAccessToken(auth);
     return this.authService.getMyCompanies(payload.sub);
   }
 
   @Post("switch-company")
-  async switchCompany(
+  switchCompany(
     @Headers("authorization") auth: string,
     @Body() dto: SwitchCompanyDto,
   ) {
-    const payload = this.extractPayload(auth);
-    if (!payload?.sub) throw new UnauthorizedException("Invalid token");
+    const payload = this.authService.verifyAccessToken(auth);
     return this.authService.switchCompany(payload.sub, dto.companyId);
-  }
-
-  private extractPayload(auth: string) {
-    if (!auth?.startsWith("Bearer ")) return null;
-    const token = auth.split(" ")[1];
-    try {
-      const [, payloadB64] = token.split(".");
-      const json = Buffer.from(payloadB64, "base64url").toString("utf8");
-      return JSON.parse(json);
-    } catch {
-      return null;
-    }
   }
 }
