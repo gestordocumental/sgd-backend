@@ -129,13 +129,46 @@ export class AuthService {
       throw new UnauthorizedException("Usuario no encontrado o inactivo");
     }
 
-    // Token already deleted above — issue new pair preserving scope
+    // Recalculate scope from user-service instead of trusting the old token.
+    // This ensures revoked company access or super admin status is enforced
+    // on the next refresh rather than persisting for the full 7-day TTL.
+    const [companies, userInfo] = await Promise.all([
+      payload.companyId
+        ? this.userClientService.getUserCompanies(payload.sub)
+        : Promise.resolve<string[] | null>(null),
+      this.userClientService.getUserInfo(payload.sub),
+    ]);
 
-    const options: TokenOptions = {};
-    if (payload.companyId) options.companyId = payload.companyId;
-    if (payload.isSuperAdmin) options.isSuperAdmin = payload.isSuperAdmin;
+    if (payload.companyId && !companies?.includes(payload.companyId)) {
+      throw new UnauthorizedException("Scope revocado");
+    }
 
-    return this.generateTokenPair(credential, options);
+    return this.generateTokenPair(credential, {
+      companyId: payload.companyId,
+      isSuperAdmin: userInfo.isSuperAdmin || undefined,
+    });
+  }
+
+  /**
+   * Disables credentials for a user (called when user is soft-deleted in user-service).
+   * No-op if no credential exists — user was never provisioned.
+   */
+  async disableCredential(userId: string): Promise<void> {
+    const credential = await this.credentialRepo.findOne({ where: { userId } });
+    if (!credential) return;
+    credential.status = CredentialStatus.DISABLED;
+    await this.credentialRepo.save(credential);
+  }
+
+  /**
+   * Re-enables credentials for a user (called when user is restored in user-service).
+   * No-op if no credential exists — user was never provisioned.
+   */
+  async enableCredential(userId: string): Promise<void> {
+    const credential = await this.credentialRepo.findOne({ where: { userId } });
+    if (!credential) return;
+    credential.status = CredentialStatus.ACTIVE;
+    await this.credentialRepo.save(credential);
   }
 
   /**

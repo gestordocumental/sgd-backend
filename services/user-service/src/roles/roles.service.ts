@@ -73,7 +73,7 @@ export class RolesService {
         where: {name: dto.name, orgId}
       });
       if (existing && existing.id !== role.id){
-        throw new ConflictException(`Role "${dto.name}" already exist in this organization`);
+        throw new ConflictException(`Role "${dto.name}" already exists in this organization`);
       }
     }
 

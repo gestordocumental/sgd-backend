@@ -126,7 +126,7 @@ credentials (auth_db)
 
 ### Usuarios y roles (user-service)
 
-```
+```text
 users (user_db)
   email         UNIQUE PARCIAL WHERE deleted_at IS NULL   ← compatible con soft delete
   position
@@ -168,7 +168,7 @@ user_org_roles                      ← un usuario puede pertenecer a N orgs con
 
 ## Flujo de autenticación
 
-```
+```text
 1. login()
    POST /api/auth/login { email, password }
    → token global: { sub, email, isSuperAdmin? }   (sin companyId)
@@ -484,7 +484,7 @@ Para cada servicio (ejemplo con auth-service):
 
 **auth-service:**
 
-```
+```text
 PORT                   = 3000
 JWT_EXPIRATION         = 3600s
 JWT_REFRESH_EXPIRATION = 7d
@@ -508,7 +508,7 @@ INTERNAL_TOKEN         = <openssl rand -base64 32>
 
 **user-service:**
 
-```
+```text
 PORT                   = 3001
 DB_NAME                = user_db
 NODE_ENV               = production
@@ -528,7 +528,7 @@ AUTH_SERVICE_URL       = http://auth-service.railway.internal:3000
 
 ### Paso 5 — Desplegar api-docs (documentación)
 
-```
+```text
 DOCS_USER     = sgd          # usuario para basic auth (por defecto: sgd)
 DOCS_PASSWORD = <password>   # password para acceder a la documentación
 ```

@@ -2,8 +2,12 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
+  Param,
   Body,
   Headers,
+  HttpCode,
+  HttpStatus,
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -21,17 +25,42 @@ export class AuthController {
     private readonly configService: ConfigService,
   ) {}
 
+  private validateInternalToken(internalToken: string): void {
+    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+    const provided = Buffer.from(internalToken ?? '');
+    const isValid =
+      provided.length === expected.length &&
+      timingSafeEqual(expected, provided);
+    if (!isValid) throw new UnauthorizedException();
+  }
+
   @Post("credentials/provision")
   provisionCredentials(
     @Headers("x-internal-token") internalToken: string,
     @Body() dto: ProvisionCredentialDto,
   ) {
-    const expected = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
-    const isValid =
-      internalToken?.length === expected.length &&
-      timingSafeEqual(Buffer.from(expected), Buffer.from(internalToken));
-    if (!isValid) throw new UnauthorizedException();
+    this.validateInternalToken(internalToken);
     return this.authService.provisionCredentials(dto);
+  }
+
+  @Patch("credentials/:userId/disable")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  disableCredential(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("userId") userId: string,
+  ) {
+    this.validateInternalToken(internalToken);
+    return this.authService.disableCredential(userId);
+  }
+
+  @Patch("credentials/:userId/enable")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  enableCredential(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("userId") userId: string,
+  ) {
+    this.validateInternalToken(internalToken);
+    return this.authService.enableCredential(userId);
   }
 
   @Post("login")

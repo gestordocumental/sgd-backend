@@ -74,10 +74,16 @@ export class UsersService {
   async remove(id: string): Promise<void> {
     const user = await this.findOne(id);
     await this.usersRepository.softRemove(user);
+    // Disable credentials so the soft-deleted user cannot log in.
+    // If auth-service fails the user record stays soft-deleted — the admin can retry.
+    await this.authClientService.disableCredentials(user.id);
   }
 
   async restore(id: string): Promise<User> {
     await this.usersRepository.restore(id);
+    // Re-enable credentials so the restored user can log in again.
+    // If auth-service fails the user record stays restored — the admin can retry.
+    await this.authClientService.enableCredentials(id);
     return this.findOne(id);
   }
 

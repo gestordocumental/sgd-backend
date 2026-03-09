@@ -46,10 +46,11 @@ export class UsersController {
     @Headers('x-internal-token') internalToken: string,
     @Param('id') id: string,
   ) {
-    const expected = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
+    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+    const provided = Buffer.from(internalToken ?? '');
     const isValid =
-      internalToken?.length === expected.length &&
-      timingSafeEqual(Buffer.from(expected), Buffer.from(internalToken));
+      provided.length === expected.length &&
+      timingSafeEqual(expected, provided);
     if (!isValid) throw new UnauthorizedException();
     return this.usersService.getCompanies(id);
   }
