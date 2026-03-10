@@ -23,5 +23,8 @@ data:
   JWT_EXPIRATION: "3600s"
   JWT_REFRESH_EXPIRATION: "7d"
 
+  # Internal URL of user-service within the cluster
+  USER_SERVICE_URL: "http://user-service.gestor-documental.svc.cluster.local"
+
   # Health
   HEALTH_PATH: "/health"

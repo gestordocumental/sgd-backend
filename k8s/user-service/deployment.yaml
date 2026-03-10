@@ -22,13 +22,17 @@ spec:
       containers:
         - name: user-service
           image: user-service:1.0.0
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: IfNotPresent  # Usa imagen local en KinD
           ports:
             - containerPort: 3000
               name: http
+
+          # Variables no sensibles desde ConfigMap
           envFrom:
             - configMapRef:
                 name: user-service-config
+
+          # Variables sensibles desde Secret
           env:
             - name: DB_USERNAME
               valueFrom:
@@ -40,17 +44,22 @@ spec:
                 secretKeyRef:
                   name: user-service-secret
                   key: DB_PASSWORD
-            - name: REDIS_PASSWORD
+            - name: INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: user-service-secret
-                  key: REDIS_PASSWORD
+                  key: INTERNAL_TOKEN
+
+          # ── Health Probes ─────────────────────────────────────────────────
+          # startupProbe: espera hasta 50s a que NestJS arranque completamente
           startupProbe:
             httpGet:
               path: /health/startup
               port: 3000
-            failureThreshold: 10
+            failureThreshold: 10   # 10 intentos × 5s = 50s máximo
             periodSeconds: 5
+
+          # livenessProbe: reinicia el pod si el proceso se bloquea
           livenessProbe:
             httpGet:
               path: /health/live
@@ -59,6 +68,8 @@ spec:
             periodSeconds: 10
             failureThreshold: 3
             timeoutSeconds: 3
+
+          # readinessProbe: retira el pod del balanceador si PostgreSQL no responde
           readinessProbe:
             httpGet:
               path: /health/ready
@@ -67,6 +78,8 @@ spec:
             periodSeconds: 5
             failureThreshold: 3
             timeoutSeconds: 3
+
+          # ── Recursos ─────────────────────────────────────────────────────
           resources:
             requests:
               cpu: "100m"
@@ -74,4 +87,5 @@ spec:
             limits:
               cpu: "300m"
               memory: "256Mi"
+
       restartPolicy: Always

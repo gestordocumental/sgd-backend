@@ -15,8 +15,7 @@ data:
   DB_PORT: "5432"
   DB_NAME: "user_db"
 
-  # Redis (cache de permisos RBAC)
-  REDIS_HOST: "redis-master.sgd-infra.svc.cluster.local"
-  REDIS_PORT: "6379"
+  # Internal URL of auth-service within the cluster
+  AUTH_SERVICE_URL: "http://auth-service.gestor-documental.svc.cluster.local"
 
   HEALTH_PATH: "/health"

@@ -12,6 +12,12 @@ name: Deploy — Microservicios
 #   Environment: develop        → secret RAILWAY_TOKEN (token Railway para develop)
 #   Environment: staging    → secret RAILWAY_TOKEN (token Railway para staging)
 #   Environment: production → secret RAILWAY_TOKEN (token Railway para production)
+#
+# ⚠️  IMPORTANTE — gestión de secretos:
+#   Los archivos k8s/*/secret.yaml son EXCLUSIVAMENTE para entorno local (KinD).
+#   Este pipeline NUNCA ejecuta `kubectl apply` sobre esos archivos.
+#   En staging/production los secretos se gestionan directamente en Railway
+#   (Dashboard → Variables) o mediante Sealed Secrets / Vault si se migra a k8s.
 
 on:
   push:

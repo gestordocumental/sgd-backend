@@ -13,26 +13,22 @@ export enum CredentialStatus {
 }
 
 @Entity("credentials")
-@Index(["companyId", "email"], { unique: true }) // unique email per company (multi-tenant)
+@Index(["email"], { unique: true }) // global unique email (one identity per email)
 export class Credential {
   @PrimaryGeneratedColumn("uuid")
-  id: string;
-
-  @Index()
-  @Column({ name: "company_id", type: "uuid" })
-  companyId: string;
+  id!: string;
 
   @Column()
-  email: string;
+  email!: string;
 
   // Logical relationship with the User Service
   @Index({ unique: true })
   @Column({ name: "user_id", type: "uuid" })
-  userId: string;
+  userId!: string;
 
   // It is filled in when the user completes the invitation.
-  @Column({ name: "password_hash" })
-  passwordHash: string;
+  @Column({ name: "password_hash", nullable: true })
+  passwordHash!: string | null;
 
   // Credential status according to the invitation cycle
   @Column({
@@ -40,18 +36,18 @@ export class Credential {
     enum: CredentialStatus,
     default: CredentialStatus.ACTIVE,
   })
-  status: CredentialStatus;
+  status!: CredentialStatus;
 
   // Refresh current token (optional) for rotation/revocation
   @Column({ name: "refresh_token_hash", nullable: true })
-  refreshTokenHash: string | null;
+  refreshTokenHash!: string | null;
 
   @Column({ name: "locked_until", type: "timestamptz", nullable: true })
-  lockedUntil: Date | null;
+  lockedUntil!: Date | null;
 
   @CreateDateColumn({ name: "created_at", type: "timestamptz" })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: "updated_at", type: "timestamptz" })
-  updatedAt: Date;
+  updatedAt!: Date;
 }

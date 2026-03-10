@@ -23,6 +23,13 @@ data:
 
     # ── Plugins globales ───────────────────────────────────────────────────────
     plugins:
+      # Generates X-Correlation-ID for every request — enables distributed tracing
+      - name: correlation-id
+        config:
+          header_name: x-correlation-id
+          generator: uuid
+          echo_downstream: true   # returns the ID in the response header
+
       - name: rate-limiting
         config:
           minute: 100
@@ -45,8 +52,11 @@ data:
             - Authorization
             - Content-Type
             - Accept
+            - X-Company-Id
+            - X-Correlation-Id
           exposed_headers:
             - X-Request-Id
+            - X-Correlation-Id
           credentials: true
           max_age: 3600
 
@@ -98,6 +108,8 @@ data:
           - name: user-routes
             paths:
               - /api/users
+              - /api/roles
+              - /api/permissions
             strip_path: false
         plugins:
           - name: jwt

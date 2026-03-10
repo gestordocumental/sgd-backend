@@ -1,10 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { Credential } from './auth/entities/credential.entity';
+import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
+import { AppLogger } from './common/logger/app-logger.service';
 
 @Module({
   imports: [
@@ -31,5 +33,11 @@ import { Credential } from './auth/entities/credential.entity';
     AuthModule,
     HealthModule,
   ],
+  providers: [AppLogger],
+  exports: [AppLogger],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CorrelationMiddleware).forRoutes('*');
+  }
+}

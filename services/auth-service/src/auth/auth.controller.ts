@@ -2,40 +2,70 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
+  Param,
   Body,
   Headers,
+  HttpCode,
+  HttpStatus,
   UnauthorizedException,
-  BadRequestException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { timingSafeEqual } from "crypto";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
+import { SwitchCompanyDto } from "./dto/switch-company.dto";
 
 @Controller("api/auth")
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly configService: ConfigService,
   ) {}
+
+  private validateInternalToken(internalToken: string): void {
+    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+    const provided = Buffer.from(internalToken ?? '');
+    const isValid =
+      provided.length === expected.length &&
+      timingSafeEqual(expected, provided);
+    if (!isValid) throw new UnauthorizedException();
+  }
 
   @Post("credentials/provision")
   provisionCredentials(
     @Headers("x-internal-token") internalToken: string,
     @Body() dto: ProvisionCredentialDto,
   ) {
-    if (internalToken !== process.env.INTERNAL_TOKEN) {
-      throw new UnauthorizedException();
-    }
-
+    this.validateInternalToken(internalToken);
     return this.authService.provisionCredentials(dto);
   }
 
+  @Patch("credentials/:userId/disable")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  disableCredential(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("userId") userId: string,
+  ) {
+    this.validateInternalToken(internalToken);
+    return this.authService.disableCredential(userId);
+  }
+
+  @Patch("credentials/:userId/enable")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  enableCredential(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("userId") userId: string,
+  ) {
+    this.validateInternalToken(internalToken);
+    return this.authService.enableCredential(userId);
+  }
+
   @Post("login")
-  login(@Headers("x-company-id") companyId: string, @Body() dto: LoginDto) {
-    if (!companyId) {
-      throw new BadRequestException('Missing header x-company-id');
-    }
-    return this.authService.login(companyId, dto);
+  login(@Body() dto: LoginDto) {
+    return this.authService.login(dto);
   }
 
   @Post("refresh")
@@ -44,30 +74,33 @@ export class AuthController {
   }
 
   // ── PROTECTED routes (Kong validates JWT before arriving here) ───────────────
+  // verifyAccessToken() re-validates signature as a defense-in-depth measure
+  // in case the pod is reached directly (port-forward, alternative ingress, etc.)
 
   @Get("me")
-  async me(@Headers("authorization") auth: string) {
-    // Kong has already validated the JWT signature. We decoded it to obtain the sub.
-    if (!auth?.startsWith("Bearer ")) throw new UnauthorizedException();
-
-    const token = auth.split(" ")[1];
-    const payload: any = this.decodeJwt(token);
-
-     if (!payload?.sub || !payload?.companyId) {
-      throw new UnauthorizedException('Invalid token (missing claims)');
-    }
-
-    return this.authService.getIdentity(payload.companyId, payload.sub);
+  me(@Headers("authorization") auth: string) {
+    const payload = this.authService.verifyAccessToken(auth);
+    if (!payload.sub) throw new UnauthorizedException("Invalid token (missing claims)");
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      ...(payload.companyId && { companyId: payload.companyId }),
+      ...(payload.isSuperAdmin && { isSuperAdmin: payload.isSuperAdmin }),
+    };
   }
 
-  private decodeJwt(jwt: string) {
-    try {
-      const [, payloadB64] = jwt.split('.');
-      const json = Buffer.from(payloadB64, 'base64url').toString('utf8');
-      return JSON.parse(json);
-    } catch {
-      return null;
-    }
+  @Get("me/companies")
+  getMyCompanies(@Headers("authorization") auth: string) {
+    const payload = this.authService.verifyAccessToken(auth);
+    return this.authService.getMyCompanies(payload.sub);
   }
 
+  @Post("switch-company")
+  switchCompany(
+    @Headers("authorization") auth: string,
+    @Body() dto: SwitchCompanyDto,
+  ) {
+    const payload = this.authService.verifyAccessToken(auth);
+    return this.authService.switchCompany(payload.sub, dto.companyId);
+  }
 }
