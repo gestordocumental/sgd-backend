@@ -108,6 +108,8 @@ data:
           - name: user-routes
             paths:
               - /api/users
+              - /api/roles
+              - /api/permissions
             strip_path: false
         plugins:
           - name: jwt

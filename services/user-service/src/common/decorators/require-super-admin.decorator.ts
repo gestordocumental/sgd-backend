@@ -6,15 +6,15 @@ import {
 } from '@nestjs/common';
 
 /**
- * Extracts companyId from the JWT payload (Authorization: Bearer <token>).
- * Kong already verified the signature — this just reads the claim.
+ * Validates that the caller is a super admin by decoding the JWT from the
+ * Authorization header. Kong already verified the signature — this just
+ * extracts the isSuperAdmin claim for authorization purposes.
  *
  * Throws UnauthorizedException if no valid token is present.
- * Throws ForbiddenException if the token has no companyId (global token —
- * caller must switch-company first to get a scoped token).
+ * Throws ForbiddenException if the caller is not a super admin.
  */
-export const OrgId = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): string => {
+export const RequireSuperAdmin = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): void => {
     const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string> }>();
     const auth = request.headers['authorization'];
 
@@ -34,13 +34,8 @@ export const OrgId = createParamDecorator(
       throw new UnauthorizedException('Malformed token');
     }
 
-    const companyId = payload.companyId as string | undefined;
-    if (!companyId) {
-      throw new ForbiddenException(
-        'Token has no companyId — call POST /api/auth/switch-company first',
-      );
+    if (!payload.isSuperAdmin) {
+      throw new ForbiddenException('Super admin access required');
     }
-
-    return companyId;
   },
 );

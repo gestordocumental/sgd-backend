@@ -7,19 +7,21 @@ export class UserResponseDto {
   lastName!: string | null;
   position!: string;
   isActive!: boolean;
+  isSuperAdmin!: boolean;
   createdAt!: Date;
   updatedAt!: Date;
 
   static from(user: User): UserResponseDto {
     const dto = new UserResponseDto();
-    dto.id          = user.id;
-    dto.email       = user.email;
-    dto.firstName   = user.firstName;
-    dto.lastName    = user.lastName;
-    dto.position    = user.position;
-    dto.isActive    = user.isActive;
-    dto.createdAt   = user.createdAt;
-    dto.updatedAt   = user.updatedAt;
+    dto.id           = user.id;
+    dto.email        = user.email;
+    dto.firstName    = user.firstName;
+    dto.lastName     = user.lastName;
+    dto.position     = user.position;
+    dto.isActive     = user.isActive;
+    dto.isSuperAdmin = user.isSuperAdmin;
+    dto.createdAt    = user.createdAt;
+    dto.updatedAt    = user.updatedAt;
     return dto;
   }
 }

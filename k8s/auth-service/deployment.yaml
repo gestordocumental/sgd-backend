@@ -59,6 +59,11 @@ spec:
                 secretKeyRef:
                   name: auth-service-secret
                   key: JWT_REFRESH_SECRET
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secret
+                  key: INTERNAL_TOKEN
 
           # ── Health Probes (sección 8 del documento) ─────────────────────
           # startupProbe: da tiempo al servicio para arrancar antes de activar

@@ -9,6 +9,10 @@ metadata:
     version: "3.4"
 spec:
   replicas: 1
+  # Recreate en lugar de RollingUpdate porque Kong usa hostPorts —
+  # dos pods no pueden ocupar el mismo puerto del nodo simultáneamente.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: api-gateway

@@ -13,9 +13,11 @@ Frontend (puerto 3001)
         ▼
   Kong API Gateway (:8080)          ← único punto de entrada externo
         │                           ← genera x-correlation-id por request
-        ├── /api/auth/*    → auth-service        (NestJS + PostgreSQL + Redis)
-        ├── /api/users/*   → user-service         (NestJS + PostgreSQL)
-        ├── /api/org/*     → org-service          (NestJS + PostgreSQL)
+        ├── /api/auth/*        → auth-service        (NestJS + PostgreSQL + Redis)
+        ├── /api/users/*       → user-service        (NestJS + PostgreSQL)
+        ├── /api/roles/*       → user-service        (NestJS + PostgreSQL)
+        ├── /api/permissions/* → user-service        (NestJS + PostgreSQL)
+        ├── /api/org/*         → org-service         (NestJS + PostgreSQL)
         ├── /api/documents/* → document-service  (NestJS + MongoDB + MinIO)
         ├── /api/workflows/* → workflow-service  (NestJS + PostgreSQL + Kafka)
         ├── /api/notifications/* → notification-service (NestJS + Redis + Kafka)
@@ -99,11 +101,15 @@ document-management-system/
         ├── Dockerfile
         ├── src/
         │   ├── users/            # CRUD de usuarios + soft delete + restore
+        │   │   └── dto/          # CreateUserDto, UpdateUserDto (con @Transform), UserResponseDto, SetSuperAdminDto
         │   ├── roles/            # Roles SYSTEM/ORG + permisos por módulo/acción
+        │   │   └── permissions.seeder.ts  # Siembra catálogo de permisos en cada arranque
         │   ├── data-source.ts    # DataSource para CLI de TypeORM (migraciones)
         │   ├── migrations/       # Migraciones TypeORM
         │   ├── auth-client/      # HTTP client hacia auth-service
-        │   ├── common/           # Logger Winston, correlation middleware, interceptors
+        │   ├── common/
+        │   │   ├── decorators/   # @OrgId(), @RequireSuperAdmin()
+        │   │   └── ...           # Logger Winston, correlation middleware, interceptors
         │   └── health/
         └── .env.example
 ```
@@ -200,7 +206,9 @@ user_org_roles                      ← un usuario puede pertenecer a N orgs con
 | Token interno entre servicios | Comparación `timingSafeEqual` (previene timing attacks) |
 | Contraseña en htpasswd | `htpasswd -i` con stdin — nunca expuesta en argv/ps |
 | Contenedor api-docs | Corre como usuario `nginx` (no root), puerto 8080 |
-| Respuestas de usuarios | `UserResponseDto` filtra `idNumber`, `isSuperAdmin`, `twoFactorEnabled`, `deletedAt` |
+| Respuestas de usuarios | `UserResponseDto` expone solo campos seguros (filtra `twoFactorEnabled`, `deletedAt`, `orgRoles`) |
+| Escalada de privilegios | `@RequireSuperAdmin()` decodifica el JWT del caller — solo super admins pueden promover/revocar otros super admins |
+| Normalización de entrada | `@Transform` en DTOs: email (lowercase+trim), idNumber (uppercase+trim), strings (trim) |
 
 ---
 
@@ -242,6 +250,12 @@ npm run migration:show
 
 > En `NODE_ENV=development` TypeORM usa `synchronize: true` para iterar rápido.
 > En cualquier otro entorno las migraciones son obligatorias.
+
+> **Permisos**: el catálogo de permisos del sistema NO requiere migraciones. Se sincroniza
+> automáticamente en cada arranque desde `permissions.seeder.ts`. Para agregar un permiso:
+> 1. Agregar el valor al enum (`PermissionModule` o `PermissionAction`) en `permission.entity.ts`
+> 2. Agregar la entrada al `PERMISSIONS_CATALOG` en `permissions.seeder.ts`
+> 3. Hacer deploy — el seeder lo inserta en el próximo arranque.
 
 ---
 
@@ -369,22 +383,35 @@ Las rutas marcadas con `JWT` requieren header `Authorization: Bearer <token>`.
 | DELETE | `/api/users/:id` | JWT | Soft delete de usuario |
 | POST | `/api/users/:id/restore` | JWT | Restaurar usuario eliminado |
 | POST | `/api/users/:id/provision` | JWT | Provisionar credenciales en auth-service |
+| POST | `/api/users/:id/restore` | JWT | Restaurar usuario eliminado |
+| PATCH | `/api/users/:id/super-admin` | JWT (super admin) | Promover/revocar super admin |
 | GET | `/api/users/:id/companies` | `x-internal-token` | Orgs del usuario (uso interno) |
 
-> Las respuestas de usuarios nunca exponen: `idNumber`, `isSuperAdmin`,
-> `twoFactorEnabled`, `deletedAt`, `orgRoles`.
+> `PATCH /api/users/:id/super-admin` requiere que el caller tenga `isSuperAdmin: true`
+> en su JWT. Solo un super admin puede promover o revocar a otro.
+>
+> Las respuestas de usuarios exponen `isSuperAdmin` (necesario para que auth-service
+> incluya el claim en el JWT) pero filtran `twoFactorEnabled`, `deletedAt` y `orgRoles`.
 
 ### Roles y Permisos (User Service)
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| GET | `/api/roles` | JWT | Roles de sistema + roles de la org |
-| POST | `/api/roles` | JWT | Crear rol custom en la org |
-| GET | `/api/roles/:id` | JWT | Obtener rol |
-| PATCH | `/api/roles/:id` | JWT | Actualizar rol (solo roles ORG) |
-| DELETE | `/api/roles/:id` | JWT | Eliminar rol (falla si tiene usuarios asignados) |
-| POST | `/api/roles/:id/permissions` | JWT | Asignar permisos a un rol |
-| DELETE | `/api/roles/:id/permissions/:permId` | JWT | Quitar permiso de un rol |
+| GET | `/api/permissions` | JWT | Catálogo completo de permisos del sistema |
+| GET | `/api/roles` | JWT + `x-org-id` | Roles de sistema + roles custom de la org |
+| POST | `/api/roles` | JWT + `x-org-id` | Crear rol custom en la org |
+| GET | `/api/roles/:id` | JWT + `x-org-id` | Obtener rol |
+| PATCH | `/api/roles/:id` | JWT + `x-org-id` | Actualizar rol (solo roles ORG) |
+| DELETE | `/api/roles/:id` | JWT + `x-org-id` | Eliminar rol (falla si tiene usuarios asignados) |
+| POST | `/api/roles/:id/permissions` | JWT + `x-org-id` | Reemplazar todos los permisos de un rol |
+| DELETE | `/api/roles/:id/permissions/:permId` | JWT + `x-org-id` | Quitar un permiso de un rol |
+
+> El header `x-org-id` lo inyecta Kong desde el claim `companyId` del JWT.
+> En pruebas directas al servicio se debe enviar manualmente.
+>
+> El catálogo de permisos se siembra automáticamente en cada arranque del servicio
+> via `PermissionsSeeder` (`OnApplicationBootstrap`). Para agregar un nuevo permiso
+> basta con añadirlo al enum y al catálogo en `permissions.seeder.ts` — sin migraciones.
 
 ---
 
@@ -582,7 +609,9 @@ kubectl logs deployment/auth-service -n gestor-documental -f
 curl http://localhost:8001/routes
 
 # Reiniciar un pod tras actualizar la imagen
+# Nota: api-gateway usa strategy: Recreate (hostPort) — eliminar el pod manualmente si el rollout queda pendiente
 kubectl rollout restart deployment/<nombre> -n gestor-documental
+kubectl delete pod -n gestor-documental -l app=api-gateway   # solo si el rollout de Kong se bloquea
 
 # Parar toda la infraestructura local
 docker compose down

@@ -2,18 +2,13 @@ import {
   createParamDecorator,
   ExecutionContext,
   UnauthorizedException,
-  ForbiddenException,
 } from '@nestjs/common';
 
 /**
- * Extracts companyId from the JWT payload (Authorization: Bearer <token>).
+ * Extracts the caller's userId (sub claim) from the JWT payload.
  * Kong already verified the signature — this just reads the claim.
- *
- * Throws UnauthorizedException if no valid token is present.
- * Throws ForbiddenException if the token has no companyId (global token —
- * caller must switch-company first to get a scoped token).
  */
-export const OrgId = createParamDecorator(
+export const CurrentUserId = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): string => {
     const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string> }>();
     const auth = request.headers['authorization'];
@@ -34,13 +29,11 @@ export const OrgId = createParamDecorator(
       throw new UnauthorizedException('Malformed token');
     }
 
-    const companyId = payload.companyId as string | undefined;
-    if (!companyId) {
-      throw new ForbiddenException(
-        'Token has no companyId — call POST /api/auth/switch-company first',
-      );
+    const sub = payload.sub as string | undefined;
+    if (!sub) {
+      throw new UnauthorizedException('Token has no sub claim');
     }
 
-    return companyId;
+    return sub;
   },
 );

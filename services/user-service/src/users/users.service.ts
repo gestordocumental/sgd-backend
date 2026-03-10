@@ -9,6 +9,7 @@ import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ProvisionUserDto } from './dto/provision-user.dto';
+import { AssignOrgDto } from './dto/assign-org.dto';
 import { AuthClientService } from '../auth-client/auth-client.service';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 
@@ -125,5 +126,43 @@ export class UsersService {
     });
 
     return { ok: true };
+  }
+
+  async setSuperAdmin(id: string, enabled: boolean): Promise<User> {
+    const user = await this.findOne(id);
+    user.isSuperAdmin = enabled;
+    return this.usersRepository.save(user);
+  }
+
+  async assignOrg(userId: string, dto: AssignOrgDto, assignedBy: string): Promise<UserOrgRole> {
+    await this.findOne(userId);
+
+    const existing = await this.userOrgRoleRepository.findOne({
+      where: { userId, orgId: dto.orgId, roleId: dto.roleId },
+    });
+    if (existing) {
+      throw new ConflictException('User already has this role in this org');
+    }
+
+    const record = this.userOrgRoleRepository.create({
+      userId,
+      orgId: dto.orgId,
+      roleId: dto.roleId,
+      assignedBy,
+    });
+    return this.userOrgRoleRepository.save(record);
+  }
+
+  async getOrgRoles(userId: string): Promise<UserOrgRole[]> {
+    await this.findOne(userId);
+    return this.userOrgRoleRepository.find({
+      where: { userId },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  async removeFromOrg(userId: string, orgId: string): Promise<void> {
+    await this.findOne(userId);
+    await this.userOrgRoleRepository.delete({ userId, orgId });
   }
 }
