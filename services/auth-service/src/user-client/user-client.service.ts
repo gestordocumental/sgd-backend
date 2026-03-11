@@ -66,7 +66,7 @@ export class UserClientService {
         throw new NotFoundException(`User ${userId} not found in user-service`);
       }
       throw new InternalServerErrorException(
-        `Could not fetch user info from user-service: ${message}`,
+        `Could not fetch user companies from user-service: ${message}`,
       );
     }
   }

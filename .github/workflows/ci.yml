@@ -13,7 +13,7 @@ on:
   push:
     branches: [dev, test, master]
   pull_request:
-    branches: [test, master]
+    branches: [dev, test, master]
 
 jobs:
   # ── Tests unitarios por servicio ─────────────────────────────────────────
@@ -52,6 +52,7 @@ jobs:
         working-directory: services/${{ matrix.service }}
         # --if-present: exit 0 si el script "test" no está definido en package.json
         # Permite agregar el job antes de que el servicio tenga tests escritos.
+        # TODO delete --if-present when all services are implements
         run: npm run test --if-present
 
   # ── Validar que cada Dockerfile compila sin errores ─────────────────────

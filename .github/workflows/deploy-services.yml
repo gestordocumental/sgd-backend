@@ -118,7 +118,7 @@ jobs:
       - name: Instalar dependencias
         working-directory: services/auth-service
         run: npm ci
-
+      # TODO delete --if-present when all services are implements
       - name: Ejecutar tests unitarios
         working-directory: services/auth-service
         run: npm run test --if-present
@@ -156,7 +156,8 @@ jobs:
       - name: Instalar dependencias
         working-directory: services/user-service
         run: npm ci
-
+        
+      # TODO delete --if-present when all services are implements
       - name: Ejecutar tests unitarios
         working-directory: services/user-service
         run: npm run test --if-present
