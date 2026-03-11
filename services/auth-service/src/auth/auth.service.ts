@@ -93,7 +93,15 @@ export class AuthService {
     const valid = await bcrypt.compare(dto.password, credential.passwordHash);
     if (!valid) throw new UnauthorizedException("Credenciales inválidas");
 
-    const userInfo = await this.userClientService.getUserInfo(credential.userId);
+    let userInfo: { isSuperAdmin: boolean };
+    try {
+      userInfo = await this.userClientService.getUserInfo(credential.userId);
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        throw new UnauthorizedException("Credenciales inválidas");
+      }
+      throw err;
+    }
 
     return this.generateTokenPair(credential, {
       isSuperAdmin: userInfo.isSuperAdmin || undefined,
@@ -132,12 +140,21 @@ export class AuthService {
     // Recalculate scope from user-service instead of trusting the old token.
     // This ensures revoked company access or super admin status is enforced
     // on the next refresh rather than persisting for the full 7-day TTL.
-    const [companies, userInfo] = await Promise.all([
-      payload.companyId
-        ? this.userClientService.getUserCompanies(payload.sub)
-        : Promise.resolve<string[] | null>(null),
-      this.userClientService.getUserInfo(payload.sub),
-    ]);
+    let companies: string[] | null;
+    let userInfo: { isSuperAdmin: boolean };
+    try {
+      [companies, userInfo] = await Promise.all([
+        payload.companyId
+          ? this.userClientService.getUserCompanies(payload.sub)
+          : Promise.resolve<string[] | null>(null),
+        this.userClientService.getUserInfo(payload.sub),
+      ]);
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        throw new UnauthorizedException("Credenciales inválidas");
+      }
+      throw err;
+    }
 
     if (payload.companyId && !companies?.includes(payload.companyId)) {
       throw new UnauthorizedException("Scope revocado");
@@ -186,14 +203,15 @@ export class AuthService {
    * but direct pod access would bypass Kong).
    */
   verifyAccessToken(auth: string): Record<string, any> {
-    if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
-    const token = auth.split(' ')[1];
+    if (!auth?.startsWith("Bearer "))
+      throw new UnauthorizedException("Missing token");
+    const token = auth.split(" ")[1];
     try {
       return this.jwtService.verify(token, {
-        secret: this.configService.get<string>('JWT_SECRET'),
+        secret: this.configService.get<string>("JWT_SECRET"),
       });
     } catch {
-      throw new UnauthorizedException('Invalid or expired token');
+      throw new UnauthorizedException("Invalid or expired token");
     }
   }
 
