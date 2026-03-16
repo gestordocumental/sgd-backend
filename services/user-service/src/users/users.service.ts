@@ -2,16 +2,24 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { randomBytes } from 'crypto';
+import Redis from 'ioredis';
 import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ProvisionUserDto } from './dto/provision-user.dto';
 import { AssignOrgDto } from './dto/assign-org.dto';
+import { CompleteRegistrationDto } from './dto/complete-registration.dto';
+import { UserResponseDto } from './dto/user-response.dto';
 import { AuthClientService } from '../auth-client/auth-client.service';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+
+const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
 
 @Injectable()
 export class UsersService {
@@ -21,9 +29,12 @@ export class UsersService {
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepository: Repository<UserOrgRole>,
     private readonly authClientService: AuthClientService,
+    @Inject('REDIS_CLIENT')
+    private readonly redis: Redis,
+    private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
-  async create(dto: CreateUserDto): Promise<User> {
+  async create(dto: CreateUserDto): Promise<{ user: User; invitationToken: string }> {
     const existing = await this.usersRepository.findOne({
       where: { email: dto.email },
       withDeleted: true,
@@ -47,7 +58,26 @@ export class UsersService {
     }
 
     const user = this.usersRepository.create(dto);
-    return this.usersRepository.save(user);
+    await this.usersRepository.save(user);
+
+    // Generate a cryptographically secure one-time invitation token
+    const token = randomBytes(32).toString('hex');
+    await this.redis.setex(`invitation:${token}`, INVITATION_TTL_SECONDS, user.id);
+
+    // Emit Kafka event — failure must not break the main flow
+    try {
+      const expiresAt = new Date(Date.now() + INVITATION_TTL_SECONDS * 1000).toISOString();
+      await this.kafkaProducer.emit('user.invited', {
+        userId: user.id,
+        email: user.email,
+        invitationToken: token,
+        expiresAt,
+      });
+    } catch {
+      // Kafka is best-effort — admin still receives the token in the response
+    }
+
+    return { user, invitationToken: token };
   }
 
   findAll(): Promise<User[]> {
@@ -164,5 +194,34 @@ export class UsersService {
   async removeFromOrg(userId: string, orgId: string): Promise<void> {
     await this.findOne(userId);
     await this.userOrgRoleRepository.delete({ userId, orgId });
+  }
+
+  /**
+   * Completes the user's registration using a one-time invitation token.
+   * Updates the user profile and provisions credentials in auth-service,
+   * then invalidates the token so it cannot be reused.
+   */
+  async completeRegistration(dto: CompleteRegistrationDto): Promise<UserResponseDto> {
+    const userId = await this.redis.get(`invitation:${dto.token}`);
+    if (!userId) {
+      throw new NotFoundException('Invitation token invalid or expired');
+    }
+
+    const user = await this.update(userId, {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      idNumber: dto.idNumber,
+    });
+
+    await this.authClientService.provisionCredentials({
+      userId: user.id,
+      email: user.email,
+      password: dto.password,
+    });
+
+    // Consume the token — one-time use only
+    await this.redis.del(`invitation:${dto.token}`);
+
+    return UserResponseDto.from(user);
   }
 }

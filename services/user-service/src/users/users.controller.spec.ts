@@ -67,6 +67,7 @@ describe('UsersController', () => {
             assignOrg: jest.fn(),
             getOrgRoles: jest.fn(),
             removeFromOrg: jest.fn(),
+            completeRegistration: jest.fn(),
           },
         },
         {
@@ -85,17 +86,18 @@ describe('UsersController', () => {
   // ─── POST / ───────────────────────────────────────────────────────────────
 
   describe('create', () => {
-    it('returns a UserResponseDto after creating a user', async () => {
+    it('returns a UserResponseDto with invitationToken after creating a user', async () => {
       const dto = { email: 'new@example.com', position: 'Dev' };
       const user = makeUser(dto);
+      const invitationToken = 'a'.repeat(64);
 
-      usersService.create.mockResolvedValue(user);
+      usersService.create.mockResolvedValue({ user, invitationToken });
 
       const result = await controller.create(dto as any);
 
       expect(usersService.create).toHaveBeenCalledWith(dto);
-      expect(result).toBeInstanceOf(UserResponseDto);
       expect(result.email).toBe(user.email);
+      expect(result.invitationToken).toBe(invitationToken);
     });
 
     it('propagates ConflictException from the service', async () => {

@@ -18,6 +18,7 @@ import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { ProvisionUserDto } from "./dto/provision-user.dto";
 import { AssignOrgDto } from "./dto/assign-org.dto";
+import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
 import { UserResponseDto } from "./dto/user-response.dto";
 import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
@@ -32,8 +33,9 @@ export class UsersController {
   ) {}
 
   @Post()
-  async create(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
-    return UserResponseDto.from(await this.usersService.create(dto));
+  async create(@Body() dto: CreateUserDto) {
+    const { user, invitationToken } = await this.usersService.create(dto);
+    return { ...UserResponseDto.from(user), invitationToken };
   }
 
   @Get()
@@ -84,6 +86,11 @@ export class UsersController {
   @Post(":id/restore")
   async restore(@Param("id") id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.restore(id));
+  }
+
+  @Post("complete-registration")
+  async completeRegistration(@Body() dto: CompleteRegistrationDto): Promise<UserResponseDto> {
+    return this.usersService.completeRegistration(dto);
   }
 
   @Post(":id/provision")

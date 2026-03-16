@@ -14,7 +14,8 @@ Frontend (puerto 3001)
   Kong API Gateway (:8080)          ← único punto de entrada externo
         │                           ← genera x-correlation-id por request
         ├── /api/auth/*        → auth-service        (NestJS + PostgreSQL + Redis)
-        ├── /api/users/*       → user-service        (NestJS + PostgreSQL)
+        ├── /api/users/complete-registration → user-service (público, sin JWT)
+        ├── /api/users/*       → user-service        (NestJS + PostgreSQL + Redis + Kafka)
         ├── /api/roles/*       → user-service        (NestJS + PostgreSQL)
         ├── /api/permissions/* → user-service        (NestJS + PostgreSQL)
         ├── /api/org/*         → org-service         (NestJS + PostgreSQL)
@@ -100,8 +101,8 @@ document-management-system/
     └── user-service/             # Usuarios, roles, permisos por org
         ├── Dockerfile
         ├── src/
-        │   ├── users/            # CRUD de usuarios + soft delete + restore
-        │   │   └── dto/          # CreateUserDto, UpdateUserDto (con @Transform), UserResponseDto, SetSuperAdminDto
+        │   ├── users/            # CRUD de usuarios + soft delete + restore + invitation flow
+        │   │   └── dto/          # CreateUserDto, UpdateUserDto, CompleteRegistrationDto, UserResponseDto, SetSuperAdminDto
         │   ├── roles/            # Roles SYSTEM/ORG + permisos por módulo/acción
         │   │   └── permissions.seeder.ts  # Siembra catálogo de permisos en cada arranque
         │   ├── data-source.ts    # DataSource para CLI de TypeORM (migraciones)
@@ -109,6 +110,8 @@ document-management-system/
         │   ├── auth-client/      # HTTP client hacia auth-service
         │   ├── common/
         │   │   ├── decorators/   # @OrgId(), @RequireSuperAdmin()
+        │   │   ├── kafka/        # KafkaProducerService — emite user.invited
+        │   │   ├── redis/        # RedisModule global — invitation tokens con TTL 72h
         │   │   └── ...           # Logger Winston, correlation middleware, interceptors
         │   └── health/
         └── .env.example
@@ -375,18 +378,24 @@ Las rutas marcadas con `JWT` requieren header `Authorization: Bearer <token>`.
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| POST | `/api/users` | JWT | Crear usuario |
+| POST | `/api/users` | JWT | Crear usuario → devuelve `invitationToken` (72h, un solo uso) |
+| POST | `/api/users/complete-registration` | — | Completar perfil + crear credenciales con el token de invitación |
 | GET | `/api/users` | JWT | Listar usuarios |
 | GET | `/api/users/:id` | JWT | Obtener usuario |
 | GET | `/api/users/by-email/:email` | JWT | Buscar por email |
 | PATCH | `/api/users/:id` | JWT | Actualizar usuario |
 | DELETE | `/api/users/:id` | JWT | Soft delete de usuario |
 | POST | `/api/users/:id/restore` | JWT | Restaurar usuario eliminado |
-| POST | `/api/users/:id/provision` | JWT | Provisionar credenciales en auth-service |
-| POST | `/api/users/:id/restore` | JWT | Restaurar usuario eliminado |
+| POST | `/api/users/:id/provision` | JWT | Provisionar credenciales en auth-service (flujo legacy) |
 | PATCH | `/api/users/:id/super-admin` | JWT (super admin) | Promover/revocar super admin |
 | GET | `/api/users/:id/companies` | `x-internal-token` | Orgs del usuario (uso interno) |
 
+> **Flujo de invitación:**
+> `POST /api/users` genera un token hex de 64 chars, lo almacena en Redis con TTL 72h y
+> emite el evento Kafka `user.invited`. El admin recibe el token en la respuesta para
+> construir el link: `https://tuapp.com/complete-registration?token=<invitationToken>`.
+> El token se invalida al usarse (un solo uso).
+>
 > `PATCH /api/users/:id/super-admin` requiere que el caller tenga `isSuperAdmin: true`
 > en su JWT. Solo un super admin puede promover o revocar a otro.
 >
@@ -544,6 +553,13 @@ DB_HOST                = ${{Postgres.PGHOST}}
 DB_PORT                = ${{Postgres.PGPORT}}
 DB_USERNAME            = ${{Postgres.PGUSER}}
 DB_PASSWORD            = ${{Postgres.PGPASSWORD}}
+
+REDIS_HOST             = ${{Redis.REDISHOST}}
+REDIS_PORT             = ${{Redis.REDISPORT}}
+REDIS_PASSWORD         = ${{Redis.REDISPASSWORD}}
+
+KAFKA_BROKER           = <broker:9092>
+KAFKA_CLIENT_ID        = user-service
 
 INTERNAL_TOKEN         = <mismo valor que auth-service en el mismo entorno>
 AUTH_SERVICE_URL       = http://auth-service.railway.internal:3000

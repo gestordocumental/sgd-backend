@@ -6,6 +6,7 @@ import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { AuthClientService } from '../auth-client/auth-client.service';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -45,8 +46,13 @@ describe('UsersService', () => {
   let usersRepo: jest.Mocked<Repository<User>>;
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
   let authClient: jest.Mocked<AuthClientService>;
+  let redis: { get: jest.Mock; setex: jest.Mock; del: jest.Mock };
+  let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit'>>;
 
   beforeEach(async () => {
+    redis = { get: jest.fn(), setex: jest.fn(), del: jest.fn() };
+    kafkaProducer = { emit: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
@@ -79,6 +85,14 @@ describe('UsersService', () => {
             enableCredentials: jest.fn(),
           },
         },
+        {
+          provide: 'REDIS_CLIENT',
+          useValue: redis,
+        },
+        {
+          provide: KafkaProducerService,
+          useValue: kafkaProducer,
+        },
       ],
     }).compile();
 
@@ -91,13 +105,14 @@ describe('UsersService', () => {
   // ─── create ───────────────────────────────────────────────────────────────
 
   describe('create', () => {
-    it('creates a new user when no record exists for that email', async () => {
+    it('creates a new user, stores invitation token in Redis, and returns { user, invitationToken }', async () => {
       const dto = { email: 'new@example.com', position: 'Developer' };
       const user = makeUser({ email: dto.email });
 
       usersRepo.findOne.mockResolvedValue(null);
       usersRepo.create.mockReturnValue(user);
       usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
 
       const result = await service.create(dto);
 
@@ -106,7 +121,46 @@ describe('UsersService', () => {
         withDeleted: true,
       });
       expect(usersRepo.create).toHaveBeenCalledWith(dto);
-      expect(result).toEqual(user);
+      expect(redis.setex).toHaveBeenCalledWith(
+        expect.stringMatching(/^invitation:[a-f0-9]{64}$/),
+        259200,
+        user.id,
+      );
+      expect(result.user).toEqual(user);
+      expect(result.invitationToken).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it('emits user.invited Kafka event after creating the user', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(kafkaProducer.emit).toHaveBeenCalledWith(
+        'user.invited',
+        expect.objectContaining({ userId: user.id, email: user.email }),
+      );
+    });
+
+    it('still returns successfully when Kafka emit fails', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+      kafkaProducer.emit.mockRejectedValue(new Error('Kafka unavailable'));
+
+      const result = await service.create(dto);
+
+      expect(result.user).toEqual(user);
+      expect(result.invitationToken).toMatch(/^[a-f0-9]{64}$/);
     });
 
     it('throws ConflictException with userId when a soft-deleted user exists for that email', async () => {
@@ -456,6 +510,59 @@ describe('UsersService', () => {
       await expect(service.removeFromOrg('bad-id', 'org-uuid-1')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  // ─── completeRegistration ─────────────────────────────────────────────────
+
+  describe('completeRegistration', () => {
+    const validToken = 'a'.repeat(64);
+    const dto = {
+      token: validToken,
+      firstName: 'Juan',
+      lastName: 'Perez',
+      idNumber: 'CC123',
+      password: 'Str0ng@Pass',
+    };
+
+    it('updates profile, provisions credentials, deletes token and returns UserResponseDto', async () => {
+      const user = makeUser({ firstName: dto.firstName, lastName: dto.lastName });
+
+      redis.get.mockResolvedValue(user.id);
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      authClient.provisionCredentials.mockResolvedValue(undefined);
+      redis.del.mockResolvedValue(1);
+
+      const result = await service.completeRegistration(dto);
+
+      expect(redis.get).toHaveBeenCalledWith(`invitation:${validToken}`);
+      expect(authClient.provisionCredentials).toHaveBeenCalledWith({
+        userId: user.id,
+        email: user.email,
+        password: dto.password,
+      });
+      expect(redis.del).toHaveBeenCalledWith(`invitation:${validToken}`);
+      expect(result.email).toBe(user.email);
+    });
+
+    it('throws NotFoundException when the token does not exist in Redis', async () => {
+      redis.get.mockResolvedValue(null);
+
+      await expect(service.completeRegistration(dto)).rejects.toThrow(NotFoundException);
+      expect(redis.del).not.toHaveBeenCalled();
+    });
+
+    it('does not delete the token when provisionCredentials fails', async () => {
+      const user = makeUser();
+
+      redis.get.mockResolvedValue(user.id);
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      authClient.provisionCredentials.mockRejectedValue(new Error('auth-service down'));
+
+      await expect(service.completeRegistration(dto)).rejects.toThrow('auth-service down');
+      expect(redis.del).not.toHaveBeenCalled();
     });
   });
 });
