@@ -1,4 +1,4 @@
-import { IsEmail, IsString, IsNotEmpty } from 'class-validator';
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateUserDto {
@@ -11,4 +11,8 @@ export class CreateUserDto {
   @IsString()
   @IsNotEmpty()
   position!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isSuperAdmin?: boolean;
 }

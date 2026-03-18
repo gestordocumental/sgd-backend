@@ -43,6 +43,11 @@ export class UsersController {
     return (await this.usersService.findAll()).map(UserResponseDto.from);
   }
 
+  @Get("super-admins")
+  async findAllSuperAdmin(): Promise<UserResponseDto[]> {
+    return (await this.usersService.findAllSuperAdmin()).map(UserResponseDto.from);
+  }
+
   @Get("by-email/:email")
   async findByEmail(@Param("email") email: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findByEmail(email));

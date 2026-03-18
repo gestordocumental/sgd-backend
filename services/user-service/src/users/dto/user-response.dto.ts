@@ -1,4 +1,4 @@
-import { User } from '../entities/user.entity';
+import { User, RegistrationStatus } from '../entities/user.entity';
 
 export class UserResponseDto {
   id!: string;
@@ -6,6 +6,7 @@ export class UserResponseDto {
   firstName!: string | null;
   lastName!: string | null;
   position!: string;
+  registrationStatus!: RegistrationStatus;
   isActive!: boolean;
   isSuperAdmin!: boolean;
   createdAt!: Date;
@@ -13,15 +14,16 @@ export class UserResponseDto {
 
   static from(user: User): UserResponseDto {
     const dto = new UserResponseDto();
-    dto.id           = user.id;
-    dto.email        = user.email;
-    dto.firstName    = user.firstName;
-    dto.lastName     = user.lastName;
-    dto.position     = user.position;
-    dto.isActive     = user.isActive;
-    dto.isSuperAdmin = user.isSuperAdmin;
-    dto.createdAt    = user.createdAt;
-    dto.updatedAt    = user.updatedAt;
+    dto.id                 = user.id;
+    dto.email              = user.email;
+    dto.firstName          = user.firstName;
+    dto.lastName           = user.lastName;
+    dto.position           = user.position;
+    dto.registrationStatus = user.registrationStatus;
+    dto.isActive           = user.isActive;
+    dto.isSuperAdmin       = user.isSuperAdmin;
+    dto.createdAt          = user.createdAt;
+    dto.updatedAt          = user.updatedAt;
     return dto;
   }
 }
