@@ -31,7 +31,7 @@ import { RedisModule } from './common/redis/redis.module';
           password: config.get<string>('DB_PASSWORD'),
           database: config.get<string>('DB_NAME'),
           entities: [User, Role, Permission, UserOrgRole],
-          synchronize: config.get('NODE_ENV') === 'development',
+          synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
         };

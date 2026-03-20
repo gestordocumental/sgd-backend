@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  UseGuards,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { timingSafeEqual } from "crypto";
@@ -24,8 +25,12 @@ import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
 import { RequireSuperAdmin } from "../common/decorators/require-super-admin.decorator";
 import { CurrentUserId } from "../common/decorators/current-user-id.decorator";
+import { PermissionsGuard } from "../common/guards/permissions.guard";
+import { RequirePermission } from "../common/decorators/require-permission.decorator";
+import { PermissionModule, PermissionAction } from "../roles/entities/permission.entity";
 
 @Controller("api/users")
+@UseGuards(PermissionsGuard)
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
@@ -33,22 +38,26 @@ export class UsersController {
   ) {}
 
   @Post()
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async create(@Body() dto: CreateUserDto) {
     const { user, invitationToken } = await this.usersService.create(dto);
     return { ...UserResponseDto.from(user), invitationToken };
   }
 
   @Get()
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAll(): Promise<UserResponseDto[]> {
     return (await this.usersService.findAll()).map(UserResponseDto.from);
   }
 
   @Get("super-admins")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAllSuperAdmin(): Promise<UserResponseDto[]> {
     return (await this.usersService.findAllSuperAdmin()).map(UserResponseDto.from);
   }
 
   @Get("by-email/:email")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByEmail(@Param("email") email: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findByEmail(email));
   }
@@ -70,11 +79,13 @@ export class UsersController {
   }
 
   @Get(":id")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findOne(@Param("id") id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findOne(id));
   }
 
   @Patch(":id")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async update(
     @Param("id") id: string,
     @Body() dto: UpdateUserDto,
@@ -84,11 +95,13 @@ export class UsersController {
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.DELETE)
   remove(@Param("id") id: string) {
     return this.usersService.remove(id);
   }
 
   @Post(":id/restore")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async restore(@Param("id") id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.restore(id));
   }
@@ -114,6 +127,7 @@ export class UsersController {
 
   @Post(":id/orgs")
   @HttpCode(HttpStatus.CREATED)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   async assignOrg(
     @CurrentUserId() callerId: string,
     @Param("id") id: string,
@@ -125,6 +139,7 @@ export class UsersController {
   }
 
   @Get(":id/orgs")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async getOrgRoles(
     @Param("id") id: string,
   ): Promise<UserOrgRoleResponseDto[]> {
@@ -133,6 +148,7 @@ export class UsersController {
 
   @Delete(":id/orgs/:orgId")
   @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   removeFromOrg(
     @Param("id") id: string,
     @Param("orgId") orgId: string,

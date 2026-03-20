@@ -6,6 +6,7 @@ import { UsersController } from './users.controller';
 import { AuthClientModule } from '../auth-client/auth-client.module';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { KafkaModule } from '../common/kafka/kafka.module';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { KafkaModule } from '../common/kafka/kafka.module';
     KafkaModule,
   ],
   controllers: [UsersController],
-  providers: [UsersService],
+  providers: [UsersService, PermissionsGuard],
   exports: [UsersService],
 })
 export class UsersModule {}

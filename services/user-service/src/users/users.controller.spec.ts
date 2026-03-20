@@ -3,7 +3,7 @@ import { ConflictException, NotFoundException, UnauthorizedException } from '@ne
 import { ConfigService } from '@nestjs/config';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
-import { User } from './entities/user.entity';
+import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserOrgRoleResponseDto } from './dto/user-org-role-response.dto';
@@ -20,6 +20,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   idNumber: null,
   position: 'Developer',
   isActive: true,
+  registrationStatus: overrides.registrationStatus ?? RegistrationStatus.ACTIVE,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],

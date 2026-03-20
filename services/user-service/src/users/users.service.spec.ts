@@ -3,7 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { UsersService } from './users.service';
-import { User } from './entities/user.entity';
+import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { AuthClientService } from '../auth-client/auth-client.service';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
@@ -18,6 +18,8 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   idNumber: null,
   position: 'Developer',
   isActive: true,
+  registrationStatus: 
+    overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],
