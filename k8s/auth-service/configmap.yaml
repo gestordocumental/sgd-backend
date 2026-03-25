@@ -21,7 +21,7 @@ data:
 
   # JWT
   JWT_EXPIRATION: "3600s"
-  JWT_REFRESH_EXPIRATION: "7d"
+  JWT_REFRESH_EXPIRATION: "12h"
 
   # Internal URL of user-service within the cluster
   USER_SERVICE_URL: "http://user-service.gestor-documental.svc.cluster.local"

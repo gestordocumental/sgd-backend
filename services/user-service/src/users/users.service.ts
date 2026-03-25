@@ -7,7 +7,7 @@ import {
   Inject,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { IsNull, Repository } from "typeorm";
 import { randomBytes } from "crypto";
 import Redis from "ioredis";
 import { User, RegistrationStatus } from "./entities/user.entity";
@@ -19,6 +19,7 @@ import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
 import { UserResponseDto } from "./dto/user-response.dto";
 import { AuthClientService } from "../auth-client/auth-client.service";
 import { UserOrgRole } from "../roles/entities/user-org-role.entity";
+import { Role, SystemRoleName, RoleScope } from "../roles/entities/role.entity";
 import { KafkaProducerService } from "../common/kafka/kafka-producer.service";
 
 const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
@@ -30,6 +31,8 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepository: Repository<UserOrgRole>,
+    @InjectRepository(Role)
+    private readonly roleRepository: Repository<Role>,
     private readonly authClientService: AuthClientService,
     @Inject("REDIS_CLIENT")
     private readonly redis: Redis,
@@ -64,6 +67,22 @@ export class UsersService {
 
     const user = this.usersRepository.create(dto);
     await this.usersRepository.save(user);
+
+    // Auto-assign ADMIN role in the org if orgId was provided
+    if (dto.orgId) {
+      const adminRole = await this.roleRepository.findOne({
+        where: { name: SystemRoleName.ADMIN, scope: RoleScope.SYSTEM, orgId: IsNull() },
+      });
+      if (adminRole) {
+        const record = this.userOrgRoleRepository.create({
+          userId: user.id,
+          orgId: dto.orgId,
+          roleId: adminRole.id,
+          assignedBy: null,
+        });
+        await this.userOrgRoleRepository.save(record);
+      }
+    }
 
     // Generate a cryptographically secure one-time invitation token
     const token = randomBytes(32).toString("hex");
@@ -200,6 +219,27 @@ export class UsersService {
       assignedBy,
     });
     return this.userOrgRoleRepository.save(record);
+  }
+
+  async findByOrg(orgId: string): Promise<{ user: User; roles: { roleId: string; roleName: string }[] }[]> {
+    const orgRoles = await this.userOrgRoleRepository.find({
+      where: { orgId },
+      relations: ['role'],
+    });
+
+    if (orgRoles.length === 0) return [];
+
+    const userIds = [...new Set(orgRoles.map((r) => r.userId))];
+    const users = await this.usersRepository.find({
+      where: userIds.map((id) => ({ id })),
+    });
+
+    return users.map((user) => ({
+      user,
+      roles: orgRoles
+        .filter((r) => r.userId === user.id)
+        .map((r) => ({ roleId: r.roleId, roleName: r.role.name })),
+    }));
   }
 
   async getOrgRoles(userId: string): Promise<UserOrgRole[]> {

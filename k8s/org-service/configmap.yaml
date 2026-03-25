@@ -15,4 +15,7 @@ data:
   DB_PORT: "5432"
   DB_NAME: "org_db"
 
+  # Internal URL del user-service dentro del cluster
+  USER_SERVICE_URL: "http://user-service.gestor-documental.svc.cluster.local"
+
   HEALTH_PATH: "/health"

@@ -18,8 +18,8 @@ import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
 
-// TTL del refresh token en Redis (debe coincidir con JWT_REFRESH_EXPIRATION: 7d)
-const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
+// TTL del refresh token en Redis (debe coincidir con JWT_REFRESH_EXPIRATION: 12h)
+const REFRESH_TTL_SECONDS = 12 * 60 * 60;
 
 interface TokenOptions {
   companyId?: string;

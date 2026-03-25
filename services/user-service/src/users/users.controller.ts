@@ -9,6 +9,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  ParseUUIDPipe,
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
@@ -21,6 +22,7 @@ import { ProvisionUserDto } from "./dto/provision-user.dto";
 import { AssignOrgDto } from "./dto/assign-org.dto";
 import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
 import { UserResponseDto } from "./dto/user-response.dto";
+import { UserWithOrgRolesDto } from "./dto/user-with-org-roles.dto";
 import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
 import { RequireSuperAdmin } from "../common/decorators/require-super-admin.decorator";
@@ -60,6 +62,16 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByEmail(@Param("email") email: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findByEmail(email));
+  }
+
+  @Get('by-org/:orgId')
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
+  async findByOrg(
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+  ): Promise<UserWithOrgRolesDto[]> {
+    return (await this.usersService.findByOrg(orgId)).map(({ user, roles }) =>
+      UserWithOrgRolesDto.fromUserAndRoles(user, roles),
+    );
   }
 
   @Get(":id/companies")

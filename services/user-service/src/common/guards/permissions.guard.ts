@@ -6,8 +6,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { timingSafeEqual } from 'crypto';
 import { UserOrgRole } from '../../roles/entities/user-org-role.entity';
 import { PERMISSION_KEY } from '../decorators/require-permission.decorator';
 import { PermissionModule, PermissionAction } from '../../roles/entities/permission.entity';
@@ -16,6 +18,7 @@ import { PermissionModule, PermissionAction } from '../../roles/entities/permiss
 export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
+    private readonly configService: ConfigService,
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepo: Repository<UserOrgRole>,
   ) {}
@@ -30,6 +33,17 @@ export class PermissionsGuard implements CanActivate {
     if (!required) return true;
 
     const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string> }>();
+
+    // Llamadas internas entre microservicios — omitir validación JWT
+    const internalToken = request.headers['x-internal-token'];
+    if (internalToken) {
+      const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+      const provided = Buffer.from(internalToken);
+      const isValid =
+        provided.length === expected.length && timingSafeEqual(expected, provided);
+      if (isValid) return true;
+    }
+
     const auth = request.headers['authorization'];
 
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
