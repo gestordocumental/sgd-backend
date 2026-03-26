@@ -11,6 +11,7 @@ import {
   HttpStatus,
   ParseUUIDPipe,
   UnauthorizedException,
+  ForbiddenException,
   UseGuards,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -27,6 +28,7 @@ import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
 import { RequireSuperAdmin } from "../common/decorators/require-super-admin.decorator";
 import { CurrentUserId } from "../common/decorators/current-user-id.decorator";
+import { JwtPayloadParam, JwtPayload } from "../common/decorators/jwt-payload.decorator";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
 import { PermissionModule, PermissionAction } from "../roles/entities/permission.entity";
@@ -41,7 +43,20 @@ export class UsersController {
 
   @Post()
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
-  async create(@Body() dto: CreateUserDto) {
+  async create(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Body() dto: CreateUserDto,
+  ) {
+    // Only super admins can create super admin users
+    if (dto.isSuperAdmin && !caller.isSuperAdmin) {
+      throw new ForbiddenException('Only super admins can grant super admin privileges');
+    }
+
+    // orgId must belong to the caller's own org unless they are a super admin
+    if (dto.orgId && !caller.isSuperAdmin && dto.orgId !== caller.companyId) {
+      throw new ForbiddenException('You can only assign users to your own organization');
+    }
+
     const { user, invitationToken } = await this.usersService.create(dto);
     return { ...UserResponseDto.from(user), invitationToken };
   }

@@ -378,7 +378,7 @@ Las rutas marcadas con `JWT` requieren header `Authorization: Bearer <token>`.
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| POST | `/api/users` | JWT | Crear usuario → devuelve `invitationToken` (72h, un solo uso) |
+| POST | `/api/users` | JWT | Crear usuario → genera invitación de registro (token de un solo uso, 72h) |
 | POST | `/api/users/complete-registration` | — | Completar perfil + crear credenciales con el token de invitación |
 | GET | `/api/users` | JWT | Listar usuarios |
 | GET | `/api/users/:id` | JWT | Obtener usuario |

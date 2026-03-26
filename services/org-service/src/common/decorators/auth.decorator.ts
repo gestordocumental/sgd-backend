@@ -18,7 +18,7 @@ export const SuperAdminOnly = () =>
 /**
  * Requires the caller to be a super admin OR that their companyId in the JWT
  * matches the :id parameter of the route.
- * Also allows internal calls with x-internal-token.
+ * Internal calls with x-internal-token are also allowed (non-superAdminOnly only).
  */
 export const OrgMemberOrSuperAdmin = () =>
   SetMetadata<string, AuthMeta>(AUTH_KEY, { orgMember: true });

@@ -16,7 +16,7 @@ export class OrgsService {
     private readonly orgRepo: Repository<Org>,
   ) {}
 
-  async create(dto: CreateOrgDto, createdBy: string | null): Promise<Org> {
+  async create(dto: CreateOrgDto, createdBy: string): Promise<Org> {
     const existing = await this.orgRepo.findOne({ where: { name: dto.name } });
     if (existing) {
       throw new ConflictException(`Organization with name "${dto.name}" already exists`);

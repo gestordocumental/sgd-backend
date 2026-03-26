@@ -16,7 +16,7 @@ export class CompleteRegistrationDto {
   @IsNotEmpty()
   lastName!: string;
 
-  @Transform(({ value }) => (value as string)?.toUpperCase().trim())
+  @Transform(({ value }) => (typeof value === 'string' ? value.toUpperCase().trim() : value))
   @IsString()
   @IsOptional()
   idNumber?: string;

@@ -28,14 +28,16 @@ export class OrgGuard implements CanActivate {
       params: Record<string, string>;
     }>();
 
-    // Internal calls between microservices — always allowed
-    const internalToken = request.headers['x-internal-token'];
-    if (internalToken) {
-      const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
-      const provided = Buffer.from(internalToken);
-      const isValid =
-        provided.length === expected.length && timingSafeEqual(expected, provided);
-      if (isValid) return true;
+    // Internal calls between microservices — only allowed for non-superAdminOnly endpoints
+    if (!meta.superAdminOnly) {
+      const internalToken = request.headers['x-internal-token'];
+      if (internalToken) {
+        const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+        const provided = Buffer.from(internalToken);
+        const isValid =
+          provided.length === expected.length && timingSafeEqual(expected, provided);
+        if (isValid) return true;
+      }
     }
 
     // Decode the JWT (Kong already verified the signature)

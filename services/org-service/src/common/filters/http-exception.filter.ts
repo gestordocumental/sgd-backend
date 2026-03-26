@@ -17,6 +17,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx    = host.switchToHttp();
     const req    = ctx.getRequest<Request>();
     const res    = ctx.getResponse<Response>();
+    const path   = req.path;
 
     const isHttp   = exception instanceof HttpException;
     const status   = isHttp ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
@@ -32,18 +33,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode:    status,
       correlationId: getCorrelationId(),
       timestamp:     new Date().toISOString(),
-      path:          req.url,
+      path,
     };
 
     if (status >= 500) {
       this.logger.error(
-        `Unhandled exception on ${req.method} ${req.url}`,
+        `Unhandled exception on ${req.method} ${path}`,
         exception instanceof Error ? exception.stack : String(exception),
         'HttpExceptionFilter',
       );
     } else {
       this.logger.warn(
-        `${req.method} ${req.url} → ${status}`,
+        `${req.method} ${path} → ${status}`,
         'HttpExceptionFilter',
       );
     }

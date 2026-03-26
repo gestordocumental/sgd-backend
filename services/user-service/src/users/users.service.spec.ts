@@ -82,6 +82,11 @@ describe('UsersService', () => {
             save: jest.fn(),
             softRemove: jest.fn(),
             restore: jest.fn(),
+            manager: {
+              transaction: jest.fn().mockImplementation(async (cb: (m: any) => Promise<void>) => {
+                await cb({ save: jest.fn() });
+              }),
+            },
           },
         },
         {

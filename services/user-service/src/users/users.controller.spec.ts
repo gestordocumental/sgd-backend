@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersController } from './users.controller';
@@ -95,13 +95,14 @@ describe('UsersController', () => {
 
   describe('create', () => {
     it('returns a UserResponseDto with invitationToken after creating a user', async () => {
-      const dto = { email: 'new@example.com', position: 'Dev' };
-      const user = makeUser(dto);
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+      const dto = { email: 'new@example.com', position: 'Dev', orgId: 'org-uuid-1' };
+      const user = makeUser({ email: dto.email, position: dto.position });
       const invitationToken = 'a'.repeat(64);
 
       usersService.create.mockResolvedValue({ user, invitationToken });
 
-      const result = await controller.create(dto as any);
+      const result = await controller.create(caller, dto as any);
 
       expect(usersService.create).toHaveBeenCalledWith(dto);
       expect(result.email).toBe(user.email);
@@ -109,13 +110,37 @@ describe('UsersController', () => {
     });
 
     it('propagates ConflictException from the service', async () => {
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+
       usersService.create.mockRejectedValue(
         new ConflictException({ message: 'User already exists', userId: 'existing-id' }),
       );
 
-      await expect(controller.create({ email: 'x@x.com' } as any)).rejects.toThrow(
-        ConflictException,
+      await expect(
+        controller.create(caller, { email: 'x@x.com', orgId: 'org-uuid-1' } as any),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws ForbiddenException when a non-super-admin tries to create a super admin user', async () => {
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+      const dto = { email: 'super@example.com', isSuperAdmin: true };
+
+      await expect(controller.create(caller, dto as any)).rejects.toThrow(
+        new ForbiddenException('Only super admins can grant super admin privileges'),
       );
+
+      expect(usersService.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when a non-super-admin tries to assign a user to a different org', async () => {
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+      const dto = { email: 'other@example.com', orgId: 'org-uuid-999' };
+
+      await expect(controller.create(caller, dto as any)).rejects.toThrow(
+        new ForbiddenException('You can only assign users to your own organization'),
+      );
+
+      expect(usersService.create).not.toHaveBeenCalled();
     });
   });
 

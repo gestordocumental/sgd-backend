@@ -21,6 +21,7 @@ export class UpdateOrgDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   address?: string;
 
   @IsOptional()

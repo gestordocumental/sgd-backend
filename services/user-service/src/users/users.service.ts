@@ -71,7 +71,11 @@ export class UsersService {
     // Auto-assign ADMIN role in the org if orgId was provided
     if (dto.orgId) {
       const adminRole = await this.roleRepository.findOne({
-        where: { name: SystemRoleName.ADMIN, scope: RoleScope.SYSTEM, orgId: IsNull() },
+        where: {
+          name: SystemRoleName.ADMIN,
+          scope: RoleScope.SYSTEM,
+          orgId: IsNull(),
+        },
       });
       if (adminRole) {
         const record = this.userOrgRoleRepository.create({
@@ -221,10 +225,12 @@ export class UsersService {
     return this.userOrgRoleRepository.save(record);
   }
 
-  async findByOrg(orgId: string): Promise<{ user: User; roles: { roleId: string; roleName: string }[] }[]> {
+  async findByOrg(
+    orgId: string,
+  ): Promise<{ user: User; roles: { roleId: string; roleName: string }[] }[]> {
     const orgRoles = await this.userOrgRoleRepository.find({
       where: { orgId },
-      relations: ['role'],
+      relations: ["role"],
     });
 
     if (orgRoles.length === 0) return [];
@@ -289,13 +295,17 @@ export class UsersService {
       );
     }
 
-    // Consume the token — one-time use only
-    await this.redis.del(`invitation:${dto.token}`);
+    // Use a transaction to ensure atomicity
+    await this.usersRepository.manager.transaction(async (manager) => {
+      // Consume the token — one-time use only
+      await this.redis.del(`invitation:${dto.token}`);
 
-    // Credentials created successfully — mark registration as complete and activate account
-    user.registrationStatus = RegistrationStatus.ACTIVE;
-    user.isActive = true;
-    const completedUser = await this.usersRepository.save(user);
+      // Credentials created successfully — mark registration as complete and activate account
+      user.registrationStatus = RegistrationStatus.ACTIVE;
+      user.isActive = true;
+      await manager.save(user);
+    });
+    const completedUser = await this.findOne(user.id);
 
     return UserResponseDto.from(completedUser);
   }

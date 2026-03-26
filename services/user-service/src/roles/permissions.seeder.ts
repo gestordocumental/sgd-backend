@@ -60,7 +60,7 @@ export class PermissionsSeeder implements OnApplicationBootstrap {
       .insert()
       .into(Permission)
       .values(PERMISSIONS_CATALOG)
-      .orIgnore() // ON CONFLICT (module, action) DO NOTHING
+      .orUpdate(['description'], ['module', 'action'])
       .execute();
 
     this.logger.log(`Permissions catalog synced (${PERMISSIONS_CATALOG.length} entries)`);

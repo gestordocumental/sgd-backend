@@ -18,6 +18,7 @@ export class CreateOrgDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   address?: string;
 
   @IsOptional()
