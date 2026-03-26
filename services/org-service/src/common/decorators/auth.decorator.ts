@@ -3,22 +3,22 @@ import { SetMetadata } from '@nestjs/common';
 export const AUTH_KEY = 'org_auth';
 
 export interface AuthMeta {
-  /** Solo super admins pueden acceder */
+  /** Only super admins can access */
   superAdminOnly?: boolean;
-  /** Super admin O usuario cuyo companyId en el JWT coincide con el :id del param */
+  /** Super admin OR user whose companyId in the JWT matches the :id route param */
   orgMember?: boolean;
 }
 
 /**
- * Requiere que el caller sea super admin (isSuperAdmin claim en el JWT).
+ * Requires the caller to be a super admin (isSuperAdmin claim in the JWT).
  */
 export const SuperAdminOnly = () =>
   SetMetadata<string, AuthMeta>(AUTH_KEY, { superAdminOnly: true });
 
 /**
- * Requiere que el caller sea super admin O que su companyId en el JWT
- * coincida con el parámetro :id de la ruta.
- * También permite llamadas internas con x-internal-token.
+ * Requires the caller to be a super admin OR that their companyId in the JWT
+ * matches the :id parameter of the route.
+ * Also allows internal calls with x-internal-token.
  */
 export const OrgMemberOrSuperAdmin = () =>
   SetMetadata<string, AuthMeta>(AUTH_KEY, { orgMember: true });

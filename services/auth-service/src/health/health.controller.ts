@@ -15,19 +15,19 @@ export class HealthController {
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
-  // startupProbe: ¿arrancó el proceso? Sí si llegamos aquí.
+  // startupProbe: Did the process start? Yes if we get here.
   @Get('startup')
   startup() {
     return { status: 'ok', service: 'auth-service' };
   }
 
-  // livenessProbe: ¿está vivo el proceso? (no deadlocked)
+  // livenessProbe: Is the process alive? (not deadlocked)
   @Get('live')
   live() {
     return { status: 'ok', service: 'auth-service' };
   }
 
-  // readinessProbe: ¿puede atender tráfico? Requiere DB y Redis operativos.
+  // readinessProbe: Can it handle traffic? Requires DB and Redis to be operational.
   @Get('ready')
   @HealthCheck()
   async ready() {

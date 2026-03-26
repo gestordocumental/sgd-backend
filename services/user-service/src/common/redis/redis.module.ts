@@ -2,7 +2,7 @@ import { Module, Global } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
-// Global para que cualquier módulo pueda inyectar REDIS_CLIENT sin importar RedisModule
+// Global so any module can inject REDIS_CLIENT without importing RedisModule
 @Global()
 @Module({
   providers: [
@@ -13,7 +13,7 @@ import Redis from 'ioredis';
         new Redis({
           host: config.get<string>('REDIS_HOST'),
           port: config.get<number>('REDIS_PORT'),
-          // password vacío ("") → undefined para que ioredis no mande AUTH
+          // empty password ("") → undefined so ioredis does not send AUTH
           password: config.get<string>('REDIS_PASSWORD') || undefined,
           lazyConnect: false,
         }),

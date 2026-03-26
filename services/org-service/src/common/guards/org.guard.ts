@@ -20,7 +20,7 @@ export class OrgGuard implements CanActivate {
   canActivate(ctx: ExecutionContext): boolean {
     const meta = this.reflector.get<AuthMeta | undefined>(AUTH_KEY, ctx.getHandler());
 
-    // Endpoints sin decorador de auth pasan directamente (ej: health)
+    // Endpoints without auth decorator pass through directly (e.g.: health)
     if (!meta) return true;
 
     const request = ctx.switchToHttp().getRequest<{
@@ -28,7 +28,7 @@ export class OrgGuard implements CanActivate {
       params: Record<string, string>;
     }>();
 
-    // Llamadas internas entre microservicios — siempre permitidas
+    // Internal calls between microservices — always allowed
     const internalToken = request.headers['x-internal-token'];
     if (internalToken) {
       const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
@@ -38,7 +38,7 @@ export class OrgGuard implements CanActivate {
       if (isValid) return true;
     }
 
-    // Decodificar el JWT (Kong ya verificó la firma)
+    // Decode the JWT (Kong already verified the signature)
     const auth = request.headers['authorization'];
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
 
@@ -52,7 +52,7 @@ export class OrgGuard implements CanActivate {
       throw new UnauthorizedException('Malformed token');
     }
 
-    // Super admin tiene acceso a todo
+    // Super admin has access to everything
     if (payload.isSuperAdmin) return true;
 
     if (meta.superAdminOnly) {

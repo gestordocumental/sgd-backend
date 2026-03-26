@@ -1,14 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { UsersService } from './users.service';
 import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
+import { Role, RoleScope, SystemRoleName } from '../roles/entities/role.entity';
 import { AuthClientService } from '../auth-client/auth-client.service';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+const makeRole = (overrides: Partial<Role> = {}): Role => ({
+  id: 'role-uuid-admin',
+  name: SystemRoleName.ADMIN,
+  scope: RoleScope.SYSTEM,
+  description: null,
+  isSystem: true,
+  orgId: null,
+  permissions: [],
+  userOrgRoles: [],
+  createdAt: new Date('2024-01-01'),
+  ...overrides,
+});
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'user-uuid-1',
@@ -47,6 +61,7 @@ describe('UsersService', () => {
   let service: UsersService;
   let usersRepo: jest.Mocked<Repository<User>>;
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
+  let roleRepo: jest.Mocked<Repository<Role>>;
   let authClient: jest.Mocked<AuthClientService>;
   let redis: { get: jest.Mock; setex: jest.Mock; del: jest.Mock };
   let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit'>>;
@@ -80,6 +95,12 @@ describe('UsersService', () => {
           },
         },
         {
+          provide: getRepositoryToken(Role),
+          useValue: {
+            findOne: jest.fn(),
+          },
+        },
+        {
           provide: AuthClientService,
           useValue: {
             provisionCredentials: jest.fn(),
@@ -101,6 +122,7 @@ describe('UsersService', () => {
     service = module.get(UsersService);
     usersRepo = module.get(getRepositoryToken(User));
     uorRepo = module.get(getRepositoryToken(UserOrgRole));
+    roleRepo = module.get(getRepositoryToken(Role));
     authClient = module.get(AuthClientService);
   });
 
@@ -193,6 +215,70 @@ describe('UsersService', () => {
       } catch (err: any) {
         expect(err.response).toMatchObject({ userId: existingUser.id });
       }
+    });
+
+    it('finds the ADMIN system role and creates a UserOrgRole when orgId is provided', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1' };
+      const user = makeUser({ email: dto.email });
+      const adminRole = makeRole();
+      const uor = makeUor({ roleId: adminRole.id });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(adminRole);
+      uorRepo.create.mockReturnValue(uor);
+      uorRepo.save.mockResolvedValue(uor);
+      redis.setex.mockResolvedValue('OK');
+
+      const result = await service.create(dto);
+
+      expect(roleRepo.findOne).toHaveBeenCalledWith({
+        where: { name: SystemRoleName.ADMIN, scope: RoleScope.SYSTEM, orgId: IsNull() },
+      });
+      expect(uorRepo.create).toHaveBeenCalledWith({
+        userId: user.id,
+        orgId: dto.orgId,
+        roleId: adminRole.id,
+        assignedBy: null,
+      });
+      expect(uorRepo.save).toHaveBeenCalled();
+      expect(result.user).toEqual(user);
+    });
+
+    it('still creates the user when orgId is provided but ADMIN role is not found', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(null); // ADMIN role not found
+      redis.setex.mockResolvedValue('OK');
+
+      const result = await service.create(dto);
+
+      expect(roleRepo.findOne).toHaveBeenCalled();
+      expect(uorRepo.create).not.toHaveBeenCalled();
+      expect(uorRepo.save).not.toHaveBeenCalled();
+      expect(result.user).toEqual(user);
+      expect(result.invitationToken).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it('does NOT query roleRepository or create UserOrgRole when orgId is not provided', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(roleRepo.findOne).not.toHaveBeenCalled();
+      expect(uorRepo.create).not.toHaveBeenCalled();
+      expect(uorRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -515,6 +601,65 @@ describe('UsersService', () => {
     });
   });
 
+  // ─── findByOrg ────────────────────────────────────────────────────────────
+
+  describe('findByOrg', () => {
+    it('returns users with their roles for a given orgId', async () => {
+      const user = makeUser();
+      const adminRole = makeRole();
+      const orgRole = makeUor({ role: adminRole as any });
+
+      uorRepo.find.mockResolvedValue([orgRole] as any);
+      usersRepo.find.mockResolvedValue([user]);
+
+      const result = await service.findByOrg('org-uuid-1');
+
+      expect(uorRepo.find).toHaveBeenCalledWith({
+        where: { orgId: 'org-uuid-1' },
+        relations: ['role'],
+      });
+      expect(usersRepo.find).toHaveBeenCalledWith({
+        where: [{ id: user.id }],
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0].user).toEqual(user);
+      expect(result[0].roles).toEqual([
+        { roleId: orgRole.roleId, roleName: adminRole.name },
+      ]);
+    });
+
+    it('returns multiple users each with their own roles', async () => {
+      const user1 = makeUser({ id: 'user-uuid-1' });
+      const user2 = makeUser({ id: 'user-uuid-2', email: 'other@example.com' });
+      const role1 = makeRole({ id: 'role-uuid-1', name: SystemRoleName.ADMIN });
+      const role2 = makeRole({ id: 'role-uuid-2', name: SystemRoleName.VIEWER, scope: RoleScope.SYSTEM });
+      const orgRole1 = makeUor({ userId: user1.id, roleId: role1.id, role: role1 as any });
+      const orgRole2 = makeUor({ id: 'uor-uuid-2', userId: user2.id, roleId: role2.id, role: role2 as any });
+
+      uorRepo.find.mockResolvedValue([orgRole1, orgRole2] as any);
+      usersRepo.find.mockResolvedValue([user1, user2]);
+
+      const result = await service.findByOrg('org-uuid-1');
+
+      expect(result).toHaveLength(2);
+      expect(result.find((r) => r.user.id === user1.id)?.roles).toEqual([
+        { roleId: role1.id, roleName: role1.name },
+      ]);
+      expect(result.find((r) => r.user.id === user2.id)?.roles).toEqual([
+        { roleId: role2.id, roleName: role2.name },
+      ]);
+    });
+
+    it('returns an empty array when no users belong to the org', async () => {
+      uorRepo.find.mockResolvedValue([]);
+
+      const result = await service.findByOrg('org-uuid-empty');
+
+      expect(result).toEqual([]);
+      expect(usersRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
   // ─── completeRegistration ─────────────────────────────────────────────────
 
   describe('completeRegistration', () => {
@@ -563,7 +708,9 @@ describe('UsersService', () => {
       usersRepo.save.mockResolvedValue(user);
       authClient.provisionCredentials.mockRejectedValue(new Error('auth-service down'));
 
-      await expect(service.completeRegistration(dto)).rejects.toThrow('auth-service down');
+      await expect(service.completeRegistration(dto)).rejects.toThrow(
+        'Error creating access credentials',
+      );
       expect(redis.del).not.toHaveBeenCalled();
     });
   });

@@ -19,7 +19,7 @@ import { OrgResponseDto } from './dto/org-response.dto';
 import { OrgGuard } from '../common/guards/org.guard';
 import { SuperAdminOnly, OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
 
-/** Extrae el userId del JWT sin verificar firma (Kong ya la verificó). */
+/** Extracts the userId from the JWT without verifying the signature (Kong already verified it). */
 function extractUserId(authHeader: string | undefined): string | null {
   if (!authHeader?.startsWith('Bearer ')) return null;
   try {
@@ -38,8 +38,8 @@ export class OrgsController {
   constructor(private readonly orgsService: OrgsService) {}
 
   /**
-   * Crear una organización.
-   * Solo super admin.
+   * Create an organization.
+   * Super admin only.
    */
   @Post()
   @SuperAdminOnly()
@@ -52,8 +52,8 @@ export class OrgsController {
   }
 
   /**
-   * Listar todas las organizaciones.
-   * Solo super admin.
+   * List all organizations.
+   * Super admin only.
    */
   @Get()
   @SuperAdminOnly()
@@ -62,8 +62,8 @@ export class OrgsController {
   }
 
   /**
-   * Obtener una organización por ID.
-   * Super admin, miembro de la org, o llamada interna (x-internal-token).
+   * Get an organization by ID.
+   * Super admin, org member, or internal call (x-internal-token).
    */
   @Get(':id')
   @OrgMemberOrSuperAdmin()
@@ -72,8 +72,8 @@ export class OrgsController {
   }
 
   /**
-   * Actualizar una organización.
-   * Super admin o miembro de la org (para actualizar los datos de su propia org).
+   * Update an organization.
+   * Super admin or org member (to update data for their own org).
    */
   @Patch(':id')
   @OrgMemberOrSuperAdmin()
@@ -85,8 +85,8 @@ export class OrgsController {
   }
 
   /**
-   * Eliminar (soft delete) una organización.
-   * Solo super admin.
+   * Delete (soft delete) an organization.
+   * Super admin only.
    */
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -96,8 +96,8 @@ export class OrgsController {
   }
 
   /**
-   * Restaurar una organización eliminada.
-   * Solo super admin.
+   * Restore a deleted organization.
+   * Super admin only.
    */
   @Post(':id/restore')
   @SuperAdminOnly()

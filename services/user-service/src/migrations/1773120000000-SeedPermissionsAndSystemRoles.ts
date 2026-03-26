@@ -11,30 +11,30 @@ export class SeedPermissionsAndSystemRoles1773120000000 implements MigrationInte
     await queryRunner.query(`
       INSERT INTO permissions (id, module, action, description)
       VALUES
-        (gen_random_uuid(), 'DOCUMENTS', 'READ',     'Ver documentos'),
-        (gen_random_uuid(), 'DOCUMENTS', 'WRITE',    'Crear y editar documentos'),
-        (gen_random_uuid(), 'DOCUMENTS', 'DELETE',   'Eliminar documentos'),
-        (gen_random_uuid(), 'DOCUMENTS', 'APPROVE',  'Aprobar documentos'),
-        (gen_random_uuid(), 'DOCUMENTS', 'UPLOAD',   'Subir archivos'),
-        (gen_random_uuid(), 'DOCUMENTS', 'DOWNLOAD', 'Descargar archivos'),
+        (gen_random_uuid(), 'DOCUMENTS', 'READ',     'View documents'),
+        (gen_random_uuid(), 'DOCUMENTS', 'WRITE',    'Create and edit documents'),
+        (gen_random_uuid(), 'DOCUMENTS', 'DELETE',   'Delete documents'),
+        (gen_random_uuid(), 'DOCUMENTS', 'APPROVE',  'Approve documents'),
+        (gen_random_uuid(), 'DOCUMENTS', 'UPLOAD',   'Upload files'),
+        (gen_random_uuid(), 'DOCUMENTS', 'DOWNLOAD', 'Download files'),
 
-        (gen_random_uuid(), 'WORKFLOWS', 'READ',     'Ver flujos de trabajo'),
-        (gen_random_uuid(), 'WORKFLOWS', 'WRITE',    'Crear y editar flujos'),
-        (gen_random_uuid(), 'WORKFLOWS', 'DELETE',   'Eliminar flujos'),
-        (gen_random_uuid(), 'WORKFLOWS', 'APPROVE',  'Aprobar pasos de flujo'),
+        (gen_random_uuid(), 'WORKFLOWS', 'READ',     'View workflows'),
+        (gen_random_uuid(), 'WORKFLOWS', 'WRITE',    'Create and edit workflows'),
+        (gen_random_uuid(), 'WORKFLOWS', 'DELETE',   'Delete workflows'),
+        (gen_random_uuid(), 'WORKFLOWS', 'APPROVE',  'Approve workflow steps'),
 
-        (gen_random_uuid(), 'USERS',     'READ',     'Ver usuarios'),
-        (gen_random_uuid(), 'USERS',     'WRITE',    'Crear y editar usuarios'),
-        (gen_random_uuid(), 'USERS',     'DELETE',   'Eliminar usuarios'),
-        (gen_random_uuid(), 'USERS',     'MANAGE',   'Gestión completa de usuarios'),
+        (gen_random_uuid(), 'USERS',     'READ',     'View users'),
+        (gen_random_uuid(), 'USERS',     'WRITE',    'Create and edit users'),
+        (gen_random_uuid(), 'USERS',     'DELETE',   'Delete users'),
+        (gen_random_uuid(), 'USERS',     'MANAGE',   'Full user management'),
 
-        (gen_random_uuid(), 'ORGS',      'READ',     'Ver información de la organización'),
-        (gen_random_uuid(), 'ORGS',      'WRITE',    'Editar información de la organización'),
-        (gen_random_uuid(), 'ORGS',      'MANAGE',   'Gestión completa de la organización'),
+        (gen_random_uuid(), 'ORGS',      'READ',     'View organization information'),
+        (gen_random_uuid(), 'ORGS',      'WRITE',    'Edit organization information'),
+        (gen_random_uuid(), 'ORGS',      'MANAGE',   'Full organization management'),
 
-        (gen_random_uuid(), 'AUDIT',     'READ',     'Ver registros de auditoría'),
+        (gen_random_uuid(), 'AUDIT',     'READ',     'View audit records'),
 
-        (gen_random_uuid(), 'PLATFORM',  'MANAGE',   'Acceso total a la plataforma (solo super admin)')
+        (gen_random_uuid(), 'PLATFORM',  'MANAGE',   'Full platform access (super admin only)')
       ON CONFLICT (module, action) DO NOTHING
     `);
 
@@ -42,11 +42,11 @@ export class SeedPermissionsAndSystemRoles1773120000000 implements MigrationInte
     await queryRunner.query(`
       INSERT INTO roles (id, name, scope, description, is_system, org_id, created_at)
       VALUES
-        (gen_random_uuid(), 'SUPER_ADMIN', 'SYSTEM', 'Acceso total a la plataforma',          true, NULL, NOW()),
-        (gen_random_uuid(), 'ADMIN',       'SYSTEM', 'Administrador de organización',          true, NULL, NOW()),
-        (gen_random_uuid(), 'MANAGER',     'SYSTEM', 'Gestor con permisos de aprobación',      true, NULL, NOW()),
-        (gen_random_uuid(), 'EDITOR',      'SYSTEM', 'Puede crear y editar documentos',        true, NULL, NOW()),
-        (gen_random_uuid(), 'VIEWER',      'SYSTEM', 'Solo lectura',                           true, NULL, NOW())
+        (gen_random_uuid(), 'SUPER_ADMIN', 'SYSTEM', 'Full platform access',                  true, NULL, NOW()),
+        (gen_random_uuid(), 'ADMIN',       'SYSTEM', 'Organization administrator',             true, NULL, NOW()),
+        (gen_random_uuid(), 'MANAGER',     'SYSTEM', 'Manager with approval permissions',      true, NULL, NOW()),
+        (gen_random_uuid(), 'EDITOR',      'SYSTEM', 'Can create and edit documents',          true, NULL, NOW()),
+        (gen_random_uuid(), 'VIEWER',      'SYSTEM', 'Read-only',                              true, NULL, NOW())
       ON CONFLICT (name, org_id) DO NOTHING
     `);
 

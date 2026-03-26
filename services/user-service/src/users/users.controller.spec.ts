@@ -1,12 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserOrgRoleResponseDto } from './dto/user-org-role-response.dto';
+import { UserWithOrgRolesDto } from './dto/user-with-org-roles.dto';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -59,6 +61,7 @@ describe('UsersController', () => {
             findAll: jest.fn(),
             findOne: jest.fn(),
             findByEmail: jest.fn(),
+            findByOrg: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
             restore: jest.fn(),
@@ -76,6 +79,10 @@ describe('UsersController', () => {
           useValue: {
             getOrThrow: jest.fn().mockReturnValue(INTERNAL_TOKEN),
           },
+        },
+        {
+          provide: getRepositoryToken(UserOrgRole),
+          useValue: { find: jest.fn() },
         },
       ],
     }).compile();
@@ -149,6 +156,33 @@ describe('UsersController', () => {
       usersService.findByEmail.mockRejectedValue(new NotFoundException());
 
       await expect(controller.findByEmail('ghost@example.com')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ─── GET /by-org/:orgId ───────────────────────────────────────────────────
+
+  describe('findByOrg', () => {
+    it('returns an array of UserWithOrgRolesDto for the given orgId', async () => {
+      const user = makeUser();
+      const roles = [{ roleId: 'role-uuid-1', roleName: 'ADMIN' }];
+
+      usersService.findByOrg.mockResolvedValue([{ user, roles }]);
+
+      const result = await controller.findByOrg('org-uuid-1');
+
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-1');
+      expect(result).toHaveLength(1);
+      result.forEach((r) => expect(r).toBeInstanceOf(UserWithOrgRolesDto));
+      expect(result[0].roles).toEqual(roles);
+    });
+
+    it('returns an empty array when no users belong to the org', async () => {
+      usersService.findByOrg.mockResolvedValue([]);
+
+      const result = await controller.findByOrg('org-uuid-empty');
+
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-empty');
+      expect(result).toEqual([]);
     });
   });
 

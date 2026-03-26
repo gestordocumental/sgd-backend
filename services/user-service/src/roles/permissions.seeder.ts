@@ -14,35 +14,35 @@ const PERMISSIONS_CATALOG: {
   description: string;
 }[] = [
   // DOCUMENTS
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.READ,     description: 'Ver documentos' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE,    description: 'Crear y editar documentos' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DELETE,   description: 'Eliminar documentos' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.APPROVE,  description: 'Aprobar documentos' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.UPLOAD,   description: 'Subir archivos' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DOWNLOAD, description: 'Descargar archivos' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.READ,     description: 'View documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE,    description: 'Create and edit documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DELETE,   description: 'Delete documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.APPROVE,  description: 'Approve documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.UPLOAD,   description: 'Upload files' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DOWNLOAD, description: 'Download files' },
 
   // WORKFLOWS
-  { module: PermissionModule.WORKFLOWS, action: PermissionAction.READ,    description: 'Ver flujos de trabajo' },
-  { module: PermissionModule.WORKFLOWS, action: PermissionAction.WRITE,   description: 'Crear y editar flujos' },
-  { module: PermissionModule.WORKFLOWS, action: PermissionAction.DELETE,  description: 'Eliminar flujos' },
-  { module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE, description: 'Aprobar pasos de flujo' },
+  { module: PermissionModule.WORKFLOWS, action: PermissionAction.READ,    description: 'View workflows' },
+  { module: PermissionModule.WORKFLOWS, action: PermissionAction.WRITE,   description: 'Create and edit workflows' },
+  { module: PermissionModule.WORKFLOWS, action: PermissionAction.DELETE,  description: 'Delete workflows' },
+  { module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE, description: 'Approve workflow steps' },
 
   // USERS
-  { module: PermissionModule.USERS, action: PermissionAction.READ,   description: 'Ver usuarios' },
-  { module: PermissionModule.USERS, action: PermissionAction.WRITE,  description: 'Crear y editar usuarios' },
-  { module: PermissionModule.USERS, action: PermissionAction.DELETE, description: 'Eliminar usuarios' },
-  { module: PermissionModule.USERS, action: PermissionAction.MANAGE, description: 'Gestión completa de usuarios' },
+  { module: PermissionModule.USERS, action: PermissionAction.READ,   description: 'View users' },
+  { module: PermissionModule.USERS, action: PermissionAction.WRITE,  description: 'Create and edit users' },
+  { module: PermissionModule.USERS, action: PermissionAction.DELETE, description: 'Delete users' },
+  { module: PermissionModule.USERS, action: PermissionAction.MANAGE, description: 'Full user management' },
 
   // ORGS
-  { module: PermissionModule.ORGS, action: PermissionAction.READ,   description: 'Ver información de la organización' },
-  { module: PermissionModule.ORGS, action: PermissionAction.WRITE,  description: 'Editar información de la organización' },
-  { module: PermissionModule.ORGS, action: PermissionAction.MANAGE, description: 'Gestión completa de la organización' },
+  { module: PermissionModule.ORGS, action: PermissionAction.READ,   description: 'View organization information' },
+  { module: PermissionModule.ORGS, action: PermissionAction.WRITE,  description: 'Edit organization information' },
+  { module: PermissionModule.ORGS, action: PermissionAction.MANAGE, description: 'Full organization management' },
 
   // AUDIT
-  { module: PermissionModule.AUDIT, action: PermissionAction.READ, description: 'Ver registros de auditoría' },
+  { module: PermissionModule.AUDIT, action: PermissionAction.READ, description: 'View audit records' },
 
   // PLATFORM — exclusive to SUPER_ADMIN
-  { module: PermissionModule.PLATFORM, action: PermissionAction.MANAGE, description: 'Acceso total a la plataforma (solo super admin)' },
+  { module: PermissionModule.PLATFORM, action: PermissionAction.MANAGE, description: 'Full platform access (super admin only)' },
 ];
 
 @Injectable()

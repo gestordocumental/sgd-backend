@@ -285,7 +285,7 @@ export class UsersService {
         throw error;
       }
       throw new InternalServerErrorException(
-        "Error al crear credenciales de acceso",
+        "Error creating access credentials",
       );
     }
 

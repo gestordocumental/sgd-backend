@@ -22,7 +22,7 @@ export class Org {
   @Column({ type: 'varchar', length: 255 })
   name!: string;
 
-  /** NIT o número de identificación tributaria */
+  /** NIT or tax identification number */
   @Column({ type: 'varchar', length: 50, nullable: true })
   nit!: string | null;
 
@@ -39,7 +39,7 @@ export class Org {
   })
   status!: OrgStatus;
 
-  /** UUID del usuario que creó la organización */
+  /** UUID of the user who created the organization */
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy!: string | null;
 

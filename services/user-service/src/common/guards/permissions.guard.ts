@@ -29,12 +29,12 @@ export class PermissionsGuard implements CanActivate {
       ctx.getHandler(),
     );
 
-    // Endpoints sin @RequirePermission pasan directamente
+    // Endpoints without @RequirePermission pass through directly
     if (!required) return true;
 
     const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string> }>();
 
-    // Llamadas internas entre microservicios — omitir validación JWT
+    // Internal calls between microservices — skip JWT validation
     const internalToken = request.headers['x-internal-token'];
     if (internalToken) {
       const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
@@ -58,7 +58,7 @@ export class PermissionsGuard implements CanActivate {
       throw new UnauthorizedException('Malformed token');
     }
 
-    // Super admin tiene acceso a todo
+    // Super admin has access to everything
     if (payload.isSuperAdmin) return true;
 
     const userId = payload.sub as string | undefined;
@@ -69,7 +69,7 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException('Token has no companyId — call POST /api/auth/switch-company first');
     }
 
-    // Un usuario puede tener múltiples roles en la misma org
+    // A user can have multiple roles in the same org
     const userOrgRoles = await this.userOrgRoleRepo.find({
       where: { userId, orgId: companyId },
       relations: ['role', 'role.permissions'],

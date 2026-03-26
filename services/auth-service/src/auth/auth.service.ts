@@ -18,7 +18,7 @@ import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
 
-// TTL del refresh token en Redis (debe coincidir con JWT_REFRESH_EXPIRATION: 12h)
+// Refresh token TTL in Redis (must match JWT_REFRESH_EXPIRATION: 12h)
 const REFRESH_TTL_SECONDS = 12 * 60 * 60;
 
 interface TokenOptions {
@@ -87,18 +87,18 @@ export class AuthService {
     });
 
     if (!credential || credential.status !== CredentialStatus.ACTIVE) {
-      throw new UnauthorizedException("Credenciales inválidas");
+      throw new UnauthorizedException("Invalid credentials");
     }
 
     const valid = await bcrypt.compare(dto.password, credential.passwordHash);
-    if (!valid) throw new UnauthorizedException("Credenciales inválidas");
+    if (!valid) throw new UnauthorizedException("Invalid credentials");
 
     let userInfo: { isSuperAdmin: boolean };
     try {
       userInfo = await this.userClientService.getUserInfo(credential.userId);
     } catch (err) {
       if (err instanceof NotFoundException) {
-        throw new UnauthorizedException("Credenciales inválidas");
+        throw new UnauthorizedException("Invalid credentials");
       }
       throw err;
     }
@@ -119,7 +119,7 @@ export class AuthService {
         secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
       });
     } catch {
-      throw new UnauthorizedException("Refresh token inválido o expirado");
+      throw new UnauthorizedException("Invalid or expired refresh token");
     }
 
     // Consume the token atomically: GETDEL returns the value and deletes the key
@@ -128,13 +128,13 @@ export class AuthService {
     const consumed = await this.redis.getdel(
       `refresh:${payload.sub}:${payload.jti}`,
     );
-    if (!consumed) throw new UnauthorizedException("Refresh token revocado");
+    if (!consumed) throw new UnauthorizedException("Refresh token revoked");
 
     const credential = await this.credentialRepo.findOne({
       where: { userId: payload.sub },
     });
     if (!credential || credential.status !== CredentialStatus.ACTIVE) {
-      throw new UnauthorizedException("Usuario no encontrado o inactivo");
+      throw new UnauthorizedException("User not found or inactive");
     }
 
     // Recalculate scope from user-service instead of trusting the old token.
@@ -151,13 +151,13 @@ export class AuthService {
       ]);
     } catch (err) {
       if (err instanceof NotFoundException) {
-        throw new UnauthorizedException("Credenciales inválidas");
+        throw new UnauthorizedException("Invalid credentials");
       }
       throw err;
     }
 
     if (payload.companyId && !companies?.includes(payload.companyId)) {
-      throw new UnauthorizedException("Scope revocado");
+      throw new UnauthorizedException("Scope revoked");
     }
 
     return this.generateTokenPair(credential, {
@@ -234,7 +234,7 @@ export class AuthService {
       where: { userId },
     });
     if (!credential || credential.status !== CredentialStatus.ACTIVE) {
-      throw new UnauthorizedException("Usuario no encontrado o inactivo");
+      throw new UnauthorizedException("User not found or inactive");
     }
 
     return this.generateTokenPair(credential, {
