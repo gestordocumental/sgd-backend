@@ -41,8 +41,6 @@ const PERMISSIONS_CATALOG: {
   // AUDIT
   { module: PermissionModule.AUDIT, action: PermissionAction.READ, description: 'View audit records' },
 
-  // PLATFORM — exclusive to SUPER_ADMIN
-  { module: PermissionModule.PLATFORM, action: PermissionAction.MANAGE, description: 'Full platform access (super admin only)' },
 ];
 
 @Injectable()

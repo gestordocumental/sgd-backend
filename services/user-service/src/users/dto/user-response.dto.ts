@@ -6,6 +6,7 @@ export class UserResponseDto {
   firstName!: string | null;
   lastName!: string | null;
   position!: string;
+  idNumber!: string | null;
   registrationStatus!: RegistrationStatus;
   isActive!: boolean;
   isSuperAdmin!: boolean;
@@ -19,6 +20,7 @@ export class UserResponseDto {
     dto.firstName          = user.firstName;
     dto.lastName           = user.lastName;
     dto.position           = user.position;
+    dto.idNumber           = user.idNumber;
     dto.registrationStatus = user.registrationStatus;
     dto.isActive           = user.isActive;
     dto.isSuperAdmin       = user.isSuperAdmin;
