@@ -288,7 +288,11 @@ export class UsersService {
       });
     } catch (error) {
       if (error instanceof HttpException) {
-        throw error;
+        const status = error.getStatus();
+        if (status >= 400 && status < 500) {
+          throw new HttpException('Invalid registration data', status);
+        }
+        throw new InternalServerErrorException('Error creating access credentials');
       }
       throw new InternalServerErrorException(
         "Error creating access credentials",

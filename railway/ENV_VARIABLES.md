@@ -44,7 +44,7 @@ en Railway para cada entorno (dev / test / prod).
 | `REDIS_HOST` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | Plugin |
 | `REDIS_PORT` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | Plugin |
 | `REDIS_PASSWORD` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | Plugin |
-| `KAFKA_BROKERS` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
+| `KAFKA_BROKER` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
 | `KAFKA_CLIENT_ID` | `user-service` | `user-service` | `user-service` | Manual |
 | `KAFKA_GROUP_ID` | `user-service-group` | `user-service-group` | `user-service-group` | Manual |
 | `INTERNAL_TOKEN` | mismo que auth-service | mismo que auth-service | mismo que auth-service | Manual |
