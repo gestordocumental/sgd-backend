@@ -290,9 +290,11 @@ export class UsersService {
       if (error instanceof HttpException) {
         const status = error.getStatus();
         if (status >= 400 && status < 500) {
-          throw new HttpException('Invalid registration data', status);
+          throw new HttpException("Invalid registration data", status);
         }
-        throw new InternalServerErrorException('Error creating access credentials');
+        throw new InternalServerErrorException(
+          "Error creating access credentials",
+        );
       }
       throw new InternalServerErrorException(
         "Error creating access credentials",
@@ -301,14 +303,15 @@ export class UsersService {
 
     // Use a transaction to ensure atomicity
     await this.usersRepository.manager.transaction(async (manager) => {
-      // Consume the token — one-time use only
-      await this.redis.del(`invitation:${dto.token}`);
-
       // Credentials created successfully — mark registration as complete and activate account
       user.registrationStatus = RegistrationStatus.ACTIVE;
       user.isActive = true;
       await manager.save(user);
     });
+
+    // Consume the token — one-time use only
+    await this.redis.del(`invitation:${dto.token}`);
+
     const completedUser = await this.findOne(user.id);
 
     return UserResponseDto.from(completedUser);
