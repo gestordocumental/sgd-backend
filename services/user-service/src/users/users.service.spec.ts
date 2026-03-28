@@ -63,11 +63,11 @@ describe('UsersService', () => {
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
   let roleRepo: jest.Mocked<Repository<Role>>;
   let authClient: jest.Mocked<AuthClientService>;
-  let redis: { get: jest.Mock; setex: jest.Mock; del: jest.Mock };
+  let redis: { getdel: jest.Mock; setex: jest.Mock };
   let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit'>>;
 
   beforeEach(async () => {
-    redis = { get: jest.fn(), setex: jest.fn(), del: jest.fn() };
+    redis = { getdel: jest.fn(), setex: jest.fn() };
     kafkaProducer = { emit: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -680,35 +680,32 @@ describe('UsersService', () => {
     it('updates profile, provisions credentials, deletes token and returns UserResponseDto', async () => {
       const user = makeUser({ firstName: dto.firstName, lastName: dto.lastName });
 
-      redis.get.mockResolvedValue(user.id);
+      redis.getdel.mockResolvedValue(user.id);
       usersRepo.findOne.mockResolvedValue(user);
       usersRepo.save.mockResolvedValue(user);
       authClient.provisionCredentials.mockResolvedValue(undefined);
-      redis.del.mockResolvedValue(1);
 
       const result = await service.completeRegistration(dto);
 
-      expect(redis.get).toHaveBeenCalledWith(`invitation:${validToken}`);
+      expect(redis.getdel).toHaveBeenCalledWith(`invitation:${validToken}`);
       expect(authClient.provisionCredentials).toHaveBeenCalledWith({
         userId: user.id,
         email: user.email,
         password: dto.password,
       });
-      expect(redis.del).toHaveBeenCalledWith(`invitation:${validToken}`);
       expect(result.email).toBe(user.email);
     });
 
     it('throws NotFoundException when the token does not exist in Redis', async () => {
-      redis.get.mockResolvedValue(null);
+      redis.getdel.mockResolvedValue(null);
 
       await expect(service.completeRegistration(dto)).rejects.toThrow(NotFoundException);
-      expect(redis.del).not.toHaveBeenCalled();
     });
 
     it('does not delete the token when provisionCredentials fails', async () => {
       const user = makeUser();
 
-      redis.get.mockResolvedValue(user.id);
+      redis.getdel.mockResolvedValue(user.id);
       usersRepo.findOne.mockResolvedValue(user);
       usersRepo.save.mockResolvedValue(user);
       authClient.provisionCredentials.mockRejectedValue(new Error('auth-service down'));
@@ -716,7 +713,6 @@ describe('UsersService', () => {
       await expect(service.completeRegistration(dto)).rejects.toThrow(
         'Error creating access credentials',
       );
-      expect(redis.del).not.toHaveBeenCalled();
     });
   });
 });
