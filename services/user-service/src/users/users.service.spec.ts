@@ -1,13 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { UsersService } from './users.service';
-import { User } from './entities/user.entity';
+import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
+import { Role, RoleScope, SystemRoleName } from '../roles/entities/role.entity';
 import { AuthClientService } from '../auth-client/auth-client.service';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+const makeRole = (overrides: Partial<Role> = {}): Role => ({
+  id: 'role-uuid-admin',
+  name: SystemRoleName.ADMIN,
+  scope: RoleScope.SYSTEM,
+  description: null,
+  isSystem: true,
+  orgId: null,
+  permissions: [],
+  userOrgRoles: [],
+  createdAt: new Date('2024-01-01'),
+  ...overrides,
+});
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'user-uuid-1',
@@ -17,6 +32,8 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   idNumber: null,
   position: 'Developer',
   isActive: true,
+  registrationStatus: 
+    overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],
@@ -44,9 +61,15 @@ describe('UsersService', () => {
   let service: UsersService;
   let usersRepo: jest.Mocked<Repository<User>>;
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
+  let roleRepo: jest.Mocked<Repository<Role>>;
   let authClient: jest.Mocked<AuthClientService>;
+  let redis: { getdel: jest.Mock; setex: jest.Mock };
+  let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit'>>;
 
   beforeEach(async () => {
+    redis = { getdel: jest.fn(), setex: jest.fn() };
+    kafkaProducer = { emit: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
@@ -59,6 +82,11 @@ describe('UsersService', () => {
             save: jest.fn(),
             softRemove: jest.fn(),
             restore: jest.fn(),
+            manager: {
+              transaction: jest.fn().mockImplementation(async (cb: (m: any) => Promise<void>) => {
+                await cb({ save: jest.fn() });
+              }),
+            },
           },
         },
         {
@@ -72,6 +100,12 @@ describe('UsersService', () => {
           },
         },
         {
+          provide: getRepositoryToken(Role),
+          useValue: {
+            findOne: jest.fn(),
+          },
+        },
+        {
           provide: AuthClientService,
           useValue: {
             provisionCredentials: jest.fn(),
@@ -79,25 +113,35 @@ describe('UsersService', () => {
             enableCredentials: jest.fn(),
           },
         },
+        {
+          provide: 'REDIS_CLIENT',
+          useValue: redis,
+        },
+        {
+          provide: KafkaProducerService,
+          useValue: kafkaProducer,
+        },
       ],
     }).compile();
 
     service = module.get(UsersService);
     usersRepo = module.get(getRepositoryToken(User));
     uorRepo = module.get(getRepositoryToken(UserOrgRole));
+    roleRepo = module.get(getRepositoryToken(Role));
     authClient = module.get(AuthClientService);
   });
 
   // ─── create ───────────────────────────────────────────────────────────────
 
   describe('create', () => {
-    it('creates a new user when no record exists for that email', async () => {
+    it('creates a new user, stores invitation token in Redis, and returns { user, invitationToken }', async () => {
       const dto = { email: 'new@example.com', position: 'Developer' };
       const user = makeUser({ email: dto.email });
 
       usersRepo.findOne.mockResolvedValue(null);
       usersRepo.create.mockReturnValue(user);
       usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
 
       const result = await service.create(dto);
 
@@ -106,7 +150,46 @@ describe('UsersService', () => {
         withDeleted: true,
       });
       expect(usersRepo.create).toHaveBeenCalledWith(dto);
-      expect(result).toEqual(user);
+      expect(redis.setex).toHaveBeenCalledWith(
+        expect.stringMatching(/^invitation:[a-f0-9]{64}$/),
+        259200,
+        user.id,
+      );
+      expect(result.user).toEqual(user);
+      expect(result.invitationToken).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it('emits user.invited Kafka event after creating the user', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(kafkaProducer.emit).toHaveBeenCalledWith(
+        'user.invited',
+        expect.objectContaining({ userId: user.id, email: user.email }),
+      );
+    });
+
+    it('still returns successfully when Kafka emit fails', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+      kafkaProducer.emit.mockRejectedValue(new Error('Kafka unavailable'));
+
+      const result = await service.create(dto);
+
+      expect(result.user).toEqual(user);
+      expect(result.invitationToken).toMatch(/^[a-f0-9]{64}$/);
     });
 
     it('throws ConflictException with userId when a soft-deleted user exists for that email', async () => {
@@ -137,6 +220,70 @@ describe('UsersService', () => {
       } catch (err: any) {
         expect(err.response).toMatchObject({ userId: existingUser.id });
       }
+    });
+
+    it('finds the ADMIN system role and creates a UserOrgRole when orgId is provided', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1' };
+      const user = makeUser({ email: dto.email });
+      const adminRole = makeRole();
+      const uor = makeUor({ roleId: adminRole.id });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(adminRole);
+      uorRepo.create.mockReturnValue(uor);
+      uorRepo.save.mockResolvedValue(uor);
+      redis.setex.mockResolvedValue('OK');
+
+      const result = await service.create(dto);
+
+      expect(roleRepo.findOne).toHaveBeenCalledWith({
+        where: { name: SystemRoleName.ADMIN, scope: RoleScope.SYSTEM, orgId: IsNull() },
+      });
+      expect(uorRepo.create).toHaveBeenCalledWith({
+        userId: user.id,
+        orgId: dto.orgId,
+        roleId: adminRole.id,
+        assignedBy: null,
+      });
+      expect(uorRepo.save).toHaveBeenCalled();
+      expect(result.user).toEqual(user);
+    });
+
+    it('still creates the user when orgId is provided but ADMIN role is not found', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(null); // ADMIN role not found
+      redis.setex.mockResolvedValue('OK');
+
+      const result = await service.create(dto);
+
+      expect(roleRepo.findOne).toHaveBeenCalled();
+      expect(uorRepo.create).not.toHaveBeenCalled();
+      expect(uorRepo.save).not.toHaveBeenCalled();
+      expect(result.user).toEqual(user);
+      expect(result.invitationToken).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it('does NOT query roleRepository or create UserOrgRole when orgId is not provided', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(roleRepo.findOne).not.toHaveBeenCalled();
+      expect(uorRepo.create).not.toHaveBeenCalled();
+      expect(uorRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -455,6 +602,116 @@ describe('UsersService', () => {
 
       await expect(service.removeFromOrg('bad-id', 'org-uuid-1')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+  });
+
+  // ─── findByOrg ────────────────────────────────────────────────────────────
+
+  describe('findByOrg', () => {
+    it('returns users with their roles for a given orgId', async () => {
+      const user = makeUser();
+      const adminRole = makeRole();
+      const orgRole = makeUor({ role: adminRole as any });
+
+      uorRepo.find.mockResolvedValue([orgRole] as any);
+      usersRepo.find.mockResolvedValue([user]);
+
+      const result = await service.findByOrg('org-uuid-1');
+
+      expect(uorRepo.find).toHaveBeenCalledWith({
+        where: { orgId: 'org-uuid-1' },
+        relations: ['role'],
+      });
+      expect(usersRepo.find).toHaveBeenCalledWith({
+        where: [{ id: user.id }],
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0].user).toEqual(user);
+      expect(result[0].roles).toEqual([
+        { roleId: orgRole.roleId, roleName: adminRole.name },
+      ]);
+    });
+
+    it('returns multiple users each with their own roles', async () => {
+      const user1 = makeUser({ id: 'user-uuid-1' });
+      const user2 = makeUser({ id: 'user-uuid-2', email: 'other@example.com' });
+      const role1 = makeRole({ id: 'role-uuid-1', name: SystemRoleName.ADMIN });
+      const role2 = makeRole({ id: 'role-uuid-2', name: SystemRoleName.VIEWER, scope: RoleScope.SYSTEM });
+      const orgRole1 = makeUor({ userId: user1.id, roleId: role1.id, role: role1 as any });
+      const orgRole2 = makeUor({ id: 'uor-uuid-2', userId: user2.id, roleId: role2.id, role: role2 as any });
+
+      uorRepo.find.mockResolvedValue([orgRole1, orgRole2] as any);
+      usersRepo.find.mockResolvedValue([user1, user2]);
+
+      const result = await service.findByOrg('org-uuid-1');
+
+      expect(result).toHaveLength(2);
+      expect(result.find((r) => r.user.id === user1.id)?.roles).toEqual([
+        { roleId: role1.id, roleName: role1.name },
+      ]);
+      expect(result.find((r) => r.user.id === user2.id)?.roles).toEqual([
+        { roleId: role2.id, roleName: role2.name },
+      ]);
+    });
+
+    it('returns an empty array when no users belong to the org', async () => {
+      uorRepo.find.mockResolvedValue([]);
+
+      const result = await service.findByOrg('org-uuid-empty');
+
+      expect(result).toEqual([]);
+      expect(usersRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── completeRegistration ─────────────────────────────────────────────────
+
+  describe('completeRegistration', () => {
+    const validToken = 'a'.repeat(64);
+    const dto = {
+      token: validToken,
+      firstName: 'Juan',
+      lastName: 'Perez',
+      idNumber: 'CC123',
+      password: 'Str0ng@Pass',
+    };
+
+    it('updates profile, provisions credentials, deletes token and returns UserResponseDto', async () => {
+      const user = makeUser({ firstName: dto.firstName, lastName: dto.lastName });
+
+      redis.getdel.mockResolvedValue(user.id);
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      authClient.provisionCredentials.mockResolvedValue(undefined);
+
+      const result = await service.completeRegistration(dto);
+
+      expect(redis.getdel).toHaveBeenCalledWith(`invitation:${validToken}`);
+      expect(authClient.provisionCredentials).toHaveBeenCalledWith({
+        userId: user.id,
+        email: user.email,
+        password: dto.password,
+      });
+      expect(result.email).toBe(user.email);
+    });
+
+    it('throws NotFoundException when the token does not exist in Redis', async () => {
+      redis.getdel.mockResolvedValue(null);
+
+      await expect(service.completeRegistration(dto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('does not delete the token when provisionCredentials fails', async () => {
+      const user = makeUser();
+
+      redis.getdel.mockResolvedValue(user.id);
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      authClient.provisionCredentials.mockRejectedValue(new Error('auth-service down'));
+
+      await expect(service.completeRegistration(dto)).rejects.toThrow(
+        'Error creating access credentials',
       );
     });
   });

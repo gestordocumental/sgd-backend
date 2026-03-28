@@ -62,7 +62,7 @@ services:
       - sgd-local
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Redis — Auth Service (tokens) + Notification Service (cola)
+  # Redis — Auth Service (tokens) + User Service (invitation tokens) + Notification Service (cola)
   # ─────────────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2-alpine
@@ -141,6 +141,7 @@ services:
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic document.approved --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic document.rejected --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.step.completed --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic user.invited --partitions 1 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.send --partitions 2 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.log --partitions 3 --replication-factor 1 &&
       echo '>>> Tópicos creados correctamente.' &&

@@ -9,7 +9,10 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  ParseUUIDPipe,
   UnauthorizedException,
+  ForbiddenException,
+  UseGuards,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { timingSafeEqual } from "crypto";
@@ -18,13 +21,20 @@ import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { ProvisionUserDto } from "./dto/provision-user.dto";
 import { AssignOrgDto } from "./dto/assign-org.dto";
+import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
 import { UserResponseDto } from "./dto/user-response.dto";
+import { UserWithOrgRolesDto } from "./dto/user-with-org-roles.dto";
 import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
 import { RequireSuperAdmin } from "../common/decorators/require-super-admin.decorator";
 import { CurrentUserId } from "../common/decorators/current-user-id.decorator";
+import { JwtPayloadParam, JwtPayload } from "../common/decorators/jwt-payload.decorator";
+import { PermissionsGuard } from "../common/guards/permissions.guard";
+import { RequirePermission } from "../common/decorators/require-permission.decorator";
+import { PermissionModule, PermissionAction } from "../roles/entities/permission.entity";
 
 @Controller("api/users")
+@UseGuards(PermissionsGuard)
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
@@ -32,18 +42,51 @@ export class UsersController {
   ) {}
 
   @Post()
-  async create(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
-    return UserResponseDto.from(await this.usersService.create(dto));
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  async create(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Body() dto: CreateUserDto,
+  ) {
+    // Only super admins can create super admin users
+    if (dto.isSuperAdmin && !caller.isSuperAdmin) {
+      throw new ForbiddenException('Only super admins can grant super admin privileges');
+    }
+
+    // orgId must belong to the caller's own org unless they are a super admin
+    if (dto.orgId && !caller.isSuperAdmin && dto.orgId !== caller.companyId) {
+      throw new ForbiddenException('You can only assign users to your own organization');
+    }
+
+    const { user, invitationToken } = await this.usersService.create(dto);
+    return { ...UserResponseDto.from(user), invitationToken };
   }
 
   @Get()
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAll(): Promise<UserResponseDto[]> {
     return (await this.usersService.findAll()).map(UserResponseDto.from);
   }
 
+  @Get("super-admins")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
+  async findAllSuperAdmin(): Promise<UserResponseDto[]> {
+    return (await this.usersService.findAllSuperAdmin()).map(UserResponseDto.from);
+  }
+
   @Get("by-email/:email")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByEmail(@Param("email") email: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findByEmail(email));
+  }
+
+  @Get('by-org/:orgId')
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
+  async findByOrg(
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+  ): Promise<UserWithOrgRolesDto[]> {
+    return (await this.usersService.findByOrg(orgId)).map(({ user, roles }) =>
+      UserWithOrgRolesDto.fromUserAndRoles(user, roles),
+    );
   }
 
   @Get(":id/companies")
@@ -63,11 +106,13 @@ export class UsersController {
   }
 
   @Get(":id")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findOne(@Param("id") id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findOne(id));
   }
 
   @Patch(":id")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async update(
     @Param("id") id: string,
     @Body() dto: UpdateUserDto,
@@ -77,13 +122,20 @@ export class UsersController {
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.DELETE)
   remove(@Param("id") id: string) {
     return this.usersService.remove(id);
   }
 
   @Post(":id/restore")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async restore(@Param("id") id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.restore(id));
+  }
+
+  @Post("complete-registration")
+  async completeRegistration(@Body() dto: CompleteRegistrationDto): Promise<UserResponseDto> {
+    return this.usersService.completeRegistration(dto);
   }
 
   @Post(":id/provision")
@@ -102,6 +154,7 @@ export class UsersController {
 
   @Post(":id/orgs")
   @HttpCode(HttpStatus.CREATED)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   async assignOrg(
     @CurrentUserId() callerId: string,
     @Param("id") id: string,
@@ -113,6 +166,7 @@ export class UsersController {
   }
 
   @Get(":id/orgs")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async getOrgRoles(
     @Param("id") id: string,
   ): Promise<UserOrgRoleResponseDto[]> {
@@ -121,6 +175,7 @@ export class UsersController {
 
   @Delete(":id/orgs/:orgId")
   @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   removeFromOrg(
     @Param("id") id: string,
     @Param("orgId") orgId: string,

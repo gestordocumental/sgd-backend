@@ -3,8 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Kafka } from 'kafkajs';
 import { KafkaProducerService } from './kafka-producer.service';
 import { AppLogger } from '../logger/app-logger.service';
-
-export const KAFKA_CLIENT = 'KAFKA_CLIENT';
+import { KAFKA_CLIENT } from './kafka.constants';
 
 /**
  * KafkaModule — configures kafkajs and exposes KafkaProducerService.

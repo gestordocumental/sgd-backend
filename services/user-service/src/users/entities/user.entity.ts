@@ -10,6 +10,13 @@ import {
 } from 'typeorm';
 import { UserOrgRole } from '../../roles/entities/user-org-role.entity';
 
+export enum RegistrationStatus {
+  /** Invited — profile may be partially filled, credentials not yet created. */
+  PENDING_CREDENTIALS = 'pending_credentials',
+  /** Registration complete — credentials exist, user can log in. */
+  ACTIVE = 'active',
+}
+
 // Partial unique index: only active (non-deleted) users must have unique emails.
 // A plain @Index({ unique: true }) would prevent re-registering a soft-deleted email.
 @Entity('users')
@@ -36,8 +43,16 @@ export class User {
   @Column({ type: 'varchar', length: 100 })
   position!: string;
 
-  @Column({ name: 'is_active', type: 'boolean', default: true })
+  @Column({ name: 'is_active', type: 'boolean', default: false })
   isActive!: boolean;
+
+  @Column({
+    name: 'registration_status',
+    type: 'enum',
+    enum: RegistrationStatus,
+    default: RegistrationStatus.PENDING_CREDENTIALS,
+  })
+  registrationStatus!: RegistrationStatus;
 
   // Platform-level flag — bypasses all org/role checks
   @Column({ name: 'is_super_admin', type: 'boolean', default: false })

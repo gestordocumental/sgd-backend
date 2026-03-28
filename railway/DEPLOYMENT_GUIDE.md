@@ -238,6 +238,12 @@ Repetir el proceso del 4.2 para cada servicio, usando los nombres EXACTOS:
 Los nombres de los servicios en Railway deben coincidir exactamente con los
 hostnames en `railway/api-gateway/kong.yaml`.
 
+> **user-service requires Redis and Kafka** in addition to PostgreSQL.
+> The invitation token flow stores one-time tokens in Redis; user events are
+> published to Kafka. Make sure to add all variables listed in
+> `railway/ENV_VARIABLES.md` — including `REDIS_*` and `KAFKA_*` — when
+> configuring this service.
+
 ---
 
 ## FASE 5 — Monitoring (solo entorno prod)

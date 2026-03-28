@@ -1,12 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
-import { User } from './entities/user.entity';
+import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserOrgRoleResponseDto } from './dto/user-org-role-response.dto';
+import { UserWithOrgRolesDto } from './dto/user-with-org-roles.dto';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -20,6 +22,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   idNumber: null,
   position: 'Developer',
   isActive: true,
+  registrationStatus: overrides.registrationStatus ?? RegistrationStatus.ACTIVE,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],
@@ -58,6 +61,7 @@ describe('UsersController', () => {
             findAll: jest.fn(),
             findOne: jest.fn(),
             findByEmail: jest.fn(),
+            findByOrg: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
             restore: jest.fn(),
@@ -67,6 +71,7 @@ describe('UsersController', () => {
             assignOrg: jest.fn(),
             getOrgRoles: jest.fn(),
             removeFromOrg: jest.fn(),
+            completeRegistration: jest.fn(),
           },
         },
         {
@@ -74,6 +79,10 @@ describe('UsersController', () => {
           useValue: {
             getOrThrow: jest.fn().mockReturnValue(INTERNAL_TOKEN),
           },
+        },
+        {
+          provide: getRepositoryToken(UserOrgRole),
+          useValue: { find: jest.fn() },
         },
       ],
     }).compile();
@@ -85,27 +94,53 @@ describe('UsersController', () => {
   // ─── POST / ───────────────────────────────────────────────────────────────
 
   describe('create', () => {
-    it('returns a UserResponseDto after creating a user', async () => {
-      const dto = { email: 'new@example.com', position: 'Dev' };
-      const user = makeUser(dto);
+    it('returns a UserResponseDto with invitationToken after creating a user', async () => {
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+      const dto = { email: 'new@example.com', position: 'Dev', orgId: 'org-uuid-1' };
+      const user = makeUser({ email: dto.email, position: dto.position });
+      const invitationToken = 'a'.repeat(64);
 
-      usersService.create.mockResolvedValue(user);
+      usersService.create.mockResolvedValue({ user, invitationToken });
 
-      const result = await controller.create(dto as any);
+      const result = await controller.create(caller, dto as any);
 
       expect(usersService.create).toHaveBeenCalledWith(dto);
-      expect(result).toBeInstanceOf(UserResponseDto);
       expect(result.email).toBe(user.email);
+      expect(result.invitationToken).toBe(invitationToken);
     });
 
     it('propagates ConflictException from the service', async () => {
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+
       usersService.create.mockRejectedValue(
         new ConflictException({ message: 'User already exists', userId: 'existing-id' }),
       );
 
-      await expect(controller.create({ email: 'x@x.com' } as any)).rejects.toThrow(
-        ConflictException,
+      await expect(
+        controller.create(caller, { email: 'x@x.com', orgId: 'org-uuid-1' } as any),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws ForbiddenException when a non-super-admin tries to create a super admin user', async () => {
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+      const dto = { email: 'super@example.com', isSuperAdmin: true };
+
+      await expect(controller.create(caller, dto as any)).rejects.toThrow(
+        new ForbiddenException('Only super admins can grant super admin privileges'),
       );
+
+      expect(usersService.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when a non-super-admin tries to assign a user to a different org', async () => {
+      const caller = { sub: 'admin-uuid', companyId: 'org-uuid-1', isSuperAdmin: false };
+      const dto = { email: 'other@example.com', orgId: 'org-uuid-999' };
+
+      await expect(controller.create(caller, dto as any)).rejects.toThrow(
+        new ForbiddenException('You can only assign users to your own organization'),
+      );
+
+      expect(usersService.create).not.toHaveBeenCalled();
     });
   });
 
@@ -146,6 +181,33 @@ describe('UsersController', () => {
       usersService.findByEmail.mockRejectedValue(new NotFoundException());
 
       await expect(controller.findByEmail('ghost@example.com')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ─── GET /by-org/:orgId ───────────────────────────────────────────────────
+
+  describe('findByOrg', () => {
+    it('returns an array of UserWithOrgRolesDto for the given orgId', async () => {
+      const user = makeUser();
+      const roles = [{ roleId: 'role-uuid-1', roleName: 'ADMIN' }];
+
+      usersService.findByOrg.mockResolvedValue([{ user, roles }]);
+
+      const result = await controller.findByOrg('org-uuid-1');
+
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-1');
+      expect(result).toHaveLength(1);
+      result.forEach((r) => expect(r).toBeInstanceOf(UserWithOrgRolesDto));
+      expect(result[0].roles).toEqual(roles);
+    });
+
+    it('returns an empty array when no users belong to the org', async () => {
+      usersService.findByOrg.mockResolvedValue([]);
+
+      const result = await controller.findByOrg('org-uuid-empty');
+
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-empty');
+      expect(result).toEqual([]);
     });
   });
 

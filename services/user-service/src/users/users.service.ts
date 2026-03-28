@@ -2,16 +2,27 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { ProvisionUserDto } from './dto/provision-user.dto';
-import { AssignOrgDto } from './dto/assign-org.dto';
-import { AuthClientService } from '../auth-client/auth-client.service';
-import { UserOrgRole } from '../roles/entities/user-org-role.entity';
+  InternalServerErrorException,
+  HttpException,
+  Inject,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { IsNull, Repository } from "typeorm";
+import { randomBytes } from "crypto";
+import Redis from "ioredis";
+import { User, RegistrationStatus } from "./entities/user.entity";
+import { CreateUserDto } from "./dto/create-user.dto";
+import { UpdateUserDto } from "./dto/update-user.dto";
+import { ProvisionUserDto } from "./dto/provision-user.dto";
+import { AssignOrgDto } from "./dto/assign-org.dto";
+import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
+import { UserResponseDto } from "./dto/user-response.dto";
+import { AuthClientService } from "../auth-client/auth-client.service";
+import { UserOrgRole } from "../roles/entities/user-org-role.entity";
+import { Role, SystemRoleName, RoleScope } from "../roles/entities/role.entity";
+import { KafkaProducerService } from "../common/kafka/kafka-producer.service";
+
+const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
 
 @Injectable()
 export class UsersService {
@@ -20,10 +31,17 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepository: Repository<UserOrgRole>,
+    @InjectRepository(Role)
+    private readonly roleRepository: Repository<Role>,
     private readonly authClientService: AuthClientService,
+    @Inject("REDIS_CLIENT")
+    private readonly redis: Redis,
+    private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
-  async create(dto: CreateUserDto): Promise<User> {
+  async create(
+    dto: CreateUserDto,
+  ): Promise<{ user: User; invitationToken: string }> {
     const existing = await this.usersRepository.findOne({
       where: { email: dto.email },
       withDeleted: true,
@@ -33,7 +51,8 @@ export class UsersService {
       // Soft-deleted user — the email is free at DB level but the record exists.
       // Caller should restore the user and then assign them to the org.
       throw new ConflictException({
-        message: 'User with this email was previously deleted. Use the restore endpoint to reactivate them.',
+        message:
+          "User with this email was previously deleted. Use the restore endpoint to reactivate them.",
         userId: existing.id,
       });
     }
@@ -41,17 +60,66 @@ export class UsersService {
     // Active user already exists — caller should assign them to the org via user_org_roles
     if (existing) {
       throw new ConflictException({
-        message: 'User with this email already exists',
+        message: "User with this email already exists",
         userId: existing.id,
       });
     }
 
     const user = this.usersRepository.create(dto);
-    return this.usersRepository.save(user);
+    await this.usersRepository.save(user);
+
+    // Auto-assign ADMIN role in the org if orgId was provided
+    if (dto.orgId) {
+      const adminRole = await this.roleRepository.findOne({
+        where: {
+          name: SystemRoleName.ADMIN,
+          scope: RoleScope.SYSTEM,
+          orgId: IsNull(),
+        },
+      });
+      if (adminRole) {
+        const record = this.userOrgRoleRepository.create({
+          userId: user.id,
+          orgId: dto.orgId,
+          roleId: adminRole.id,
+          assignedBy: null,
+        });
+        await this.userOrgRoleRepository.save(record);
+      }
+    }
+
+    // Generate a cryptographically secure one-time invitation token
+    const token = randomBytes(32).toString("hex");
+    await this.redis.setex(
+      `invitation:${token}`,
+      INVITATION_TTL_SECONDS,
+      user.id,
+    );
+
+    // Emit Kafka event — failure must not break the main flow
+    try {
+      const expiresAt = new Date(
+        Date.now() + INVITATION_TTL_SECONDS * 1000,
+      ).toISOString();
+      await this.kafkaProducer.emit("user.invited", {
+        userId: user.id,
+        email: user.email,
+        invitationToken: token,
+        expiresAt,
+      });
+    } catch {
+      // Kafka is best-effort — admin still receives the token in the response
+    }
+
+    return { user, invitationToken: token };
   }
 
   findAll(): Promise<User[]> {
     return this.usersRepository.find();
+  }
+
+  findAllSuperAdmin(): Promise<User[]> {
+    return this.usersRepository.find({ where: { isSuperAdmin: true } });
   }
 
   async findOne(id: string): Promise<User> {
@@ -95,7 +163,7 @@ export class UsersService {
   async getCompanies(userId: string): Promise<string[]> {
     const rows = await this.userOrgRoleRepository.find({
       where: { userId },
-      order: { createdAt: 'ASC' },
+      order: { createdAt: "ASC" },
     });
 
     // Deduplicate orgIds preserving first-occurrence order
@@ -120,8 +188,8 @@ export class UsersService {
     const user = await this.findOne(id);
 
     await this.authClientService.provisionCredentials({
-      userId:   user.id,
-      email:    user.email,
+      userId: user.id,
+      email: user.email,
       password: dto.password,
     });
 
@@ -134,14 +202,18 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
-  async assignOrg(userId: string, dto: AssignOrgDto, assignedBy: string): Promise<UserOrgRole> {
+  async assignOrg(
+    userId: string,
+    dto: AssignOrgDto,
+    assignedBy: string,
+  ): Promise<UserOrgRole> {
     await this.findOne(userId);
 
     const existing = await this.userOrgRoleRepository.findOne({
       where: { userId, orgId: dto.orgId, roleId: dto.roleId },
     });
     if (existing) {
-      throw new ConflictException('User already has this role in this org');
+      throw new ConflictException("User already has this role in this org");
     }
 
     const record = this.userOrgRoleRepository.create({
@@ -153,16 +225,96 @@ export class UsersService {
     return this.userOrgRoleRepository.save(record);
   }
 
+  async findByOrg(
+    orgId: string,
+  ): Promise<{ user: User; roles: { roleId: string; roleName: string }[] }[]> {
+    const orgRoles = await this.userOrgRoleRepository.find({
+      where: { orgId },
+      relations: ["role"],
+    });
+
+    if (orgRoles.length === 0) return [];
+
+    const userIds = [...new Set(orgRoles.map((r) => r.userId))];
+    const users = await this.usersRepository.find({
+      where: userIds.map((id) => ({ id })),
+    });
+
+    return users.map((user) => ({
+      user,
+      roles: orgRoles
+        .filter((r) => r.userId === user.id)
+        .map((r) => ({ roleId: r.roleId, roleName: r.role.name })),
+    }));
+  }
+
   async getOrgRoles(userId: string): Promise<UserOrgRole[]> {
     await this.findOne(userId);
     return this.userOrgRoleRepository.find({
       where: { userId },
-      order: { createdAt: 'ASC' },
+      order: { createdAt: "ASC" },
     });
   }
 
   async removeFromOrg(userId: string, orgId: string): Promise<void> {
     await this.findOne(userId);
     await this.userOrgRoleRepository.delete({ userId, orgId });
+  }
+
+  /**
+   * Completes the user's registration using a one-time invitation token.
+   * Updates the user profile and provisions credentials in auth-service,
+   * then invalidates the token so it cannot be reused.
+   */
+  async completeRegistration(
+    dto: CompleteRegistrationDto,
+  ): Promise<UserResponseDto> {
+    // GETDEL is atomic: retrieves and deletes in one operation, preventing
+    // TOCTOU race conditions where two concurrent requests consume the same token.
+    const userId = await this.redis.getdel(`invitation:${dto.token}`);
+    if (!userId) {
+      throw new NotFoundException("Invitation token invalid or expired");
+    }
+
+    const user = await this.update(userId, {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      idNumber: dto.idNumber,
+    });
+
+    try {
+      await this.authClientService.provisionCredentials({
+        userId: user.id,
+        email: user.email,
+        password: dto.password,
+      });
+    } catch (error) {
+      if (error instanceof HttpException) {
+        const status = error.getStatus();
+        if (status >= 400 && status < 500) {
+          throw new HttpException("Invalid registration data", status);
+        }
+        throw new InternalServerErrorException(
+          "Error creating access credentials",
+        );
+      }
+      throw new InternalServerErrorException(
+        "Error creating access credentials",
+      );
+    }
+
+    // Use a transaction to ensure atomicity
+    await this.usersRepository.manager.transaction(async (manager) => {
+      // Credentials created successfully — mark registration as complete and activate account
+      user.registrationStatus = RegistrationStatus.ACTIVE;
+      user.isActive = true;
+      await manager.save(user);
+    });
+
+    // Token was already consumed atomically via GETDEL above.
+
+    const completedUser = await this.findOne(user.id);
+
+    return UserResponseDto.from(completedUser);
   }
 }

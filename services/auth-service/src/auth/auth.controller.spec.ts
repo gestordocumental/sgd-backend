@@ -54,7 +54,7 @@ describe('AuthController', () => {
     });
 
     it('throws UnauthorizedException when internal token is wrong', () => {
-      // validateInternalToken lanza síncronamente — usar toThrow, no rejects.toThrow
+      // validateInternalToken throws synchronously — use toThrow, not rejects.toThrow
       expect(() => controller.provisionCredentials('wrong-token', dto))
         .toThrow(UnauthorizedException);
 

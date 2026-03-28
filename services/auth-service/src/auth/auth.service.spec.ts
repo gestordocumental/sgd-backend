@@ -68,7 +68,7 @@ describe('AuthService', () => {
                 JWT_SECRET: 'test-secret',
                 JWT_REFRESH_SECRET: 'test-refresh-secret',
                 JWT_EXPIRATION: '15m',
-                JWT_REFRESH_EXPIRATION: '7d',
+                JWT_REFRESH_EXPIRATION: '12h',
               }[key] ?? null),
             ),
             getOrThrow: jest.fn(),

@@ -1,4 +1,4 @@
-import { IsEmail, IsString, IsNotEmpty } from 'class-validator';
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateUserDto {
@@ -11,4 +11,13 @@ export class CreateUserDto {
   @IsString()
   @IsNotEmpty()
   position!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isSuperAdmin?: boolean;
+
+  // If provided, the user is automatically assigned the ADMIN role in this org
+  @IsUUID()
+  @IsOptional()
+  orgId?: string;
 }
