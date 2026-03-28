@@ -269,7 +269,9 @@ export class UsersService {
   async completeRegistration(
     dto: CompleteRegistrationDto,
   ): Promise<UserResponseDto> {
-    const userId = await this.redis.get(`invitation:${dto.token}`);
+    // GETDEL is atomic: retrieves and deletes in one operation, preventing
+    // TOCTOU race conditions where two concurrent requests consume the same token.
+    const userId = await this.redis.getdel(`invitation:${dto.token}`);
     if (!userId) {
       throw new NotFoundException("Invitation token invalid or expired");
     }
@@ -309,8 +311,7 @@ export class UsersService {
       await manager.save(user);
     });
 
-    // Consume the token — one-time use only
-    await this.redis.del(`invitation:${dto.token}`);
+    // Token was already consumed atomically via GETDEL above.
 
     const completedUser = await this.findOne(user.id);
 
