@@ -63,7 +63,8 @@ export class OrgGuard implements CanActivate {
 
     if (meta.orgMember) {
       const companyId = payload.companyId as string | undefined;
-      const orgId = request.params['id'];
+      // Nested routes use :orgId; top-level org routes use :id
+      const orgId = request.params['orgId'] ?? request.params['id'];
 
       if (!companyId) {
         throw new ForbiddenException(

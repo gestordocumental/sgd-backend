@@ -20,4 +20,9 @@ export class CreateUserDto {
   @IsUUID()
   @IsOptional()
   orgId?: string;
+
+  // If provided alongside orgId, overrides the default ADMIN role assignment
+  @IsUUID()
+  @IsOptional()
+  roleId?: string;
 }

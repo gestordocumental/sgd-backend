@@ -2,8 +2,12 @@ import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrgsModule } from './orgs/orgs.module';
+import { OrgStructureModule } from './org-structure/org-structure.module';
 import { HealthModule } from './health/health.module';
 import { Org } from './orgs/entities/org.entity';
+import { Departamento } from './org-structure/entities/departamento.entity';
+import { Area } from './org-structure/entities/area.entity';
+import { Cargo } from './org-structure/entities/cargo.entity';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
 
@@ -25,7 +29,7 @@ import { AppLogger } from './common/logger/app-logger.service';
           username: config.get<string>('DB_USERNAME'),
           password: config.get<string>('DB_PASSWORD'),
           database: config.get<string>('DB_NAME'),
-          entities: [Org],
+          entities: [Org, Departamento, Area, Cargo],
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
@@ -34,6 +38,7 @@ import { AppLogger } from './common/logger/app-logger.service';
     }),
 
     OrgsModule,
+    OrgStructureModule,
     HealthModule,
   ],
   providers: [AppLogger],

@@ -75,3 +75,4 @@ docker-compose.override.yml
 **/*.local
 **/*.tmp
 **/*.bak
+*.pdf
