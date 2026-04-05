@@ -31,7 +31,7 @@ export class PermissionsService {
       relations: ['role', 'role.permissions'],
     });
     return userOrgRoles.some((uor) =>
-      uor.role?.permissions.some((p) => p.module === module && p.action === action),
+      uor.role?.permissions?.some((p) => p.module === module && p.action === action) ?? false,
     );
   }
 }

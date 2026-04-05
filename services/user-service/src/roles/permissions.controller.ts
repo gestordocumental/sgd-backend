@@ -4,7 +4,6 @@ import {
   Query,
   Headers,
   UnauthorizedException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
@@ -24,17 +23,25 @@ export class PermissionsController {
   }
 
   /**
-   * Internal endpoint called by other microservices to check whether the user
-   * identified by the Authorization JWT has the given permission in their org.
+   * Internal endpoint — checks whether a user has the given permission in their org.
    *
-   * Requires x-internal-token header — not exposed to end users via Kong.
+   * Called by other microservices (e.g. org-service) that have already decoded
+   * and trust-verified the user's JWT. Accepts explicit userId / orgId query
+   * params instead of re-parsing a JWT, eliminating the risk of a caller
+   * supplying crafted claims.
+   *
+   * Protected by x-internal-token only. Never exposed to end users via Kong.
+   *
+   * Returns { allowed: true } for super-admins (isSuperAdmin query flag).
    */
   @Get('check')
   async check(
     @Headers('x-internal-token') internalToken: string | undefined,
-    @Headers('authorization') authorization: string | undefined,
+    @Query('userId') userId: string,
+    @Query('orgId') orgId: string,
     @Query('module') module: string,
     @Query('action') action: string,
+    @Query('isSuperAdmin') isSuperAdminParam: string | undefined,
   ): Promise<{ allowed: boolean }> {
     // Validate internal token
     const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
@@ -43,36 +50,13 @@ export class PermissionsController {
       provided.length === expected.length && timingSafeEqual(expected, provided);
     if (!isValid) throw new UnauthorizedException('Invalid internal token');
 
-    // Decode user JWT (signature already verified by Kong)
-    if (!authorization?.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing user token');
-    }
-    const parts = authorization.split(' ')[1].split('.');
-    if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
-
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    } catch {
-      throw new UnauthorizedException('Malformed token');
-    }
-
-    // Super admin always allowed
-    if (payload.isSuperAdmin) return { allowed: true };
-
-    const userId = payload.sub as string | undefined;
-    const companyId = payload.companyId as string | undefined;
-
-    if (!userId) throw new UnauthorizedException('Token has no sub claim');
-    if (!companyId) {
-      throw new ForbiddenException(
-        'Token has no companyId — call POST /api/auth/switch-company first',
-      );
-    }
+    // Super admins have unrestricted access — the calling service asserts this
+    // after verifying the JWT signature itself (or trusting Kong's verification).
+    if (isSuperAdminParam === 'true') return { allowed: true };
 
     const allowed = await this.permissionsService.checkUserPermission(
       userId,
-      companyId,
+      orgId,
       module,
       action,
     );

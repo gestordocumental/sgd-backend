@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsUUID, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class UpdateUserDto {
@@ -26,14 +26,17 @@ export class UpdateUserDto {
   @IsOptional()
   isActive?: boolean;
 
+  @ValidateIf((o) => o.departamentoId !== null)
   @IsUUID()
   @IsOptional()
   departamentoId?: string | null;
 
+  @ValidateIf((o) => o.areaId !== null)
   @IsUUID()
   @IsOptional()
   areaId?: string | null;
 
+  @ValidateIf((o) => o.cargoId !== null)
   @IsUUID()
   @IsOptional()
   cargoId?: string | null;

@@ -41,26 +41,45 @@ export class OrgPermissionsGuard implements CanActivate {
       throw new UnauthorizedException('Malformed token');
     }
 
-    // Super admin bypasses permission checks
+    // Super admin bypasses permission checks — Kong already verified the signature
     if (payload.isSuperAdmin) return true;
 
-    // Delegate the DB-backed permission check to user-service
+    const userId = payload.sub as string | undefined;
+    const companyId = payload.companyId as string | undefined;
+
+    if (!userId) throw new UnauthorizedException('Token has no sub claim');
+    if (!companyId) {
+      throw new ForbiddenException(
+        'Token has no companyId — call POST /api/auth/switch-company first',
+      );
+    }
+
+    // Delegate DB-backed permission check to user-service.
+    // Pass userId and orgId as explicit params — no JWT forwarded — so
+    // user-service never has to re-parse or re-trust JWT claims.
     const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
     const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
-    const url = `${userServiceUrl}/api/permissions/check?module=${required.module}&action=${required.action}`;
+    const url =
+      `${userServiceUrl}/api/permissions/check` +
+      `?userId=${encodeURIComponent(userId)}` +
+      `&orgId=${encodeURIComponent(companyId)}` +
+      `&module=${encodeURIComponent(required.module)}` +
+      `&action=${encodeURIComponent(required.action)}`;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3_000);
     let response: Response;
     try {
       response = await fetch(url, {
-        headers: {
-          authorization: auth,
-          'x-internal-token': internalToken,
-        },
+        signal: controller.signal,
+        headers: { 'x-internal-token': internalToken },
       });
-    } catch (err) {
+    } catch {
       throw new InternalServerErrorException(
         'Could not reach user-service to verify permissions',
       );
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (!response.ok) {
