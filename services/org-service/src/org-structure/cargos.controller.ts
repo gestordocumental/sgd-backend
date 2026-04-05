@@ -7,15 +7,18 @@ import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
 import { CargoResponseDto } from './dto/cargo-response.dto';
 import { OrgGuard } from '../common/guards/org.guard';
+import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
+import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
 
 @Controller('api/org/:orgId/departamentos/:departamentoId/areas/:areaId/cargos')
-@UseGuards(OrgGuard)
+@UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class CargosController {
   constructor(private readonly service: CargosService) {}
 
   @Post()
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -26,6 +29,7 @@ export class CargosController {
   }
 
   @Get()
+  @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findAll(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -35,6 +39,7 @@ export class CargosController {
   }
 
   @Get(':id')
+  @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findOne(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -45,6 +50,7 @@ export class CargosController {
   }
 
   @Patch(':id')
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -57,6 +63,7 @@ export class CargosController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
   async remove(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -67,6 +74,7 @@ export class CargosController {
   }
 
   @Post(':id/restore')
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,

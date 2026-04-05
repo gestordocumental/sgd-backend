@@ -25,7 +25,8 @@ export class MakeRoleIdNullableInUserOrgRoles1775186318602 implements MigrationI
     public async down(queryRunner: QueryRunner): Promise<void> {
         await queryRunner.query(`ALTER TABLE "user_org_roles" DROP CONSTRAINT "FK_d8e5e7828e44142bc24f6b24301"`);
         await queryRunner.query(`ALTER TABLE "user_org_roles" DROP CONSTRAINT "UQ_2bda8cf92a55087b2b14dd4202e"`);
-        // Remove rows with null role_id before restoring the NOT NULL constraint
+        // DESTRUCTIVE: Remove rows with null role_id before restoring the NOT NULL constraint.
+        // Users who had their role cleared (but remained org members) will lose that membership record.
         await queryRunner.query(`DELETE FROM "user_org_roles" WHERE "role_id" IS NULL`);
         await queryRunner.query(`ALTER TABLE "user_org_roles" ALTER COLUMN "role_id" SET NOT NULL`);
         await queryRunner.query(`ALTER TABLE "user_org_roles" ADD CONSTRAINT "FK_d8e5e7828e44142bc24f6b24301" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE NO ACTION`);

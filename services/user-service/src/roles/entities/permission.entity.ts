@@ -12,6 +12,7 @@ export enum PermissionModule {
   WORKFLOWS     = 'WORKFLOWS',
   USERS         = 'USERS',
   ORGS          = 'ORGS',
+  ORG_STRUCTURE = 'ORG_STRUCTURE',
   AUDIT         = 'AUDIT',
 }
 

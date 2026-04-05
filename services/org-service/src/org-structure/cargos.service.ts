@@ -38,11 +38,17 @@ export class CargosService {
     return this.repo.save(cargo);
   }
 
-  findAll(orgId: string, departamentoId: string, areaId: string): Promise<Cargo[]> {
+  async findAll(orgId: string, departamentoId: string, areaId: string): Promise<Cargo[]> {
+    await this.areasService.findOne(orgId, departamentoId, areaId);
     return this.repo.find({ where: { orgId, departamentoId, areaId }, order: { name: 'ASC' } });
   }
 
+  findAllByOrg(orgId: string): Promise<Cargo[]> {
+    return this.repo.find({ where: { orgId }, order: { name: 'ASC' } });
+  }
+
   async findOne(orgId: string, departamentoId: string, areaId: string, id: string): Promise<Cargo> {
+    await this.areasService.findOne(orgId, departamentoId, areaId);
     const cargo = await this.repo.findOne({ where: { id, orgId, departamentoId, areaId } });
     if (!cargo) throw new NotFoundException(`Cargo ${id} not found`);
     return cargo;
@@ -77,9 +83,12 @@ export class CargosService {
   }
 
   async restore(orgId: string, departamentoId: string, areaId: string, id: string): Promise<Cargo> {
+    await this.areasService.findOne(orgId, departamentoId, areaId);
     const cargo = await this.repo.findOne({ where: { id, orgId, departamentoId, areaId }, withDeleted: true });
     if (!cargo) throw new NotFoundException(`Cargo ${id} not found`);
     if (!cargo.deletedAt) throw new ConflictException(`Cargo ${id} is not deleted`);
+    const nameConflict = await this.repo.findOne({ where: { areaId, name: cargo.name } });
+    if (nameConflict) throw new ConflictException(`Cargo "${cargo.name}" already exists in this area`);
     await this.repo.restore(id);
     return this.findOne(orgId, departamentoId, areaId, id);
   }

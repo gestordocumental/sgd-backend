@@ -73,8 +73,10 @@ export class UsersService {
       let roleId: string | null = null;
 
       if (dto.roleId) {
-        // Use the explicitly requested role
-        roleId = dto.roleId;
+        // Validate and use the explicitly requested role
+        const role = await this.roleRepository.findOne({ where: { id: dto.roleId } });
+        if (!role) throw new NotFoundException(`Role ${dto.roleId} not found`);
+        roleId = role.id;
       } else {
         // Fall back to the system ADMIN role
         const adminRole = await this.roleRepository.findOne({

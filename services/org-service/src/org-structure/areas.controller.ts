@@ -7,15 +7,18 @@ import { CreateAreaDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 import { AreaResponseDto } from './dto/area-response.dto';
 import { OrgGuard } from '../common/guards/org.guard';
+import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
+import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
 
 @Controller('api/org/:orgId/departamentos/:departamentoId/areas')
-@UseGuards(OrgGuard)
+@UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class AreasController {
   constructor(private readonly service: AreasService) {}
 
   @Post()
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -25,6 +28,7 @@ export class AreasController {
   }
 
   @Get()
+  @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findAll(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -33,6 +37,7 @@ export class AreasController {
   }
 
   @Get(':id')
+  @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findOne(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -42,6 +47,7 @@ export class AreasController {
   }
 
   @Patch(':id')
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -53,6 +59,7 @@ export class AreasController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
   async remove(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
@@ -62,6 +69,7 @@ export class AreasController {
   }
 
   @Post(':id/restore')
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,

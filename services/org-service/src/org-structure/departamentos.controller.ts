@@ -7,15 +7,18 @@ import { CreateDepartamentoDto } from './dto/create-departamento.dto';
 import { UpdateDepartamentoDto } from './dto/update-departamento.dto';
 import { DepartamentoResponseDto } from './dto/departamento-response.dto';
 import { OrgGuard } from '../common/guards/org.guard';
+import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
+import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
 
 @Controller('api/org/:orgId/departamentos')
-@UseGuards(OrgGuard)
+@UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class DepartamentosController {
   constructor(private readonly service: DepartamentosService) {}
 
   @Post()
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Body() dto: CreateDepartamentoDto,
@@ -24,6 +27,7 @@ export class DepartamentosController {
   }
 
   @Get()
+  @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findAll(
     @Param('orgId', ParseUUIDPipe) orgId: string,
   ): Promise<DepartamentoResponseDto[]> {
@@ -31,6 +35,7 @@ export class DepartamentosController {
   }
 
   @Get(':id')
+  @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findOne(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -39,6 +44,7 @@ export class DepartamentosController {
   }
 
   @Patch(':id')
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -49,6 +55,7 @@ export class DepartamentosController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
   async remove(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -57,6 +64,7 @@ export class DepartamentosController {
   }
 
   @Post(':id/restore')
+  @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('id', ParseUUIDPipe) id: string,

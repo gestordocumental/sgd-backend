@@ -9,12 +9,14 @@ import { CargosService } from './cargos.service';
 import { DepartamentosController } from './departamentos.controller';
 import { AreasController } from './areas.controller';
 import { CargosController } from './cargos.controller';
+import { OrgCargosController } from './org-cargos.controller';
 import { OrgGuard } from '../common/guards/org.guard';
+import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Departamento, Area, Cargo])],
-  controllers: [DepartamentosController, AreasController, CargosController],
-  providers: [DepartamentosService, AreasService, CargosService, OrgGuard],
+  controllers: [DepartamentosController, AreasController, CargosController, OrgCargosController],
+  providers: [DepartamentosService, AreasService, CargosService, OrgGuard, OrgPermissionsGuard],
   exports: [DepartamentosService, AreasService, CargosService],
 })
 export class OrgStructureModule {}

@@ -18,5 +18,8 @@ export const AppDataSource = new DataSource({
       ? 'dist/migrations/*.js'
       : 'src/migrations/*.ts',
   ],
+  // 'each' gives every migration its own transaction so ALTER TYPE ADD VALUE
+  // can commit before the next migration uses the new enum value.
+  migrationsTransactionMode: 'each',
   synchronize: false,
 });

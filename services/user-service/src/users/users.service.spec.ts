@@ -31,8 +31,11 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   lastName: 'Doe',
   idNumber: null,
   position: 'Developer',
+  departamentoId: null,
+  areaId: null,
+  cargoId: null,
   isActive: true,
-  registrationStatus: 
+  registrationStatus:
     overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
   isSuperAdmin: false,
   twoFactorEnabled: false,

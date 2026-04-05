@@ -5,8 +5,11 @@ export class UserResponseDto {
   email!: string;
   firstName!: string | null;
   lastName!: string | null;
-  position!: string;
+  position!: string | null;
   idNumber!: string | null;
+  departamentoId!: string | null;
+  areaId!: string | null;
+  cargoId!: string | null;
   registrationStatus!: RegistrationStatus;
   isActive!: boolean;
   isSuperAdmin!: boolean;
@@ -21,6 +24,9 @@ export class UserResponseDto {
     dto.lastName           = user.lastName;
     dto.position           = user.position;
     dto.idNumber           = user.idNumber;
+    dto.departamentoId     = user.departamentoId;
+    dto.areaId             = user.areaId;
+    dto.cargoId            = user.cargoId;
     dto.registrationStatus = user.registrationStatus;
     dto.isActive           = user.isActive;
     dto.isSuperAdmin       = user.isSuperAdmin;

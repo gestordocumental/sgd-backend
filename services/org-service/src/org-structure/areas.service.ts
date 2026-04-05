@@ -32,11 +32,13 @@ export class AreasService {
     return this.repo.save(area);
   }
 
-  findAll(orgId: string, departamentoId: string): Promise<Area[]> {
+  async findAll(orgId: string, departamentoId: string): Promise<Area[]> {
+    await this.departamentosService.findOne(orgId, departamentoId);
     return this.repo.find({ where: { orgId, departamentoId }, order: { name: 'ASC' } });
   }
 
   async findOne(orgId: string, departamentoId: string, id: string): Promise<Area> {
+    await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId } });
     if (!area) throw new NotFoundException(`Area ${id} not found`);
     return area;
@@ -65,9 +67,12 @@ export class AreasService {
   }
 
   async restore(orgId: string, departamentoId: string, id: string): Promise<Area> {
+    await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId }, withDeleted: true });
     if (!area) throw new NotFoundException(`Area ${id} not found`);
     if (!area.deletedAt) throw new ConflictException(`Area ${id} is not deleted`);
+    const nameConflict = await this.repo.findOne({ where: { departamentoId, name: area.name } });
+    if (nameConflict) throw new ConflictException(`Area "${area.name}" already exists in this departamento`);
     await this.repo.restore(id);
     return this.findOne(orgId, departamentoId, id);
   }

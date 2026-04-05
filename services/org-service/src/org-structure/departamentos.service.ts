@@ -62,6 +62,8 @@ export class DepartamentosService {
     const departamento = await this.repo.findOne({ where: { id, orgId }, withDeleted: true });
     if (!departamento) throw new NotFoundException(`Departamento ${id} not found`);
     if (!departamento.deletedAt) throw new ConflictException(`Departamento ${id} is not deleted`);
+    const nameConflict = await this.repo.findOne({ where: { orgId, name: departamento.name } });
+    if (nameConflict) throw new ConflictException(`Departamento "${departamento.name}" already exists in this organization`);
     await this.repo.restore(id);
     return this.findOne(orgId, id);
   }

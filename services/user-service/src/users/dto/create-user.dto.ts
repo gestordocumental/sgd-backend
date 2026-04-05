@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, IsUUID } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateUserDto {
@@ -6,11 +6,11 @@ export class CreateUserDto {
   @IsEmail()
   email!: string;
 
-  // Required at creation — identifies the user's role in the company
+  // Replaced by departamento/area/cargo structure — kept for backward compatibility
   @Transform(({ value }) => (value as string)?.trim())
   @IsString()
-  @IsNotEmpty()
-  position!: string;
+  @IsOptional()
+  position?: string;
 
   @IsBoolean()
   @IsOptional()
@@ -25,4 +25,17 @@ export class CreateUserDto {
   @IsUUID()
   @IsOptional()
   roleId?: string;
+
+  // Org-structure assignment (plain UUID references — cross-service, no FK)
+  @IsUUID()
+  @IsOptional()
+  departamentoId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  areaId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  cargoId?: string;
 }
