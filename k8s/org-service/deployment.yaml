@@ -40,6 +40,11 @@ spec:
                 secretKeyRef:
                   name: org-service-secret
                   key: DB_PASSWORD
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: org-service-secret
+                  key: INTERNAL_TOKEN
           startupProbe:
             httpGet:
               path: /health/startup
