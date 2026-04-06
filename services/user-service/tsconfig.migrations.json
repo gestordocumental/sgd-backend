@@ -1,4 +1,9 @@
 {
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
   "include": ["src/data-source.ts", "src/migrations/**/*.ts"]
 }
