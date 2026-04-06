@@ -11,6 +11,11 @@ COPY src ./src
 
 RUN npm run build
 
+# Compila data-source y migraciones (no forman parte del árbol de módulos de NestJS)
+RUN npx tsc --module commonjs --target ES2021 --experimentalDecorators true \
+    --emitDecoratorMetadata true --esModuleInterop true --skipLibCheck true \
+    --outDir dist src/data-source.ts
+
 # ── Stage 2: production ───────────────────────────────────────────────────────
 FROM node:20-alpine
 
