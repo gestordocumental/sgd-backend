@@ -39,9 +39,19 @@ export class User {
   @Column({ name: 'id_number', type: 'varchar', length: 50, nullable: true })
   idNumber!: string | null;
 
-  // Job position / title — required at creation
-  @Column({ type: 'varchar', length: 100 })
-  position!: string;
+  // Job position / title — nullable, replaced by departamento/area/cargo structure
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  position!: string | null;
+
+  // Org-structure references (plain UUIDs — no FK, cross-service)
+  @Column({ name: 'departamento_id', type: 'uuid', nullable: true })
+  departamentoId!: string | null;
+
+  @Column({ name: 'area_id', type: 'uuid', nullable: true })
+  areaId!: string | null;
+
+  @Column({ name: 'cargo_id', type: 'uuid', nullable: true })
+  cargoId!: string | null;
 
   @Column({ name: 'is_active', type: 'boolean', default: false })
   isActive!: boolean;

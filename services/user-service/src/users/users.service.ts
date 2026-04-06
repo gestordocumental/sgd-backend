@@ -68,20 +68,32 @@ export class UsersService {
     const user = this.usersRepository.create(dto);
     await this.usersRepository.save(user);
 
-    // Auto-assign ADMIN role in the org if orgId was provided
+    // Assign role in the org if orgId was provided
     if (dto.orgId) {
-      const adminRole = await this.roleRepository.findOne({
-        where: {
-          name: SystemRoleName.ADMIN,
-          scope: RoleScope.SYSTEM,
-          orgId: IsNull(),
-        },
-      });
-      if (adminRole) {
+      let roleId: string | null = null;
+
+      if (dto.roleId) {
+        // Validate and use the explicitly requested role
+        const role = await this.roleRepository.findOne({ where: { id: dto.roleId } });
+        if (!role) throw new NotFoundException(`Role ${dto.roleId} not found`);
+        roleId = role.id;
+      } else {
+        // Fall back to the system ADMIN role
+        const adminRole = await this.roleRepository.findOne({
+          where: {
+            name: SystemRoleName.ADMIN,
+            scope: RoleScope.SYSTEM,
+            orgId: IsNull(),
+          },
+        });
+        if (adminRole) roleId = adminRole.id;
+      }
+
+      if (roleId) {
         const record = this.userOrgRoleRepository.create({
           userId: user.id,
           orgId: dto.orgId,
-          roleId: adminRole.id,
+          roleId,
           assignedBy: null,
         });
         await this.userOrgRoleRepository.save(record);
@@ -209,11 +221,23 @@ export class UsersService {
   ): Promise<UserOrgRole> {
     await this.findOne(userId);
 
+    // If the user already has a membership record for this org, just update the role
     const existing = await this.userOrgRoleRepository.findOne({
-      where: { userId, orgId: dto.orgId, roleId: dto.roleId },
+      where: { userId, orgId: dto.orgId },
     });
+
     if (existing) {
-      throw new ConflictException("User already has this role in this org");
+      if (existing.roleId === dto.roleId) {
+        throw new ConflictException("User already has this role in this org");
+      }
+      await this.userOrgRoleRepository.update(existing.id, {
+        roleId: dto.roleId,
+        assignedBy,
+      });
+      return this.userOrgRoleRepository.findOne({
+        where: { id: existing.id },
+        relations: ['role'],
+      }) as Promise<UserOrgRole>;
     }
 
     const record = this.userOrgRoleRepository.create({
@@ -228,24 +252,26 @@ export class UsersService {
   async findByOrg(
     orgId: string,
   ): Promise<{ user: User; roles: { roleId: string; roleName: string }[] }[]> {
+    // All membership records for this org (including those with role_id = NULL)
     const orgRoles = await this.userOrgRoleRepository.find({
       where: { orgId },
-      relations: ["role"],
+      relations: ['user', 'role'],
     });
 
     if (orgRoles.length === 0) return [];
 
-    const userIds = [...new Set(orgRoles.map((r) => r.userId))];
-    const users = await this.usersRepository.find({
-      where: userIds.map((id) => ({ id })),
-    });
+    // Group by userId, collecting only records that have a role assigned
+    const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[] }>();
+    for (const r of orgRoles) {
+      if (!byUser.has(r.userId)) {
+        byUser.set(r.userId, { user: r.user, roles: [] });
+      }
+      if (r.roleId !== null && r.role !== null) {
+        byUser.get(r.userId)!.roles.push({ roleId: r.roleId, roleName: r.role.name });
+      }
+    }
 
-    return users.map((user) => ({
-      user,
-      roles: orgRoles
-        .filter((r) => r.userId === user.id)
-        .map((r) => ({ roleId: r.roleId, roleName: r.role.name })),
-    }));
+    return Array.from(byUser.values());
   }
 
   async getOrgRoles(userId: string): Promise<UserOrgRole[]> {
@@ -258,7 +284,10 @@ export class UsersService {
 
   async removeFromOrg(userId: string, orgId: string): Promise<void> {
     await this.findOne(userId);
-    await this.userOrgRoleRepository.delete({ userId, orgId });
+    await this.userOrgRoleRepository.query(
+      `UPDATE user_org_roles SET role_id = NULL, assigned_by = NULL WHERE user_id = $1 AND org_id = $2`,
+      [userId, orgId],
+    );
   }
 
   /**

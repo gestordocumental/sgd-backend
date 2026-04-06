@@ -12,8 +12,8 @@ export enum PermissionModule {
   WORKFLOWS     = 'WORKFLOWS',
   USERS         = 'USERS',
   ORGS          = 'ORGS',
+  ORG_STRUCTURE = 'ORG_STRUCTURE',
   AUDIT         = 'AUDIT',
-  PLATFORM      = 'PLATFORM', // exclusive to SUPER_ADMIN
 }
 
 export enum PermissionAction {
@@ -23,7 +23,7 @@ export enum PermissionAction {
   APPROVE  = 'APPROVE',
   UPLOAD   = 'UPLOAD',
   DOWNLOAD = 'DOWNLOAD',
-  MANAGE   = 'MANAGE', // full control — used for PLATFORM module
+  MANAGE   = 'MANAGE', // full control
 }
 
 @Entity('permissions')

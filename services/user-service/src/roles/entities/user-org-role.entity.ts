@@ -12,7 +12,7 @@ import { User } from '../../users/entities/user.entity';
 import { Role } from './role.entity';
 
 @Entity('user_org_roles')
-@Unique(['userId', 'orgId', 'roleId']) // one role per org per user
+@Unique(['userId', 'orgId']) // one membership per org per user
 export class UserOrgRole {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -26,8 +26,9 @@ export class UserOrgRole {
   @Column({ name: 'org_id', type: 'uuid' })
   orgId!: string;
 
-  @Column({ name: 'role_id', type: 'uuid' })
-  roleId!: string;
+  // Nullable: user belongs to the org but may have no role assigned yet
+  @Column({ name: 'role_id', type: 'uuid', nullable: true })
+  roleId!: string | null;
 
   // Audit trail: who assigned this role
   @Column({ name: 'assigned_by', type: 'uuid', nullable: true })
@@ -37,9 +38,9 @@ export class UserOrgRole {
   @JoinColumn({ name: 'user_id' })
   user!: User;
 
-  @ManyToOne(() => Role, (role) => role.userOrgRoles, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => Role, (role) => role.userOrgRoles, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'role_id' })
-  role!: Role;
+  role!: Role | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

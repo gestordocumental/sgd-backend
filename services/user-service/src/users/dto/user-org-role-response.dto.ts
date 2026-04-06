@@ -4,7 +4,7 @@ export class UserOrgRoleResponseDto {
   id!: string;
   userId!: string;
   orgId!: string;
-  roleId!: string;
+  roleId!: string | null;
   assignedBy!: string | null;
   createdAt!: Date;
 

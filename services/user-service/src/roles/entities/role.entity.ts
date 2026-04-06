@@ -19,7 +19,6 @@ export enum RoleScope {
 
 // Predefined system role names — custom org roles use free-form strings
 export enum SystemRoleName {
-  SUPER_ADMIN = 'SUPER_ADMIN',
   ADMIN       = 'ADMIN',
   MANAGER     = 'MANAGER',
   EDITOR      = 'EDITOR',

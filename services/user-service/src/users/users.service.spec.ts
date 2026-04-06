@@ -31,8 +31,11 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   lastName: 'Doe',
   idNumber: null,
   position: 'Developer',
+  departamentoId: null,
+  areaId: null,
+  cargoId: null,
   isActive: true,
-  registrationStatus: 
+  registrationStatus:
     overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
   isSuperAdmin: false,
   twoFactorEnabled: false,
@@ -97,6 +100,8 @@ describe('UsersService', () => {
             create: jest.fn(),
             save: jest.fn(),
             delete: jest.fn(),
+            query: jest.fn(),
+            update: jest.fn(),
           },
         },
         {
@@ -583,18 +588,18 @@ describe('UsersService', () => {
   // ─── removeFromOrg ────────────────────────────────────────────────────────
 
   describe('removeFromOrg', () => {
-    it('deletes all org-role rows for the given userId + orgId', async () => {
+    it('clears role assignment for the given userId + orgId', async () => {
       const user = makeUser();
 
       usersRepo.findOne.mockResolvedValue(user);
-      uorRepo.delete.mockResolvedValue(undefined as any);
+      uorRepo.query.mockResolvedValue(undefined as any);
 
       await service.removeFromOrg(user.id, 'org-uuid-1');
 
-      expect(uorRepo.delete).toHaveBeenCalledWith({
-        userId: user.id,
-        orgId: 'org-uuid-1',
-      });
+      expect(uorRepo.query).toHaveBeenCalledWith(
+        `UPDATE user_org_roles SET role_id = NULL, assigned_by = NULL WHERE user_id = $1 AND org_id = $2`,
+        [user.id, 'org-uuid-1'],
+      );
     });
 
     it('throws NotFoundException when user does not exist', async () => {
@@ -612,20 +617,17 @@ describe('UsersService', () => {
     it('returns users with their roles for a given orgId', async () => {
       const user = makeUser();
       const adminRole = makeRole();
-      const orgRole = makeUor({ role: adminRole as any });
+      const orgRole = makeUor({ user, role: adminRole as any });
 
       uorRepo.find.mockResolvedValue([orgRole] as any);
-      usersRepo.find.mockResolvedValue([user]);
 
       const result = await service.findByOrg('org-uuid-1');
 
       expect(uorRepo.find).toHaveBeenCalledWith({
         where: { orgId: 'org-uuid-1' },
-        relations: ['role'],
+        relations: ['user', 'role'],
       });
-      expect(usersRepo.find).toHaveBeenCalledWith({
-        where: [{ id: user.id }],
-      });
+      expect(usersRepo.find).not.toHaveBeenCalled();
       expect(result).toHaveLength(1);
       expect(result[0].user).toEqual(user);
       expect(result[0].roles).toEqual([
@@ -638,11 +640,10 @@ describe('UsersService', () => {
       const user2 = makeUser({ id: 'user-uuid-2', email: 'other@example.com' });
       const role1 = makeRole({ id: 'role-uuid-1', name: SystemRoleName.ADMIN });
       const role2 = makeRole({ id: 'role-uuid-2', name: SystemRoleName.VIEWER, scope: RoleScope.SYSTEM });
-      const orgRole1 = makeUor({ userId: user1.id, roleId: role1.id, role: role1 as any });
-      const orgRole2 = makeUor({ id: 'uor-uuid-2', userId: user2.id, roleId: role2.id, role: role2 as any });
+      const orgRole1 = makeUor({ userId: user1.id, user: user1, roleId: role1.id, role: role1 as any });
+      const orgRole2 = makeUor({ id: 'uor-uuid-2', userId: user2.id, user: user2, roleId: role2.id, role: role2 as any });
 
       uorRepo.find.mockResolvedValue([orgRole1, orgRole2] as any);
-      usersRepo.find.mockResolvedValue([user1, user2]);
 
       const result = await service.findByOrg('org-uuid-1');
 

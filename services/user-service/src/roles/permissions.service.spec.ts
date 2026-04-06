@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PermissionsService } from './permissions.service';
 import { Permission, PermissionModule, PermissionAction } from './entities/permission.entity';
+import { UserOrgRole } from './entities/user-org-role.entity';
 
 const makePermission = (overrides: Partial<Permission> = {}): Permission => ({
   id: 'perm-uuid-1',
@@ -23,6 +24,10 @@ describe('PermissionsService', () => {
         PermissionsService,
         {
           provide: getRepositoryToken(Permission),
+          useValue: { find: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(UserOrgRole),
           useValue: { find: jest.fn() },
         },
       ],
