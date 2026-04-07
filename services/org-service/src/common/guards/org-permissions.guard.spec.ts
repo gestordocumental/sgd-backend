@@ -27,8 +27,10 @@ describe('OrgPermissionsGuard', () => {
   let configService: { getOrThrow: jest.Mock };
   let guard: OrgPermissionsGuard;
   let fetchMock: jest.Mock;
+  let originalFetch: typeof global.fetch;
 
   beforeEach(() => {
+    originalFetch = global.fetch;
     reflector = { get: jest.fn() };
     configService = {
       getOrThrow: jest.fn((key: string) => {
@@ -46,6 +48,7 @@ describe('OrgPermissionsGuard', () => {
   });
 
   afterEach(() => {
+    global.fetch = originalFetch;
     jest.clearAllMocks();
   });
 

@@ -62,7 +62,16 @@ export class InitialSchema1700000000000 implements MigrationInterface {
     // Global unique index on email — replaced with partial index by
     // ReplaceEmailIndexWithPartialIndex1772994203515 (referenced by this exact name).
     await queryRunner.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "IDX_97672ac88f789774dd47f7c8be" ON "users" ("email")
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND indexname = 'users_email_active_uniq'
+        ) THEN
+          CREATE UNIQUE INDEX IF NOT EXISTS "IDX_97672ac88f789774dd47f7c8be" ON "users" ("email");
+        END IF;
+      END $$;
     `);
 
     // ── roles ──────────────────────────────────────────────────────────────────

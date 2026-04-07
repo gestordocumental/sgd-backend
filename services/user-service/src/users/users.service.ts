@@ -220,6 +220,7 @@ export class UsersService {
     assignedBy: string,
   ): Promise<UserOrgRole> {
     await this.findOne(userId);
+    const roleId = dto.roleId ?? null;
 
     // If the user already has a membership record for this org, just update the role
     const existing = await this.userOrgRoleRepository.findOne({
@@ -227,11 +228,11 @@ export class UsersService {
     });
 
     if (existing) {
-      if (existing.roleId === dto.roleId) {
+      if (existing.roleId === roleId) {
         throw new ConflictException("User already has this role in this org");
       }
       await this.userOrgRoleRepository.update(existing.id, {
-        roleId: dto.roleId,
+        roleId,
         assignedBy,
       });
       return this.userOrgRoleRepository.findOne({
@@ -243,7 +244,7 @@ export class UsersService {
     const record = this.userOrgRoleRepository.create({
       userId,
       orgId: dto.orgId,
-      roleId: dto.roleId,
+      roleId,
       assignedBy,
     });
     return this.userOrgRoleRepository.save(record);

@@ -1,5 +1,5 @@
-# Always use LF for shell scripts — CRLF breaks sh/bash in Linux containers
-*.sh text eol=lf
-
 # Default: let git handle text files normally
 * text=auto
+
+# Always use LF for shell scripts — CRLF breaks sh/bash in Linux containers
+*.sh text eol=lf
