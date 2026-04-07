@@ -35,12 +35,15 @@ export const OrgId = createParamDecorator(
     }
 
     const companyId = payload.companyId as string | undefined;
-    if (!companyId) {
-      throw new ForbiddenException(
-        'Token has no companyId — call POST /api/auth/switch-company first',
-      );
-    }
+    if (companyId) return companyId;
 
-    return companyId;
+    // Super-admin tokens have no companyId. Allow passing it as a query param
+    // so the admin can query roles/resources scoped to a specific org.
+    const queryOrgId = (request as unknown as { query?: Record<string, string> }).query?.orgId;
+    if (queryOrgId) return queryOrgId;
+
+    throw new ForbiddenException(
+      'Token has no companyId — call POST /api/auth/switch-company first',
+    );
   },
 );
