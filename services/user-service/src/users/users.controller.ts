@@ -89,6 +89,20 @@ export class UsersController {
     );
   }
 
+  /**
+   * Returns the caller's own role assignments for their current company (from JWT companyId).
+   * No @RequirePermission needed — a user can always read their own roles.
+   * Used by the frontend to derive which UI sections to display.
+   */
+  @Get("me/org-roles")
+  getMyOrgRoles(@JwtPayloadParam() caller: JwtPayload): Promise<UserOrgRoleResponseDto[]> {
+    if (!caller.sub) throw new UnauthorizedException('Missing sub claim');
+    if (!caller.companyId) throw new ForbiddenException('No company context — call switch-company first');
+    return this.usersService.getMyOrgRoles(caller.sub, caller.companyId).then(
+      (roles) => roles.map(UserOrgRoleResponseDto.from),
+    );
+  }
+
   @Get(":id/companies")
   getCompanies(
     @Headers("x-internal-token") internalToken: string,
@@ -139,6 +153,7 @@ export class UsersController {
   }
 
   @Post(":id/provision")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   provision(@Param("id") id: string, @Body() dto: ProvisionUserDto) {
     return this.usersService.provision(id, dto);
   }

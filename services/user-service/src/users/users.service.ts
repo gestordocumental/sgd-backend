@@ -7,7 +7,7 @@ import {
   Inject,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { IsNull, Repository } from "typeorm";
+import { IsNull, Not, Repository } from "typeorm";
 import { randomBytes } from "crypto";
 import Redis from "ioredis";
 import { User, RegistrationStatus } from "./entities/user.entity";
@@ -173,8 +173,11 @@ export class UsersService {
    * The first element is treated as the default company by auth-service / frontend.
    */
   async getCompanies(userId: string): Promise<string[]> {
+    // Only return orgs where the user has an active role (roleId not null).
+    // removeFromOrg nulls the roleId without deleting the row, so filtering here
+    // prevents removed orgs from appearing in the user's company list.
     const rows = await this.userOrgRoleRepository.find({
-      where: { userId },
+      where: { userId, roleId: Not(IsNull()) },
       order: { createdAt: "ASC" },
     });
 
@@ -280,6 +283,19 @@ export class UsersService {
     return this.userOrgRoleRepository.find({
       where: { userId },
       order: { createdAt: "ASC" },
+    });
+  }
+
+  /**
+   * Returns the current user's role assignments for a specific org.
+   * Used by the frontend to determine which UI sections to show,
+   * without requiring USERS:READ permission (users can always see their own roles).
+   */
+  async getMyOrgRoles(userId: string, orgId: string): Promise<UserOrgRole[]> {
+    // Exclude records with roleId = NULL (user was removed from the org).
+    return this.userOrgRoleRepository.find({
+      where: { userId, orgId, roleId: Not(IsNull()) },
+      order: { createdAt: 'ASC' },
     });
   }
 

@@ -162,7 +162,10 @@ export class AuthService {
 
     return this.generateTokenPair(credential, {
       companyId: payload.companyId,
-      isSuperAdmin: userInfo.isSuperAdmin || undefined,
+      // Only include isSuperAdmin for global (non-company) tokens.
+      // Company-scoped tokens must not carry isSuperAdmin so the user
+      // is limited to their company role permissions in that context.
+      ...(!payload.companyId && { isSuperAdmin: userInfo.isSuperAdmin || undefined }),
     });
   }
 
@@ -219,10 +222,7 @@ export class AuthService {
    * Validates the user belongs to companyId and returns a scoped token pair.
    */
   async switchCompany(userId: string, companyId: string) {
-    const [companies, userInfo] = await Promise.all([
-      this.userClientService.getUserCompanies(userId),
-      this.userClientService.getUserInfo(userId),
-    ]);
+    const companies = await this.userClientService.getUserCompanies(userId);
 
     if (!companies.includes(companyId)) {
       throw new NotFoundException(
@@ -237,9 +237,12 @@ export class AuthService {
       throw new UnauthorizedException("User not found or inactive");
     }
 
+    // isSuperAdmin is intentionally omitted from company-scoped tokens so the user
+    // operates with their company role permissions only, regardless of global
+    // super admin status. The global token (stored in sgd-super-admin-token)
+    // retains isSuperAdmin for exitCompany() to work correctly.
     return this.generateTokenPair(credential, {
       companyId,
-      isSuperAdmin: userInfo.isSuperAdmin || undefined,
     });
   }
 

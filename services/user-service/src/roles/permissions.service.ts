@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Permission } from './entities/permission.entity';
 import { UserOrgRole } from './entities/user-org-role.entity';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class PermissionsService {
@@ -11,6 +12,8 @@ export class PermissionsService {
     private readonly permissionsRepository: Repository<Permission>,
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepo: Repository<UserOrgRole>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
   ) {}
 
   // Read-only — orgs can only assign existing permissions, not create new ones
@@ -18,6 +21,18 @@ export class PermissionsService {
     return this.permissionsRepository.find({
       order: { module: 'ASC', action: 'ASC' },
     });
+  }
+
+  /**
+   * Checks isSuperAdmin directly from the database — never from caller-supplied params.
+   * This prevents privilege escalation if a calling service is compromised.
+   */
+  async isUserSuperAdmin(userId: string): Promise<boolean> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['isSuperAdmin'],
+    });
+    return user?.isSuperAdmin === true;
   }
 
   async checkUserPermission(

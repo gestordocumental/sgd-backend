@@ -25,14 +25,13 @@ export class PermissionsController {
   /**
    * Internal endpoint — checks whether a user has the given permission in their org.
    *
-   * Called by other microservices (e.g. org-service) that have already decoded
-   * and trust-verified the user's JWT. Accepts explicit userId / orgId query
-   * params instead of re-parsing a JWT, eliminating the risk of a caller
-   * supplying crafted claims.
+   * Called by other microservices (e.g. org-service). Accepts explicit userId/orgId
+   * instead of re-parsing a JWT, so caller cannot supply crafted claims.
    *
    * Protected by x-internal-token only. Never exposed to end users via Kong.
    *
-   * Returns { allowed: true } for super-admins (isSuperAdmin query flag).
+   * Super-admin status is verified directly against the DB — never trusted
+   * from caller-supplied query params to prevent privilege escalation.
    */
   @Get('check')
   async check(
@@ -41,18 +40,17 @@ export class PermissionsController {
     @Query('orgId') orgId: string,
     @Query('module') module: string,
     @Query('action') action: string,
-    @Query('isSuperAdmin') isSuperAdminParam: string | undefined,
   ): Promise<{ allowed: boolean }> {
-    // Validate internal token
     const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
     const provided = Buffer.from(internalToken ?? '');
     const isValid =
       provided.length === expected.length && timingSafeEqual(expected, provided);
     if (!isValid) throw new UnauthorizedException('Invalid internal token');
 
-    // Super admins have unrestricted access — the calling service asserts this
-    // after verifying the JWT signature itself (or trusting Kong's verification).
-    if (isSuperAdminParam === 'true') return { allowed: true };
+    // Verify super-admin status from the database, not from caller params
+    if (await this.permissionsService.isUserSuperAdmin(userId)) {
+      return { allowed: true };
+    }
 
     const allowed = await this.permissionsService.checkUserPermission(
       userId,
