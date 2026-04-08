@@ -557,6 +557,46 @@ describe('UsersService', () => {
         service.assignOrg('bad-id', { orgId: 'o', roleId: 'r' }, 'a'),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('creates a membership with null roleId when dto.roleId is omitted', async () => {
+      const user = makeUser();
+      const dto = { orgId: 'org-uuid-1' };
+      const uor = makeUor({ roleId: null });
+
+      usersRepo.findOne.mockResolvedValue(user);
+      uorRepo.findOne.mockResolvedValue(null);
+      uorRepo.create.mockReturnValue(uor);
+      uorRepo.save.mockResolvedValue(uor);
+
+      const result = await service.assignOrg(user.id, dto as any, 'admin-uuid');
+
+      expect(uorRepo.create).toHaveBeenCalledWith({
+        userId: user.id,
+        orgId: dto.orgId,
+        roleId: null,
+        assignedBy: 'admin-uuid',
+      });
+      expect(result).toEqual(uor);
+    });
+
+    it('clears the role when membership exists and dto.roleId is omitted', async () => {
+      const user = makeUser();
+      const existing = makeUor({ roleId: 'role-uuid-1' });
+      const updated = makeUor({ id: existing.id, roleId: null });
+
+      usersRepo.findOne.mockResolvedValue(user);
+      uorRepo.findOne
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValueOnce(updated);
+
+      const result = await service.assignOrg(user.id, { orgId: existing.orgId } as any, 'admin-uuid');
+
+      expect(uorRepo.update).toHaveBeenCalledWith(existing.id, {
+        roleId: null,
+        assignedBy: 'admin-uuid',
+      });
+      expect(result).toEqual(updated);
+    });
   });
 
   // ─── getOrgRoles ──────────────────────────────────────────────────────────

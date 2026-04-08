@@ -7,7 +7,7 @@ import {
   Inject,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { IsNull, Repository } from "typeorm";
+import { IsNull, Not, Repository } from "typeorm";
 import { randomBytes } from "crypto";
 import Redis from "ioredis";
 import { User, RegistrationStatus } from "./entities/user.entity";
@@ -152,7 +152,13 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, callerOrgId?: string): Promise<void> {
+    if (callerOrgId) {
+      // Org-scoped delete: only remove the user's membership from the caller's org.
+      // The user account and credentials remain intact so they can still access other orgs.
+      return this.removeFromOrg(id, callerOrgId);
+    }
+    // Global delete (super admin, no companyId): soft-delete the account and disable credentials.
     const user = await this.findOne(id);
     await this.usersRepository.softRemove(user);
     // Disable credentials so the soft-deleted user cannot log in.
@@ -173,8 +179,11 @@ export class UsersService {
    * The first element is treated as the default company by auth-service / frontend.
    */
   async getCompanies(userId: string): Promise<string[]> {
+    // Only return orgs where the user has an active role (roleId not null).
+    // removeFromOrg nulls the roleId without deleting the row, so filtering here
+    // prevents removed orgs from appearing in the user's company list.
     const rows = await this.userOrgRoleRepository.find({
-      where: { userId },
+      where: { userId, roleId: Not(IsNull()) },
       order: { createdAt: "ASC" },
     });
 
@@ -220,6 +229,7 @@ export class UsersService {
     assignedBy: string,
   ): Promise<UserOrgRole> {
     await this.findOne(userId);
+    const roleId = dto.roleId ?? null;
 
     // If the user already has a membership record for this org, just update the role
     const existing = await this.userOrgRoleRepository.findOne({
@@ -227,11 +237,11 @@ export class UsersService {
     });
 
     if (existing) {
-      if (existing.roleId === dto.roleId) {
+      if (existing.roleId === roleId) {
         throw new ConflictException("User already has this role in this org");
       }
       await this.userOrgRoleRepository.update(existing.id, {
-        roleId: dto.roleId,
+        roleId,
         assignedBy,
       });
       return this.userOrgRoleRepository.findOne({
@@ -243,7 +253,7 @@ export class UsersService {
     const record = this.userOrgRoleRepository.create({
       userId,
       orgId: dto.orgId,
-      roleId: dto.roleId,
+      roleId,
       assignedBy,
     });
     return this.userOrgRoleRepository.save(record);
@@ -263,6 +273,7 @@ export class UsersService {
     // Group by userId, collecting only records that have a role assigned
     const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[] }>();
     for (const r of orgRoles) {
+      if (!r.user) continue; // user was soft-deleted; relation resolves to null
       if (!byUser.has(r.userId)) {
         byUser.set(r.userId, { user: r.user, roles: [] });
       }
@@ -279,6 +290,19 @@ export class UsersService {
     return this.userOrgRoleRepository.find({
       where: { userId },
       order: { createdAt: "ASC" },
+    });
+  }
+
+  /**
+   * Returns the current user's role assignments for a specific org.
+   * Used by the frontend to determine which UI sections to show,
+   * without requiring USERS:READ permission (users can always see their own roles).
+   */
+  async getMyOrgRoles(userId: string, orgId: string): Promise<UserOrgRole[]> {
+    // Exclude records with roleId = NULL (user was removed from the org).
+    return this.userOrgRoleRepository.find({
+      where: { userId, orgId, roleId: Not(IsNull()) },
+      order: { createdAt: 'ASC' },
     });
   }
 

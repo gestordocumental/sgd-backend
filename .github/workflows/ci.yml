@@ -26,8 +26,8 @@ jobs:
         service:
           - auth-service
           - user-service
+          - org-service
           # Agregar aquí cuando el servicio tenga tests:
-          # - org-service
           # - document-service
           # - workflow-service
           # - notification-service
@@ -65,8 +65,8 @@ jobs:
         service:
           - auth-service
           - user-service
+          - org-service
           # Agregar aquí cuando se creen los demás servicios:
-          # - org-service
           # - document-service
           # - workflow-service
           # - notification-service

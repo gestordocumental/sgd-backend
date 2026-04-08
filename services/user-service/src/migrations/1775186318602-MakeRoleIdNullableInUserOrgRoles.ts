@@ -4,9 +4,12 @@ export class MakeRoleIdNullableInUserOrgRoles1775186318602 implements MigrationI
     name = 'MakeRoleIdNullableInUserOrgRoles1775186318602'
 
     public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`ALTER TABLE "user_org_roles" DROP CONSTRAINT "UQ_8b7faa9d36151ec52426d498f85"`);
-        await queryRunner.query(`ALTER TABLE "user_org_roles" DROP COLUMN "deleted_at"`);
-        await queryRunner.query(`ALTER TABLE "user_org_roles" DROP CONSTRAINT "FK_d8e5e7828e44142bc24f6b24301"`);
+        // Be tolerant of databases bootstrapped with synchronize:true, where the
+        // current shape may already exist with the new unique constraint name.
+        await queryRunner.query(`ALTER TABLE "user_org_roles" DROP CONSTRAINT IF EXISTS "UQ_8b7faa9d36151ec52426d498f85"`);
+        await queryRunner.query(`ALTER TABLE "user_org_roles" DROP CONSTRAINT IF EXISTS "UQ_2bda8cf92a55087b2b14dd4202e"`);
+        await queryRunner.query(`ALTER TABLE "user_org_roles" DROP COLUMN IF EXISTS "deleted_at"`);
+        await queryRunner.query(`ALTER TABLE "user_org_roles" DROP CONSTRAINT IF EXISTS "FK_d8e5e7828e44142bc24f6b24301"`);
         await queryRunner.query(`ALTER TABLE "user_org_roles" ALTER COLUMN "role_id" DROP NOT NULL`);
         // Remove duplicate (user_id, org_id) rows keeping the most recently created one
         // before adding the new unique constraint
@@ -18,8 +21,21 @@ export class MakeRoleIdNullableInUserOrgRoles1775186318602 implements MigrationI
                 ORDER BY user_id, org_id, created_at DESC
             )
         `);
-        await queryRunner.query(`ALTER TABLE "user_org_roles" ADD CONSTRAINT "UQ_2bda8cf92a55087b2b14dd4202e" UNIQUE ("user_id", "org_id")`);
-        await queryRunner.query(`ALTER TABLE "user_org_roles" ADD CONSTRAINT "FK_d8e5e7828e44142bc24f6b24301" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE NO ACTION`);
+        await queryRunner.query(`
+            DO $$ BEGIN
+                ALTER TABLE "user_org_roles"
+                ADD CONSTRAINT "UQ_2bda8cf92a55087b2b14dd4202e" UNIQUE ("user_id", "org_id");
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END $$;
+        `);
+        await queryRunner.query(`
+            DO $$ BEGIN
+                ALTER TABLE "user_org_roles"
+                ADD CONSTRAINT "FK_d8e5e7828e44142bc24f6b24301"
+                FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END $$;
+        `);
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {

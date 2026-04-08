@@ -21,10 +21,13 @@ function buildJwt(payload: Record<string, unknown>): string {
   return `header.${encoded}.signature`;
 }
 
-function makeCtx(headers: Record<string, string>): ExecutionContext {
+function makeCtx(
+  headers: Record<string, string>,
+  query?: Record<string, unknown>,
+): ExecutionContext {
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ headers }),
+      getRequest: () => ({ headers, query }),
     }),
   } as unknown as ExecutionContext;
 }
@@ -71,6 +74,34 @@ describe('@OrgId()', () => {
 
   it('throws ForbiddenException when the payload has no companyId (global token)', () => {
     const ctx = makeCtx({ authorization: `Bearer ${buildJwt({ sub: 'user-uuid-1' })}` });
+
+    expect(() => factory(undefined, ctx)).toThrow(ForbiddenException);
+  });
+
+  it('returns query orgId for super admin when it is a valid UUID', () => {
+    const orgId = '123e4567-e89b-42d3-a456-426614174000';
+    const ctx = makeCtx(
+      { authorization: `Bearer ${buildJwt({ sub: 'user-uuid-1', isSuperAdmin: true })}` },
+      { orgId },
+    );
+
+    expect(factory(undefined, ctx)).toBe(orgId);
+  });
+
+  it('throws ForbiddenException when non-super-admin tries to use query orgId', () => {
+    const ctx = makeCtx(
+      { authorization: `Bearer ${buildJwt({ sub: 'user-uuid-1' })}` },
+      { orgId: '123e4567-e89b-42d3-a456-426614174000' },
+    );
+
+    expect(() => factory(undefined, ctx)).toThrow(ForbiddenException);
+  });
+
+  it('throws ForbiddenException when super admin query orgId is not a valid UUID', () => {
+    const ctx = makeCtx(
+      { authorization: `Bearer ${buildJwt({ sub: 'user-uuid-1', isSuperAdmin: true })}` },
+      { orgId: 'not-a-uuid' },
+    );
 
     expect(() => factory(undefined, ctx)).toThrow(ForbiddenException);
   });

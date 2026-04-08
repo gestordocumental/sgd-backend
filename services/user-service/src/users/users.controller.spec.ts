@@ -278,12 +278,20 @@ describe('UsersController', () => {
   // ─── DELETE /:id ──────────────────────────────────────────────────────────
 
   describe('remove', () => {
-    it('delegates to service.remove and returns void', async () => {
+    it('passes companyId from JWT when caller has org context (org-scoped delete)', async () => {
       usersService.remove.mockResolvedValue(undefined);
 
-      await controller.remove('user-uuid-1');
+      await controller.remove({ sub: 'caller-id', companyId: 'org-uuid' } as any, 'user-uuid-1');
 
-      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1');
+      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', 'org-uuid');
+    });
+
+    it('passes undefined companyId when caller is super admin (global delete)', async () => {
+      usersService.remove.mockResolvedValue(undefined);
+
+      await controller.remove({ sub: 'caller-id', isSuperAdmin: true } as any, 'user-uuid-1');
+
+      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', undefined);
     });
   });
 
