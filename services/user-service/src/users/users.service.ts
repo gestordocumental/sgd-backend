@@ -152,7 +152,13 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, callerOrgId?: string): Promise<void> {
+    if (callerOrgId) {
+      // Org-scoped delete: only remove the user's membership from the caller's org.
+      // The user account and credentials remain intact so they can still access other orgs.
+      return this.removeFromOrg(id, callerOrgId);
+    }
+    // Global delete (super admin, no companyId): soft-delete the account and disable credentials.
     const user = await this.findOne(id);
     await this.usersRepository.softRemove(user);
     // Disable credentials so the soft-deleted user cannot log in.
@@ -267,6 +273,7 @@ export class UsersService {
     // Group by userId, collecting only records that have a role assigned
     const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[] }>();
     for (const r of orgRoles) {
+      if (!r.user) continue; // user was soft-deleted; relation resolves to null
       if (!byUser.has(r.userId)) {
         byUser.set(r.userId, { user: r.user, roles: [] });
       }

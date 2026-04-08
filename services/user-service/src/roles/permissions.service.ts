@@ -28,6 +28,7 @@ export class PermissionsService {
    * This prevents privilege escalation if a calling service is compromised.
    */
   async isUserSuperAdmin(userId: string): Promise<boolean> {
+    if (!userId) return false;
     const user = await this.userRepo.findOne({
       where: { id: userId },
       select: ['isSuperAdmin'],
@@ -41,6 +42,7 @@ export class PermissionsService {
     module: string,
     action: string,
   ): Promise<boolean> {
+    if (!userId || !orgId) return false;
     const userOrgRoles = await this.userOrgRoleRepo.find({
       where: { userId, orgId },
       relations: ['role', 'role.permissions'],

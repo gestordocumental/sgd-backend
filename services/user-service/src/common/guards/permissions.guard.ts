@@ -80,7 +80,7 @@ export class PermissionsGuard implements CanActivate {
     }
 
     const hasPermission = userOrgRoles.some((uor) =>
-      uor.role?.permissions.some(
+      uor.role?.permissions?.some(
         (p) => p.module === required.module && p.action === required.action,
       ),
     );

@@ -137,8 +137,11 @@ export class UsersController {
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(PermissionModule.USERS, PermissionAction.DELETE)
-  remove(@Param("id") id: string) {
-    return this.usersService.remove(id);
+  remove(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    return this.usersService.remove(id, caller.companyId);
   }
 
   @Post(":id/restore")

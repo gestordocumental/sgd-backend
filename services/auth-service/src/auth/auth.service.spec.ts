@@ -450,7 +450,7 @@ describe('AuthService', () => {
 
       expect(jwtService.sign).toHaveBeenNthCalledWith(
         1,
-        expect.not.objectContaining({ isSuperAdmin: true }),
+        expect.not.objectContaining({ isSuperAdmin: expect.anything() }),
         expect.any(Object),
       );
     });
