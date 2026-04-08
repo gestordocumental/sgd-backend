@@ -28,6 +28,11 @@ export class InitialSchema1700000000000 implements MigrationInterface {
       EXCEPTION WHEN duplicate_object THEN NULL;
       END $$
     `);
+    // If the enum already existed (e.g. created by synchronize:true without PLATFORM),
+    // the DO block above is a no-op. Ensure PLATFORM is present regardless of origin.
+    await queryRunner.query(
+      `ALTER TYPE "public"."permissions_module_enum" ADD VALUE IF NOT EXISTS 'PLATFORM'`,
+    );
 
     await queryRunner.query(`
       DO $$ BEGIN

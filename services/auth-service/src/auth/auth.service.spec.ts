@@ -441,7 +441,7 @@ describe('AuthService', () => {
       await expect(service.switchCompany('user-id', 'org-id')).rejects.toThrow(UnauthorizedException);
     });
 
-    it('includes isSuperAdmin when user is super admin', async () => {
+    it('omits isSuperAdmin from company-scoped token even when user is super admin', async () => {
       userClient.getUserCompanies.mockResolvedValue(['org-id']);
       userClient.getUserInfo.mockResolvedValue({ isSuperAdmin: true });
       credRepo.findOne.mockResolvedValue(makeCredential());
@@ -450,7 +450,7 @@ describe('AuthService', () => {
 
       expect(jwtService.sign).toHaveBeenNthCalledWith(
         1,
-        expect.objectContaining({ companyId: 'org-id', isSuperAdmin: true }),
+        expect.not.objectContaining({ isSuperAdmin: true }),
         expect.any(Object),
       );
     });

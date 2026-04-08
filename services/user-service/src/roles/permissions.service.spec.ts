@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { PermissionsService } from './permissions.service';
 import { Permission, PermissionModule, PermissionAction } from './entities/permission.entity';
 import { UserOrgRole } from './entities/user-org-role.entity';
+import { User } from '../users/entities/user.entity';
 
 const makePermission = (overrides: Partial<Permission> = {}): Permission => ({
   id: 'perm-uuid-1',
@@ -29,6 +30,10 @@ describe('PermissionsService', () => {
         {
           provide: getRepositoryToken(UserOrgRole),
           useValue: { find: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(User),
+          useValue: { findOne: jest.fn() },
         },
       ],
     }).compile();
