@@ -120,7 +120,9 @@ services:
         paths:
           - /api/users
           - /api/roles
-          - /api/permissions
+          # Exact match: exposes GET /api/permissions (list) but NOT /api/permissions/check,
+          # which is internal-only (x-internal-token, service-to-service, never via Kong).
+          - ~^/api/permissions$
         strip_path: false
     plugins:
       - name: jwt

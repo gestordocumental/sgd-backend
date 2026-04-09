@@ -7,6 +7,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  */
 export class InitialSchema1700000000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // gen_random_uuid() is built-in since PG 13; pgcrypto is a no-op safety net for older envs.
+    await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
+
     await queryRunner.query(`
       DO $$ BEGIN
         CREATE TYPE "public"."credentials_status_enum" AS ENUM ('active', 'disabled');
