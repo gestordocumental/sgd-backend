@@ -7,8 +7,24 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+
+function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
+  const [header, payload, signature] = parts;
+  const sigBytes = Buffer.from(signature, 'base64url');
+  const expectedBytes = createHmac('sha256', secret).update(`${header}.${payload}`).digest();
+  if (sigBytes.length !== expectedBytes.length || !timingSafeEqual(sigBytes, expectedBytes)) {
+    throw new UnauthorizedException('Invalid token');
+  }
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    throw new UnauthorizedException('Malformed token');
+  }
+}
 
 @Injectable()
 export class OrgGuard implements CanActivate {
@@ -40,19 +56,11 @@ export class OrgGuard implements CanActivate {
       }
     }
 
-    // Decode the JWT (Kong already verified the signature)
     const auth = request.headers['authorization'];
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
 
-    const parts = auth.split(' ')[1].split('.');
-    if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
-
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    } catch {
-      throw new UnauthorizedException('Malformed token');
-    }
+    const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
+    const payload = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
 
     // Super admin has access to everything
     if (payload.isSuperAdmin) return true;

@@ -9,7 +9,23 @@ import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
+
+function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
+  const [header, payload, signature] = parts;
+  const sigBytes = Buffer.from(signature, 'base64url');
+  const expectedBytes = createHmac('sha256', secret).update(`${header}.${payload}`).digest();
+  if (sigBytes.length !== expectedBytes.length || !timingSafeEqual(sigBytes, expectedBytes)) {
+    throw new UnauthorizedException('Invalid token');
+  }
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    throw new UnauthorizedException('Malformed token');
+  }
+}
 import { UserOrgRole } from '../../roles/entities/user-org-role.entity';
 import { PERMISSION_KEY } from '../decorators/require-permission.decorator';
 import { PermissionModule, PermissionAction } from '../../roles/entities/permission.entity';
@@ -48,15 +64,8 @@ export class PermissionsGuard implements CanActivate {
 
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
 
-    const parts = auth.split(' ')[1].split('.');
-    if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
-
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    } catch {
-      throw new UnauthorizedException('Malformed token');
-    }
+    const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
+    const payload = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
 
     // Super admin has access to everything
     if (payload.isSuperAdmin) return true;

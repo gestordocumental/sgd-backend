@@ -58,6 +58,57 @@ services:
           status_code: 200
           message: "OK"
 
+  # ── Swagger docs (JWT requerido en producción) ─────────────────────────
+  - name: auth-docs
+    url: http://auth-service.railway.internal:3000
+    routes:
+      - name: auth-docs-route
+        paths:
+          - /api/auth/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  - name: user-docs
+    url: http://user-service.railway.internal:3000
+    routes:
+      - name: user-docs-route
+        paths:
+          - /api/users/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  - name: org-docs
+    url: http://org-service.railway.internal:3000
+    routes:
+      - name: org-docs-route
+        paths:
+          - /api/org/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  - name: document-docs
+    url: http://document-service.railway.internal:3000
+    routes:
+      - name: document-docs-route
+        paths:
+          - /api/documents/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  - name: metadata-extractor-docs
+    url: http://metadata-extractor-service.railway.internal:3000
+    routes:
+      - name: metadata-extractor-docs-route
+        paths:
+          - /api/metadata-extractor/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+
   # ── auth-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
   - name: auth-public
     url: http://auth-service.railway.internal:3000
@@ -68,6 +119,12 @@ services:
           - /api/auth/refresh
         methods: [POST]
         strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+          fault_tolerant: true
 
   # ── auth-service: provision (token interno, sin JWT público) ──────────
   - name: auth-provision

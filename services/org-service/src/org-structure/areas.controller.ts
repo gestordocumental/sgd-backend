@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Patch, Delete,
   Param, Body, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { AreasService } from './areas.service';
 import { CreateAreaDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
@@ -11,12 +12,18 @@ import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
 import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
 
+@ApiTags('Org Structure — Areas')
+@ApiBearerAuth('JWT')
+@ApiParam({ name: 'orgId', format: 'uuid' })
+@ApiParam({ name: 'departamentoId', format: 'uuid' })
 @Controller('api/org/:orgId/departamentos/:departamentoId/areas')
 @UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class AreasController {
   constructor(private readonly service: AreasService) {}
 
+  @ApiOperation({ summary: 'Create an area within a department' })
+  @ApiResponse({ status: 201, type: AreaResponseDto })
   @Post()
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
@@ -27,6 +34,8 @@ export class AreasController {
     return AreaResponseDto.from(await this.service.create(orgId, departamentoId, dto));
   }
 
+  @ApiOperation({ summary: 'List all areas of a department' })
+  @ApiResponse({ status: 200, type: AreaResponseDto, isArray: true })
   @Get()
   @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findAll(
@@ -36,6 +45,9 @@ export class AreasController {
     return (await this.service.findAll(orgId, departamentoId)).map(AreaResponseDto.from);
   }
 
+  @ApiOperation({ summary: 'Get area by ID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, type: AreaResponseDto })
   @Get(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findOne(
@@ -46,6 +58,9 @@ export class AreasController {
     return AreaResponseDto.from(await this.service.findOne(orgId, departamentoId, id));
   }
 
+  @ApiOperation({ summary: 'Update area' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, type: AreaResponseDto })
   @Patch(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
@@ -57,6 +72,9 @@ export class AreasController {
     return AreaResponseDto.from(await this.service.update(orgId, departamentoId, id, dto));
   }
 
+  @ApiOperation({ summary: 'Soft delete area' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 204 })
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
@@ -68,6 +86,9 @@ export class AreasController {
     return this.service.remove(orgId, departamentoId, id);
   }
 
+  @ApiOperation({ summary: 'Restore a deleted area' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, type: AreaResponseDto })
   @Post(':id/restore')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(

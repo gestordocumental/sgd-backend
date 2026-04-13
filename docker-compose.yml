@@ -1,12 +1,9 @@
-# IMPORTANTE (sección 9 del documento técnico):
-# Este archivo levanta ÚNICAMENTE la infraestructura de datos en local.
-# Los 8 microservicios de la aplicación siempre se despliegan en Kubernetes (Kind).
+# Infraestructura local del SGD.
+# Levanta todas las dependencias de datos: DBs, Kafka, Redis, MinIO, Elasticsearch.
 #
 # Flujo de trabajo local:
-#   1. docker compose up -d        → levanta infra (DBs, Kafka, Redis, MinIO, ES)
-#   2. kubectl apply -f k8s/       → despliega microservicios en Kind
-#
-# Los pods en Kind acceden a estos servicios via ExternalName (k8s/external-services/).
+#   1. docker compose up -d                    → levanta infraestructura
+#   2. cd services/<nombre> && npm run start:dev  → arranca cada microservicio
 
 name: sgd-infra
 
@@ -97,7 +94,7 @@ services:
       # PLAINTEXT: comunicación interna docker-compose
       # EXTERNAL:  acceso desde Kind (via host.docker.internal:9094)
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://host.docker.internal:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
@@ -144,6 +141,9 @@ services:
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic user.invited --partitions 1 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.send --partitions 2 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.log --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.file.uploaded --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extracted --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extraction.failed --partitions 3 --replication-factor 1 &&
       echo '>>> Tópicos creados correctamente.' &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
       "
@@ -214,6 +214,48 @@ services:
         echo '>>> Bucket documentos creado correctamente.'
       "
     restart: "no"
+    networks:
+      - sgd-local
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Kong — API Gateway local (DB-less, misma config que Railway)
+  # Proxy:      http://localhost:8000  ← todos los endpoints pasan por aquí
+  # Admin API:  http://localhost:8001  ← diagnóstico (routes, plugins activos)
+  #
+  # Requiere que los microservicios estén corriendo con npm run start:dev.
+  # Kong los alcanza vía host.docker.internal.
+  # KONG_JWT_SECRET debe coincidir con JWT_SECRET del auth-service (.env).
+  # ─────────────────────────────────────────────────────────────────────────────
+  kong:
+    image: kong:3.4
+    container_name: sgd-kong
+    # sed sustituye ${KONG_JWT_SECRET} en el template antes de que Kong lo cargue.
+    # _transform: true en el YAML de Kong NO hace sustitución de variables de entorno.
+    entrypoint: ["/bin/sh", "/kong-entrypoint.sh", "kong", "docker-start"]
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yaml   # sobreescrito por el entrypoint
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_JWT_SECRET: "${KONG_JWT_SECRET:-local-jwt-secret-change-me}"
+    volumes:
+      - ./docker/kong/kong.local.yaml:/etc/kong/kong.template.yaml:ro
+      - ./docker/kong/entrypoint.sh:/kong-entrypoint.sh:ro
+    ports:
+      - "8000:8000"   # Proxy — punto de entrada a todos los microservicios
+      - "8101:8001"   # Admin API — diagnóstico (host:8101 → kong:8001)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Linux: resuelve al host; Mac/Win ya lo tienen
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
     networks:
       - sgd-local
 

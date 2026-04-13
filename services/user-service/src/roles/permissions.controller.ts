@@ -8,7 +8,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import { PermissionsService } from './permissions.service';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiQuery } from '@nestjs/swagger';
 
+@ApiTags('Permissions')
 @Controller('api/permissions')
 export class PermissionsController {
   constructor(
@@ -16,6 +18,9 @@ export class PermissionsController {
     private readonly configService: ConfigService,
   ) {}
 
+  @ApiOperation({ summary: 'List all available permissions — used by orgs to build custom roles' })
+  @ApiBearerAuth('JWT')
+  @ApiResponse({ status: 200, description: 'Array of permissions' })
   // Returns all available permissions — orgs use this list to build custom roles
   @Get()
   findAll() {
@@ -33,6 +38,13 @@ export class PermissionsController {
    * Super-admin status is verified directly against the DB — never trusted
    * from caller-supplied query params to prevent privilege escalation.
    */
+  @ApiOperation({ summary: 'Check if a user has a permission in their org (internal only)' })
+  @ApiSecurity('internal-token')
+  @ApiQuery({ name: 'userId', type: String })
+  @ApiQuery({ name: 'orgId', type: String })
+  @ApiQuery({ name: 'module', type: String })
+  @ApiQuery({ name: 'action', type: String })
+  @ApiResponse({ status: 200, schema: { example: { allowed: true } } })
   @Get('check')
   async check(
     @Headers('x-internal-token') internalToken: string | undefined,
