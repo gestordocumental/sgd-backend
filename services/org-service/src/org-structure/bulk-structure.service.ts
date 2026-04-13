@@ -42,7 +42,7 @@ export class BulkStructureService {
 
     if (rows.length === 0) {
       throw new BadRequestException(
-        "El archivo Excel no contiene filas válidas",
+        'El archivo Excel no contiene filas válidas. Asegúrese de diligenciar la hoja "Estructura" y no la hoja "Ejemplo".',
       );
     }
     if (rows.length > MAX_ROWS) {
@@ -273,7 +273,7 @@ export class BulkStructureService {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as any);
 
-    const worksheet = workbook.worksheets[0];
+    const worksheet = workbook.getWorksheet('Estructura') ?? workbook.worksheets[0];
     if (!worksheet)
       throw new BadRequestException(
         "El archivo Excel no tiene hojas de cálculo",
