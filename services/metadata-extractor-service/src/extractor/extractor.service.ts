@@ -54,8 +54,20 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
   private async handleFileUploaded({ message }: EachMessagePayload): Promise<void> {
     if (!message.value) return;
 
-    const payload = JSON.parse(message.value.toString()) as FileUploadedPayload;
+    let payload: FileUploadedPayload;
+    try {
+      payload = JSON.parse(message.value.toString()) as FileUploadedPayload;
+    } catch {
+      this.logger.warn('Malformed JSON in message — skipping', 'ExtractorService');
+      return;
+    }
+
     const { orgId, typologyId, r2Key, mimeType } = payload;
+
+    if (!orgId || !typologyId || !r2Key || !mimeType) {
+      this.logger.warn('Invalid payload — missing required fields', 'ExtractorService');
+      return;
+    }
 
     this.logger.log(`Extracting metadata for typology ${typologyId}`, 'ExtractorService');
 
