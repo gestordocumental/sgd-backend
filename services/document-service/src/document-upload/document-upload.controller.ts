@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Param,
@@ -75,9 +76,10 @@ export class DocumentUploadController {
     @Param('orgId') orgId: string,
     @Param('id') typologyId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body('orgName') orgName?: string,
   ): Promise<DocumentUploadResponseDto> {
     if (!file) throw new BadRequestException('El archivo es requerido');
-    return this.service.upload(orgId, typologyId, file);
+    return this.service.upload(orgId, typologyId, file, orgName);
   }
 
   @ApiOperation({ summary: 'Get a temporary signed download URL for the uploaded file' })

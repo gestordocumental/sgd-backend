@@ -8,7 +8,7 @@ import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 import { runWithCorrelation } from '../common/kafka/kafka-consumer.util';
 import { StorageService } from '../common/storage/storage.service';
 import { MetadataRulesService } from './rules/metadata-rules.service';
-import { extractText } from './parsers/parser.factory';
+import { extractStructured } from './parsers/parser.factory';
 import { AppLogger } from '../common/logger/app-logger.service';
 
 interface FileUploadedPayload {
@@ -16,6 +16,7 @@ interface FileUploadedPayload {
   typologyId: string;
   r2Key: string;
   mimeType: string;
+  orgName?: string;
 }
 
 @Injectable()
@@ -62,7 +63,7 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
       return;
     }
 
-    const { orgId, typologyId, r2Key, mimeType } = payload;
+    const { orgId, typologyId, r2Key, mimeType, orgName } = payload;
 
     if (!orgId || !typologyId || !r2Key || !mimeType) {
       this.logger.warn('Invalid payload — missing required fields', 'ExtractorService');
@@ -75,21 +76,27 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
       // Download file directly from storage — never passes through document-service
       const buffer = await this.storage.download(r2Key);
 
-      // Extract plain text using the appropriate parser
-      const text = await extractText(buffer, mimeType);
+      // Extract structured content (text + header table cells)
+      const structured = await extractStructured(buffer, mimeType);
 
-      if (text === null) {
+      if (structured === null) {
         await this.emitFailure(orgId, typologyId, `Formato de archivo no soportado: ${mimeType}`);
         return;
       }
 
-      if (text.trim().length === 0) {
+      if (structured.text.trim().length === 0) {
         await this.emitFailure(orgId, typologyId, 'El documento no contiene texto extraíble (puede ser un escaneo o imagen)');
         return;
       }
 
-      // Apply regex rules to find nombre, codigo, version
-      const extracted = this.rules.extract(text);
+      // Apply rules to find nombre, codigo, version
+      const extracted = this.rules.extract({
+        text:      structured.text,
+        titleCell: structured.titleCell,
+        leftCell:  structured.leftCell,
+        rightCell: structured.rightCell,
+        orgName,
+      });
 
       await this.producer.emit(TOPICS.TYPOLOGY_METADATA_EXTRACTED, {
         orgId,

@@ -12,11 +12,16 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -25,6 +30,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { ExtractorClientService, PreviewExtractResult } from '../common/extractor-client/extractor-client.service';
 import { OrgClientService } from '../common/org-client/org-client.service';
 import { JwtGuard } from '../common/guards/jwt.guard';
 import { OrgMember } from '../common/decorators/auth.decorator';
@@ -45,7 +51,38 @@ export class TypologiesController {
   constructor(
     private readonly service: TypologiesService,
     private readonly orgClient: OrgClientService,
+    private readonly extractorClient: ExtractorClientService,
   ) {}
+
+  @ApiOperation({
+    summary: 'Synchronous metadata extraction preview — internal use only',
+    description: 'Accepts a PDF/DOCX file and returns extracted nombre, codigo and version without persisting anything.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiOkResponse({ schema: { example: { nombre: 'Política de Seguridad', codigo: 'POL-SEG-001', version: 'v1.0' } } })
+  @Post('preview-extract')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 20 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = [
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/msword',
+        ];
+        if (allowed.includes(file.mimetype)) cb(null, true);
+        else cb(new BadRequestException('Solo se permiten archivos PDF, DOCX o DOC'), false);
+      },
+    }),
+  )
+  async previewExtract(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('orgName') orgName?: string,
+  ): Promise<PreviewExtractResult> {
+    if (!file) throw new BadRequestException('El archivo es requerido');
+    return this.extractorClient.previewExtract(file, orgName);
+  }
 
   @ApiOperation({ summary: 'Create a typology for an organization' })
   @ApiCreatedResponse({ description: 'Typology created', type: TypologyResponseDto })
@@ -58,22 +95,20 @@ export class TypologiesController {
     @Param('orgId') orgId: string,
     @Body() dto: CreateTypologyDto,
   ): Promise<TypologyResponseDto> {
-    const resolved = await this.orgClient.resolveStructure(orgId, [{
-      department: dto.departamentoId,
-      area: dto.areaId,
-      position: dto.cargoId,
-    }]);
+    const structure = await this.orgClient.resolveStructureById(
+      orgId,
+      dto.departamentoId,
+      dto.areaId,
+      dto.cargoId,
+    );
 
-    if (resolved.unresolved.length > 0) {
-      throw new BadRequestException(resolved.unresolved[0].reason);
-    }
-
-    const r = resolved.resolved[0];
     const created = await this.service.create(orgId, dto, {
-      departamentoId: r.departamentoId,
-      departamentoNombre: dto.departamentoId,
-      areaId: r.areaId,
-      cargoId: r.cargoId,
+      departamentoId:     structure.departamentoId,
+      departamentoNombre: structure.departamentoNombre,
+      areaId:             structure.areaId,
+      areaNombre:         structure.areaNombre,
+      cargoId:            structure.cargoId,
+      cargoNombre:        structure.cargoNombre,
     }, CreationSource.MANUAL);
 
     return TypologyResponseDto.fromDocument(created);

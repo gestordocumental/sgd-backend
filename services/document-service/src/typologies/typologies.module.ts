@@ -4,11 +4,13 @@ import { Typology, TypologySchema } from './schemas/typology.schema';
 import { TypologiesService } from './typologies.service';
 import { TypologiesController } from './typologies.controller';
 import { OrgClientModule } from '../common/org-client/org-client.module';
+import { ExtractorClientModule } from '../common/extractor-client/extractor-client.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Typology.name, schema: TypologySchema }]),
     OrgClientModule,
+    ExtractorClientModule,
   ],
   controllers: [TypologiesController],
   providers: [TypologiesService],

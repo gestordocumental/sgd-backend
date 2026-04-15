@@ -29,6 +29,15 @@ export interface ResolveStructureResult {
   unresolved: UnresolvedItem[];
 }
 
+export interface ResolveByIdResult {
+  departamentoId: string;
+  departamentoNombre: string;
+  areaId: string | null;
+  areaNombre: string | null;
+  cargoId: string | null;
+  cargoNombre: string | null;
+}
+
 @Injectable()
 export class OrgClientService {
   private readonly orgServiceUrl: string;
@@ -95,6 +104,68 @@ export class OrgClientService {
 
       throw new InternalServerErrorException(
         `Could not resolve org structure from org-service: ${message}`,
+      );
+    }
+  }
+
+  async resolveStructureById(
+    orgId: string,
+    departamentoId: string,
+    areaId?: string,
+    cargoId?: string,
+  ): Promise<ResolveByIdResult> {
+    const correlationId = getCorrelationId();
+    const url = `${this.orgServiceUrl}/internal/structure/resolve-by-ids`;
+
+    this.logger.http({
+      type: 'internal-request',
+      target: 'org-service',
+      url,
+      correlationId,
+      message: `→ [org-service] POST /internal/structure/resolve-by-ids`,
+    });
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post<ResolveByIdResult>(
+          url,
+          { orgId, departamentoId, areaId, cargoId },
+          {
+            headers: {
+              'x-internal-token':      this.internalToken,
+              [CORRELATION_ID_HEADER]: correlationId,
+            },
+          },
+        ),
+      );
+
+      this.logger.http({
+        type: 'internal-response',
+        target: 'org-service',
+        statusCode: 200,
+        correlationId,
+        message: `← [org-service] POST /internal/structure/resolve-by-ids 200`,
+      });
+
+      return response.data;
+    } catch (error: any) {
+      const status  = error?.response?.status;
+      const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
+
+      this.logger.http({
+        type: 'internal-response',
+        target: 'org-service',
+        statusCode: status ?? 500,
+        correlationId,
+        message: `← [org-service] POST /internal/structure/resolve-by-ids ${status ?? 500}: ${message}`,
+      });
+
+      if (status === 400) {
+        throw error.response.data;
+      }
+
+      throw new InternalServerErrorException(
+        `Could not resolve org structure by IDs from org-service: ${message}`,
       );
     }
   }

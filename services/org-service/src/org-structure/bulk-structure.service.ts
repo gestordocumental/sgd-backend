@@ -19,6 +19,7 @@ import {
   UnresolvedStructureItem,
 } from "./dto/resolve-structure-response.dto";
 import { AppLogger } from "../common/logger/app-logger.service";
+import { ResolveByIdRequestDto, ResolveByIdResponseDto } from "./dto/resolve-by-id-request.dto";
 
 const MAX_ROWS = 500;
 
@@ -189,6 +190,59 @@ export class BulkStructureService {
     }
 
     return { index, departamentoId: dept.id, areaId, cargoId: null };
+  }
+
+  async resolveStructureById(
+    dto: ResolveByIdRequestDto,
+  ): Promise<ResolveByIdResponseDto> {
+    const dept = await this.deptRepo.findOne({
+      where: { orgId: dto.orgId, id: dto.departamentoId },
+    });
+    if (!dept) {
+      throw new BadRequestException(
+        `Departamento '${dto.departamentoId}' no encontrado en la organización`,
+      );
+    }
+
+    let areaId: string | null = null;
+    let areaNombre: string | null = null;
+    let cargoId: string | null = null;
+    let cargoNombre: string | null = null;
+
+    if (dto.areaId) {
+      const area = await this.areaRepo.findOne({
+        where: { orgId: dto.orgId, departamentoId: dept.id, id: dto.areaId },
+      });
+      if (!area) {
+        throw new BadRequestException(
+          `Área '${dto.areaId}' no encontrada en el departamento '${dept.name}'`,
+        );
+      }
+      areaId = area.id;
+      areaNombre = area.name;
+
+      if (dto.cargoId) {
+        const cargo = await this.cargoRepo.findOne({
+          where: { orgId: dto.orgId, areaId: area.id, id: dto.cargoId },
+        });
+        if (!cargo) {
+          throw new BadRequestException(
+            `Cargo '${dto.cargoId}' no encontrado en el área '${area.name}'`,
+          );
+        }
+        cargoId = cargo.id;
+        cargoNombre = cargo.name;
+      }
+    }
+
+    return {
+      departamentoId: dept.id,
+      departamentoNombre: dept.name,
+      areaId,
+      areaNombre,
+      cargoId,
+      cargoNombre,
+    };
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────

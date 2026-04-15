@@ -30,6 +30,7 @@ export class DocumentUploadService {
     orgId: string,
     typologyId: string,
     file: Express.Multer.File,
+    orgName?: string,
   ): Promise<{ message: string; extractionStatus: string }> {
     if (!Types.ObjectId.isValid(typologyId)) throw new BadRequestException('Invalid typology ID');
 
@@ -66,6 +67,7 @@ export class DocumentUploadService {
       typologyId,
       r2Key,
       mimeType: file.mimetype,
+      ...(orgName ? { orgName } : {}),
     });
 
     this.logger.log(`Document uploaded for typology ${typologyId}, extraction started`, 'DocumentUploadService');
