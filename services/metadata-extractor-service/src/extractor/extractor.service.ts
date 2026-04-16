@@ -19,6 +19,18 @@ interface FileUploadedPayload {
   orgName?: string;
 }
 
+function isValidFileUploadedPayload(raw: unknown): raw is FileUploadedPayload {
+  if (!raw || typeof raw !== 'object') return false;
+  const p = raw as Record<string, unknown>;
+  return (
+    typeof p['orgId']       === 'string' && p['orgId'].trim().length       > 0 &&
+    typeof p['typologyId']  === 'string' && p['typologyId'].trim().length  > 0 &&
+    typeof p['r2Key']       === 'string' && p['r2Key'].trim().length       > 0 &&
+    typeof p['mimeType']    === 'string' && p['mimeType'].trim().length    > 0 &&
+    (p['orgName'] == null || typeof p['orgName'] === 'string')
+  );
+}
+
 @Injectable()
 export class ExtractorService implements OnApplicationBootstrap, OnApplicationShutdown {
   private consumer!: Consumer;
@@ -55,20 +67,20 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
   private async handleFileUploaded({ message }: EachMessagePayload): Promise<void> {
     if (!message.value) return;
 
-    let payload: FileUploadedPayload;
+    let raw: unknown;
     try {
-      payload = JSON.parse(message.value.toString()) as FileUploadedPayload;
+      raw = JSON.parse(message.value.toString());
     } catch {
       this.logger.warn('Malformed JSON in message — skipping', 'ExtractorService');
       return;
     }
 
-    const { orgId, typologyId, r2Key, mimeType, orgName } = payload;
-
-    if (!orgId || !typologyId || !r2Key || !mimeType) {
-      this.logger.warn('Invalid payload — missing required fields', 'ExtractorService');
+    if (!isValidFileUploadedPayload(raw)) {
+      this.logger.warn('Invalid payload — missing or malformed required fields', 'ExtractorService');
       return;
     }
+
+    const { orgId, typologyId, r2Key, mimeType, orgName } = raw;
 
     this.logger.log(`Extracting metadata for typology ${typologyId}`, 'ExtractorService');
 
@@ -109,7 +121,7 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
       this.logger.log(`Metadata extracted for typology ${typologyId}: ${JSON.stringify(extracted)}`, 'ExtractorService');
     } catch (err: any) {
       this.logger.error(`Extraction failed for typology ${typologyId}: ${err?.message}`, err?.stack, 'ExtractorService');
-      await this.emitFailure(orgId, typologyId, err?.message ?? 'Error desconocido durante la extracción');
+      await this.emitFailure(orgId, typologyId, 'Extraction failed due to an internal error');
     }
   }
 

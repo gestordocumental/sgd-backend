@@ -118,8 +118,9 @@ export class MetadataRulesService {
     }
     // Contains common company legal suffixes
     if (this.companySuffixRe.test(line)) return true;
-    // All-caps short text (typical company abbreviation)
-    if (line === line.toUpperCase() && line.split(/\s+/).length <= 5 && line.length < 50) {
+    // All-caps 1-2 token text: company abbreviation (e.g. "ACME", "GD CORP").
+    // Capped at 2 tokens so multi-word titles in uppercase (e.g. "MANUAL DE CALIDAD") are not discarded.
+    if (line === line.toUpperCase() && line.split(/\s+/).length <= 2 && line.length < 30) {
       return true;
     }
     return false;

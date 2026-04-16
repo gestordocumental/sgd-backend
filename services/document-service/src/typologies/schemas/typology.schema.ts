@@ -7,6 +7,7 @@ export enum TypologyStatus {
   INCOMPLETE = 'INCOMPLETE',
   ACTIVE     = 'ACTIVE',
   ARCHIVED   = 'ARCHIVED',
+  DELETED    = 'DELETED',
 }
 
 export enum ExtractionStatus {
@@ -144,8 +145,16 @@ export class Typology {
 
 export const TypologySchema = SchemaFactory.createForClass(Typology);
 
-// Partial unique index: codigo must be unique per org (ignoring soft-deleted)
+// Partial unique index: only one ACTIVE typology per (orgId, codigo) is allowed.
+// INCOMPLETE / ARCHIVED / soft-deleted records with the same codigo are permitted.
 TypologySchema.index(
   { orgId: 1, 'datosDeclarados.codigo': 1 },
-  { unique: true, partialFilterExpression: { deletedAt: null, 'datosDeclarados.codigo': { $ne: null } } },
+  {
+    unique: true,
+    partialFilterExpression: {
+      deletedAt: null,
+      typologyStatus: TypologyStatus.ACTIVE,
+      'datosDeclarados.codigo': { $ne: null },
+    },
+  },
 );

@@ -40,6 +40,7 @@ import { TypologyResponseDto } from './dto/typology-response.dto';
 import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { CreationSource } from './schemas/typology.schema';
 import { TypologiesService } from './typologies.service';
+import { multerOptions } from '../document-upload/document-upload.constants';
 
 @ApiTags('Typologies')
 @ApiBearerAuth('JWT')
@@ -62,20 +63,7 @@ export class TypologiesController {
   @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
   @ApiOkResponse({ schema: { example: { nombre: 'Política de Seguridad', codigo: 'POL-SEG-001', version: 'v1.0' } } })
   @Post('preview-extract')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: 20 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        const allowed = [
-          'application/pdf',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'application/msword',
-        ];
-        if (allowed.includes(file.mimetype)) cb(null, true);
-        else cb(new BadRequestException('Solo se permiten archivos PDF, DOCX o DOC'), false);
-      },
-    }),
-  )
+  @UseInterceptors(FileInterceptor('file', multerOptions))
   async previewExtract(
     @UploadedFile() file: Express.Multer.File,
     @Body('orgName') orgName?: string,
@@ -124,7 +112,19 @@ export class TypologiesController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ): Promise<TypologyResponseDto[]> {
-    const typologies = await this.service.findAll(orgId, page, Math.min(limit, 100));
+    const typologies = await this.service.findAll(orgId, Math.max(page, 1), Math.min(Math.max(limit, 1), 100));
+    return typologies.map(TypologyResponseDto.fromDocument);
+  }
+
+  @ApiOperation({ summary: 'Get full history (including archived/deleted) for a given codigo' })
+  @ApiParam({ name: 'codigo', description: 'Typology codigo' })
+  @ApiOkResponse({ description: 'Typology history', type: TypologyResponseDto, isArray: true })
+  @Get('history/:codigo')
+  async findHistory(
+    @Param('orgId') orgId: string,
+    @Param('codigo') codigo: string,
+  ): Promise<TypologyResponseDto[]> {
+    const typologies = await this.service.findHistory(orgId, codigo);
     return typologies.map(TypologyResponseDto.fromDocument);
   }
 

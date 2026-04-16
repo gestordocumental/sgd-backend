@@ -5,6 +5,7 @@ import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { Credential } from "./entities/credential.entity";
 import { UserClientModule } from "../user-client/user-client.module";
+import { CredentialSeeder } from "./credential.seeder";
 
 @Module({
   imports: [
@@ -14,6 +15,6 @@ import { UserClientModule } from "../user-client/user-client.module";
     UserClientModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, CredentialSeeder],
 })
 export class AuthModule {}

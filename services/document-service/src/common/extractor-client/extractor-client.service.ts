@@ -1,7 +1,13 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  UnprocessableEntityException,
+  InternalServerErrorException,
+  GatewayTimeoutException,
+} from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import * as FormData from 'form-data';
 import { AppLogger } from '../logger/app-logger.service';
 import { getCorrelationId } from '../correlation/correlation.context';
@@ -16,6 +22,7 @@ export interface PreviewExtractResult {
 @Injectable()
 export class ExtractorClientService {
   private readonly extractorUrl: string;
+  private readonly timeoutMs: number;
 
   constructor(
     private readonly httpService: HttpService,
@@ -23,6 +30,7 @@ export class ExtractorClientService {
     private readonly logger: AppLogger,
   ) {
     this.extractorUrl = this.config.getOrThrow<string>('METADATA_EXTRACTOR_URL');
+    this.timeoutMs = this.config.get<number>('METADATA_EXTRACTOR_TIMEOUT_MS') ?? 15_000;
   }
 
   async previewExtract(file: Express.Multer.File, orgName?: string): Promise<PreviewExtractResult> {
@@ -51,7 +59,7 @@ export class ExtractorClientService {
             ...form.getHeaders(),
             [CORRELATION_ID_HEADER]: correlationId,
           },
-        }),
+        }).pipe(timeout(this.timeoutMs)),
       );
 
       this.logger.http({
@@ -64,6 +72,17 @@ export class ExtractorClientService {
 
       return response.data;
     } catch (error: any) {
+      if (error instanceof TimeoutError) {
+        this.logger.http({
+          type: 'internal-response',
+          target: 'metadata-extractor-service',
+          statusCode: 504,
+          correlationId,
+          message: `← [metadata-extractor] POST /preview/extract 504: timed out after ${this.timeoutMs}ms`,
+        });
+        throw new GatewayTimeoutException('metadata-extractor-service did not respond in time');
+      }
+
       const status  = error?.response?.status;
       const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
 
@@ -74,6 +93,10 @@ export class ExtractorClientService {
         correlationId,
         message: `← [metadata-extractor] POST /preview/extract ${status ?? 500}: ${message}`,
       });
+
+      // Propagate 4xx from the extractor as meaningful client errors instead of 500.
+      if (status === 400) throw new BadRequestException(message);
+      if (status === 422) throw new UnprocessableEntityException(message);
 
       throw new InternalServerErrorException(
         `Could not extract metadata from metadata-extractor-service: ${message}`,

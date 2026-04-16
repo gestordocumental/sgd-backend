@@ -10,6 +10,26 @@ import { CreateTypologyDto } from './dto/create-typology.dto';
 import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { ResolveDiscrepancyDto, ResolveAction } from './dto/resolve-discrepancy.dto';
 
+function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
+  const parse = (v: string) =>
+    v.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const nv = parse(newVer);
+  const ov = parse(oldVer);
+  const len = Math.max(nv.length, ov.length);
+  while (nv.length < len) nv.push(0);
+  while (ov.length < len) ov.push(0);
+  let diffIdx = -1;
+  for (let i = 0; i < len; i++) {
+    if (nv[i] !== ov[i]) { diffIdx = i; break; }
+  }
+  if (diffIdx === -1) return false;
+  if (nv[diffIdx] !== ov[diffIdx] + 1) return false;
+  for (let i = diffIdx + 1; i < len; i++) {
+    if (nv[i] !== 0) return false;
+  }
+  return true;
+}
+
 interface OrgStructureNames {
   departamentoId: string;
   departamentoNombre: string;
@@ -32,6 +52,20 @@ export class TypologiesService {
     structureNames: OrgStructureNames,
     source: CreationSource = CreationSource.MANUAL,
   ): Promise<TypologyDocument> {
+    // Explicit pre-check: reject if an ACTIVE typology with the same codigo already exists
+    if (dto.codigo) {
+      const existing = await this.model.findOne({
+        orgId,
+        'datosDeclarados.codigo': dto.codigo,
+        typologyStatus: TypologyStatus.ACTIVE,
+      }).exec();
+      if (existing) {
+        throw new ConflictException(
+          `An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+        );
+      }
+    }
+
     const hasDeclaredData = !!(dto.nombre && dto.codigo && dto.version);
 
     const doc = new this.model({
@@ -58,7 +92,7 @@ export class TypologiesService {
       return await doc.save();
     } catch (err: any) {
       if (err.code === 11000) {
-        throw new ConflictException(`Ya existe una tipología con el código '${dto.codigo}' en esta organización`);
+        throw new ConflictException(`An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`);
       }
       throw err;
     }
@@ -67,7 +101,7 @@ export class TypologiesService {
   findAll(orgId: string, page = 1, limit = 20): Promise<TypologyDocument[]> {
     const skip = (page - 1) * limit;
     return this.model
-      .find({ orgId, deletedAt: null })
+      .find({ orgId, typologyStatus: TypologyStatus.ACTIVE })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -84,6 +118,16 @@ export class TypologiesService {
   async update(orgId: string, id: string, dto: UpdateTypologyDto): Promise<TypologyDocument> {
     const doc = await this.findOne(orgId, id);
 
+    // Version change: new version must be exactly one increment above the current one
+    if (dto.version !== undefined && dto.version !== null) {
+      const oldVersion = doc.datosDeclarados.version;
+      if (oldVersion && !isExactlyOneIncrement(dto.version, oldVersion)) {
+        throw new BadRequestException(
+          `The new version (${dto.version}) must be exactly one increment above the current version (${oldVersion}).`,
+        );
+      }
+    }
+
     if (dto.nombre  !== undefined) doc.datosDeclarados.nombre  = dto.nombre;
     if (dto.codigo  !== undefined) doc.datosDeclarados.codigo  = dto.codigo;
     if (dto.version !== undefined) doc.datosDeclarados.version = dto.version;
@@ -99,7 +143,7 @@ export class TypologiesService {
       return await doc.save();
     } catch (err: any) {
       if (err.code === 11000) {
-        throw new ConflictException(`Ya existe una tipología con el código '${dto.codigo}' en esta organización`);
+        throw new ConflictException(`An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`);
       }
       throw err;
     }
@@ -108,7 +152,16 @@ export class TypologiesService {
   async remove(orgId: string, id: string): Promise<void> {
     const doc = await this.findOne(orgId, id);
     doc.deletedAt = new Date();
+    doc.typologyStatus = TypologyStatus.DELETED;
     await doc.save();
+  }
+
+  /** Returns all typologies (including soft-deleted) that share the same codigo within the org */
+  findHistory(orgId: string, codigo: string): Promise<TypologyDocument[]> {
+    return this.model
+      .find({ orgId, 'datosDeclarados.codigo': codigo })
+      .sort({ createdAt: -1 })
+      .exec();
   }
 
   /** Called by Kafka consumer when metadata extraction succeeds */
@@ -162,7 +215,7 @@ export class TypologiesService {
 
     const status = doc.documento.extractionStatus;
     if (status !== ExtractionStatus.DISCREPANCY && status !== ExtractionStatus.PENDING_CONFIRMATION) {
-      throw new BadRequestException(`No hay discrepancia o confirmación pendiente en esta tipología`);
+      throw new BadRequestException(`No pending discrepancy or confirmation for this typology.`);
     }
 
     if (dto.action === ResolveAction.KEEP_DECLARED) {

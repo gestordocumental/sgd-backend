@@ -24,22 +24,37 @@ export class StorageService implements OnModuleInit {
         secretAccessKey: this.config.getOrThrow<string>('STORAGE_SECRET_KEY'),
       },
       forcePathStyle: this.config.get<string>('STORAGE_FORCE_PATH') === 'true',
+      maxAttempts: 3,
     });
     this.logger.log('StorageService (read-only) initialized', 'StorageService');
   }
 
   /** Downloads a file as a Buffer. Only used internally — file never leaves this service. */
-  async download(key: string): Promise<Buffer> {
-    const response = await this.client.send(
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-    );
-
-    const stream = response.Body as Readable;
-    return new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-      stream.on('end', () => resolve(Buffer.concat(chunks)));
-      stream.on('error', reject);
-    });
+  async download(key: string, retries = 3): Promise<Buffer> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await this.client.send(
+          new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+        );
+        const stream = response.Body as Readable;
+        return await new Promise<Buffer>((resolve, reject) => {
+          const chunks: Buffer[] = [];
+          stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+          stream.on('end', () => resolve(Buffer.concat(chunks)));
+          stream.on('error', reject);
+        });
+      } catch (err: any) {
+        const isRetryable = err?.code === 'ECONNRESET' || err?.code === 'ETIMEDOUT' || err?.code === 'ENOTFOUND';
+        if (isRetryable && attempt < retries) {
+          const delay = attempt * 500;
+          this.logger.warn(`download attempt ${attempt} failed (${err.code}), retrying in ${delay}ms…`, 'StorageService');
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
+    }
+    // unreachable — satisfies TS
+    throw new Error('download failed after retries');
   }
 }

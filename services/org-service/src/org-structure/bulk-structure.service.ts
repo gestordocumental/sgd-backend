@@ -157,6 +157,13 @@ export class BulkStructureService {
       };
     }
 
+    if (item.position && !item.area) {
+      return {
+        index,
+        reason: `Cargo '${item.position}' requiere un área para poder resolverse.`,
+      };
+    }
+
     let areaId: string | null = null;
     if (item.area) {
       const area = await this.areaRepo.findOne({
@@ -208,6 +215,10 @@ export class BulkStructureService {
     let areaNombre: string | null = null;
     let cargoId: string | null = null;
     let cargoNombre: string | null = null;
+
+    if (dto.cargoId && !dto.areaId) {
+      throw new BadRequestException('cargoId requiere areaId');
+    }
 
     if (dto.areaId) {
       const area = await this.areaRepo.findOne({

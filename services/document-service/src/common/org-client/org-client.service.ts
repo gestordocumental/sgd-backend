@@ -1,7 +1,7 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, GatewayTimeoutException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import { AppLogger } from '../logger/app-logger.service';
 import { getCorrelationId } from '../correlation/correlation.context';
 import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
@@ -42,14 +42,16 @@ export interface ResolveByIdResult {
 export class OrgClientService {
   private readonly orgServiceUrl: string;
   private readonly internalToken: string;
+  private readonly timeoutMs: number;
 
   constructor(
     private readonly httpService: HttpService,
     private readonly config: ConfigService,
     private readonly logger: AppLogger,
   ) {
-    this.orgServiceUrl  = this.config.getOrThrow<string>('ORG_SERVICE_URL');
-    this.internalToken  = this.config.getOrThrow<string>('INTERNAL_TOKEN');
+    this.orgServiceUrl = this.config.getOrThrow<string>('ORG_SERVICE_URL');
+    this.internalToken = this.config.getOrThrow<string>('INTERNAL_TOKEN');
+    this.timeoutMs     = this.config.get<number>('ORG_SERVICE_TIMEOUT_MS') ?? 5_000;
   }
 
   async resolveStructure(
@@ -78,7 +80,7 @@ export class OrgClientService {
               [CORRELATION_ID_HEADER]: correlationId,
             },
           },
-        ),
+        ).pipe(timeout(this.timeoutMs)),
       );
 
       this.logger.http({
@@ -91,6 +93,17 @@ export class OrgClientService {
 
       return response.data;
     } catch (error: any) {
+      if (error instanceof TimeoutError) {
+        this.logger.http({
+          type: 'internal-response',
+          target: 'org-service',
+          statusCode: 504,
+          correlationId,
+          message: `← [org-service] POST /internal/structure/resolve 504: timed out after ${this.timeoutMs}ms`,
+        });
+        throw new GatewayTimeoutException('org-service did not respond in time');
+      }
+
       const status  = error?.response?.status;
       const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
 
@@ -136,7 +149,7 @@ export class OrgClientService {
               [CORRELATION_ID_HEADER]: correlationId,
             },
           },
-        ),
+        ).pipe(timeout(this.timeoutMs)),
       );
 
       this.logger.http({
@@ -149,6 +162,17 @@ export class OrgClientService {
 
       return response.data;
     } catch (error: any) {
+      if (error instanceof TimeoutError) {
+        this.logger.http({
+          type: 'internal-response',
+          target: 'org-service',
+          statusCode: 504,
+          correlationId,
+          message: `← [org-service] POST /internal/structure/resolve-by-ids 504: timed out after ${this.timeoutMs}ms`,
+        });
+        throw new GatewayTimeoutException('org-service did not respond in time');
+      }
+
       const status  = error?.response?.status;
       const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
 

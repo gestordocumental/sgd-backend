@@ -1,18 +1,24 @@
 import { parsePdf } from './pdf.parser';
 import { parseDocx, parseDocxStructured, type DocxStructure } from './docx.parser';
+import { parseXlsx, parseXlsxStructured } from './xlsx.parser';
 
 export type { DocxStructure };
 export type { DocxStructure as ExtractionStructure };
 
+// Note: application/msword (.doc binary) is intentionally excluded — mammoth only
+// supports OOXML (.docx). A .doc file would cause a silent parse failure.
 const MIME_PARSERS: Record<string, (buf: Buffer) => Promise<string>> = {
-  'application/pdf':   parsePdf,
+  'application/pdf': parsePdf,
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': parseDocx,
-  'application/msword': parseDocx,
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': parseXlsx,
 };
 
 const DOCX_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/msword',
+]);
+
+const XLSX_MIMES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ]);
 
 /**
@@ -33,6 +39,10 @@ export async function extractStructured(buffer: Buffer, mimeType: string): Promi
 
   if (DOCX_MIMES.has(mimeType)) {
     return parseDocxStructured(buffer);
+  }
+
+  if (XLSX_MIMES.has(mimeType)) {
+    return parseXlsxStructured(buffer);
   }
 
   // PDF — no table structure available

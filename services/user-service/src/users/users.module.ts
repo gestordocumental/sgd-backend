@@ -8,6 +8,7 @@ import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role } from '../roles/entities/role.entity';
 import { KafkaModule } from '../common/kafka/kafka.module';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { SuperAdminSeeder } from './super-admin.seeder';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
     KafkaModule,
   ],
   controllers: [UsersController],
-  providers: [UsersService, PermissionsGuard],
+  providers: [UsersService, PermissionsGuard, SuperAdminSeeder],
   exports: [UsersService],
 })
 export class UsersModule {}
