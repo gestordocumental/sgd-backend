@@ -228,12 +228,13 @@ describe('TypologiesService', () => {
       await expect(service.update('org-1', doc.id, { version: '03' })).rejects.toThrow(BadRequestException);
     });
 
-    it('rejects same version (01 → 01)', async () => {
+    it('allows same version (01 → 01)', async () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: '01', fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
       const service = new TypologiesService(Model);
-      await expect(service.update('org-1', doc.id, { version: '01' })).rejects.toThrow(BadRequestException);
+      await expect(service.update('org-1', doc.id, { version: '01' })).resolves.not.toThrow();
+      expect(doc.datosDeclarados.version).toBe('01');
     });
 
     it('rejects decremented version (02 → 01)', async () => {

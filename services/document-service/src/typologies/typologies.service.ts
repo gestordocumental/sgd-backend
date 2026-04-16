@@ -123,12 +123,12 @@ export class TypologiesService {
   ): Promise<TypologyDocument> {
     const doc = await this.findOne(orgId, id);
 
-    // Version change: new version must be exactly one increment above the current one
+    // Version change: new version must be equal to the current one or exactly one increment above
     if (dto.version !== undefined && dto.version !== null) {
       const oldVersion = doc.datosDeclarados.version;
-      if (oldVersion && !isExactlyOneIncrement(dto.version, oldVersion)) {
+      if (oldVersion && dto.version !== oldVersion && !isExactlyOneIncrement(dto.version, oldVersion)) {
         throw new BadRequestException(
-          `The new version (${dto.version}) must be exactly one increment above the current version (${oldVersion}).`,
+          `The new version (${dto.version}) must be equal to or exactly one increment above the current version (${oldVersion}).`,
         );
       }
     }
