@@ -20,10 +20,14 @@ import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
  * Examples: "05"→"06" ✓  "05"→"07" ✗  "v1.0"→"v1.1" ✓  "v1.9"→"v2.0" ✓  "v1.0"→"v2.1" ✗
  */
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
-  const parse = (v: string) =>
-    v.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const parse = (v: string): number[] | null => {
+    const normalized = v.replace(/^v/i, '');
+    if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
+    return normalized.split('.').map((n) => Number(n));
+  };
   const nv = parse(newVer);
   const ov = parse(oldVer);
+  if (!nv || !ov) return false;
   const len = Math.max(nv.length, ov.length);
   while (nv.length < len) nv.push(0);
   while (ov.length < len) ov.push(0);
@@ -103,8 +107,16 @@ export class DocumentUploadService {
         r2Key: null, originalName: null, mimeType: null, uploadedAt: null,
         extractionStatus: ExtractionStatus.NOT_UPLOADED,
       };
-      await typology.save().catch(() => {});
-      await this.storage.delete(r2Key).catch(() => {});
+      const rollbackPersisted = await typology.save().then(() => true).catch(() => false);
+      if (rollbackPersisted) {
+        await this.storage.delete(r2Key).catch(() => {});
+      } else {
+        this.logger.error(
+          `Rollback failed for typology ${typologyId}; keeping uploaded object ${r2Key} to avoid a dangling reference.`,
+          undefined,
+          'DocumentUploadService',
+        );
+      }
       throw new InternalServerErrorException('Failed to trigger metadata extraction. Upload rolled back.');
     }
 
@@ -147,11 +159,7 @@ export class DocumentUploadService {
       );
     }
 
-    // 1. Archive the previous typology
-    old.typologyStatus = TypologyStatus.ARCHIVED;
-    await old.save();
-
-    // 2. Create the new typology inheriting org structure and codigo
+    // Step 1: Create new typology — old remains ACTIVE until everything succeeds.
     const nombre  = dto.nombre  !== undefined ? dto.nombre  : old.datosDeclarados.nombre;
     const version = newVersion  !== null       ? newVersion  : old.datosDeclarados.version;
     const codigo  = old.datosDeclarados.codigo;
@@ -162,28 +170,30 @@ export class DocumentUploadService {
       typologyStatus:  hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE,
       fuenteCreacion:  old.fuenteCreacion,
       estructuraOrg: {
-        departamentoId:    old.estructuraOrg.departamentoId,
+        departamentoId:     old.estructuraOrg.departamentoId,
         departamentoNombre: old.estructuraOrg.departamentoNombre,
-        areaId:            old.estructuraOrg.areaId,
-        areaNombre:        old.estructuraOrg.areaNombre,
-        cargoId:           old.estructuraOrg.cargoId,
-        cargoNombre:       old.estructuraOrg.cargoNombre,
+        areaId:             old.estructuraOrg.areaId,
+        areaNombre:         old.estructuraOrg.areaNombre,
+        cargoId:            old.estructuraOrg.cargoId,
+        cargoNombre:        old.estructuraOrg.cargoNombre,
       },
-      datosDeclarados: {
-        nombre,
-        codigo,
-        version,
-        fuente: old.datosDeclarados.fuente,
-      },
+      datosDeclarados: { nombre, codigo, version, fuente: old.datosDeclarados.fuente },
     });
 
     await newDoc.save();
 
-    // 3. Upload file under the new typology's ID
     const newTypologyId = (newDoc._id as Types.ObjectId).toString();
     const r2Key = `org/${orgId}/typologies/${newTypologyId}/${uuidv4()}.${ext}`;
-    await this.storage.upload(r2Key, file.buffer, file.mimetype);
 
+    // Step 2: Upload file — if this fails, delete newDoc, old stays ACTIVE.
+    try {
+      await this.storage.upload(r2Key, file.buffer, file.mimetype);
+    } catch (err) {
+      await newDoc.deleteOne().catch(() => {});
+      throw err;
+    }
+
+    // Step 3: Persist documento on new doc — if this fails, clean up file + newDoc.
     newDoc.documento = {
       r2Key,
       originalName:     file.originalname,
@@ -192,16 +202,41 @@ export class DocumentUploadService {
       extractionStatus: ExtractionStatus.PROCESSING,
     };
 
-    await newDoc.save();
+    try {
+      await newDoc.save();
+    } catch (err) {
+      await this.storage.delete(r2Key).catch(() => {});
+      await newDoc.deleteOne().catch(() => {});
+      throw err;
+    }
 
-    // 4. Trigger async metadata extraction
-    await this.kafka.emit(TOPICS.TYPOLOGY_FILE_UPLOADED, {
-      orgId,
-      typologyId: newTypologyId,
-      r2Key,
-      mimeType: file.mimetype,
-      ...(dto.orgName ? { orgName: dto.orgName } : {}),
-    });
+    // Step 4: Archive old — only now that new doc is fully persisted.
+    // If this fails, clean up new doc + file (old is still ACTIVE).
+    old.typologyStatus = TypologyStatus.ARCHIVED;
+    try {
+      await old.save();
+    } catch (err) {
+      await this.storage.delete(r2Key).catch(() => {});
+      await newDoc.deleteOne().catch(() => {});
+      throw err;
+    }
+
+    // Step 5: Emit extraction event — if Kafka fails, restore old to ACTIVE and clean up.
+    try {
+      await this.kafka.emit(TOPICS.TYPOLOGY_FILE_UPLOADED, {
+        orgId,
+        typologyId: newTypologyId,
+        r2Key,
+        mimeType: file.mimetype,
+        ...(dto.orgName ? { orgName: dto.orgName } : {}),
+      });
+    } catch (err) {
+      old.typologyStatus = TypologyStatus.ACTIVE;
+      await old.save().catch(() => {});
+      await this.storage.delete(r2Key).catch(() => {});
+      await newDoc.deleteOne().catch(() => {});
+      throw new InternalServerErrorException('Failed to trigger metadata extraction. New version rolled back.');
+    }
 
     this.logger.log(
       `New version created: ${typologyId} (${oldVersion ?? '—'}) → ${newTypologyId} (${version ?? '—'})`,
@@ -221,7 +256,49 @@ export class DocumentUploadService {
     if (!typology) throw new NotFoundException(`Typology ${typologyId} not found`);
     if (!typology.documento?.r2Key) throw new NotFoundException('Esta tipología no tiene documento cargado');
 
-    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(typology.documento.r2Key);
+    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(
+      typology.documento.r2Key,
+      typology.documento.originalName ?? undefined,
+      typology.documento.mimeType    ?? undefined,
+    );
     return { signedUrl: url, expiresAt };
+  }
+
+  async retryExtraction(
+    orgId: string,
+    typologyId: string,
+    orgName?: string,
+  ): Promise<{ message: string; extractionStatus: string }> {
+    if (!Types.ObjectId.isValid(typologyId)) throw new BadRequestException('Invalid typology ID');
+
+    const typology = await this.model.findOne({ _id: typologyId, orgId, deletedAt: null }).exec();
+    if (!typology) throw new NotFoundException(`Typology ${typologyId} not found`);
+    if (!typology.documento?.r2Key) throw new BadRequestException('Esta tipología no tiene documento cargado');
+
+    if (typology.documento.extractionStatus !== ExtractionStatus.FAILED) {
+      throw new BadRequestException(
+        `Solo se puede reintentar cuando la extracción ha fallado. Estado actual: ${typology.documento.extractionStatus}`,
+      );
+    }
+
+    typology.documento.extractionStatus = ExtractionStatus.PROCESSING;
+    await typology.save();
+
+    try {
+      await this.kafka.emit(TOPICS.TYPOLOGY_FILE_UPLOADED, {
+        orgId,
+        typologyId,
+        r2Key:    typology.documento.r2Key,
+        mimeType: typology.documento.mimeType,
+        ...(orgName ? { orgName } : {}),
+      });
+    } catch (err) {
+      typology.documento.extractionStatus = ExtractionStatus.FAILED;
+      await typology.save().catch(() => {});
+      throw new InternalServerErrorException('No se pudo reencolar la extracción. Intenta de nuevo.');
+    }
+
+    this.logger.log(`Extraction retried for typology ${typologyId}`, 'DocumentUploadService');
+    return { message: 'Extracción reencolada.', extractionStatus: ExtractionStatus.PROCESSING };
   }
 }

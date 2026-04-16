@@ -9,9 +9,16 @@ import { Reflector } from '@nestjs/core';
 import { OrgPermissionsGuard } from './org-permissions.guard';
 import { OrgPermissionMeta } from '../decorators/require-org-permission.decorator';
 
+import { createHmac } from 'crypto';
+
+const TEST_JWT_SECRET = 'test-jwt-secret';
+
 const buildJwt = (payload: Record<string, unknown>) => {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(payload)}.signature`;
+  const header = encode({ alg: 'HS256', typ: 'JWT' });
+  const body   = encode(payload);
+  const sig    = createHmac('sha256', TEST_JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${sig}`;
 };
 
 const makeContext = (headers: Record<string, string> = {}): ExecutionContext =>
@@ -35,7 +42,8 @@ describe('OrgPermissionsGuard', () => {
     configService = {
       getOrThrow: jest.fn((key: string) => {
         if (key === 'USER_SERVICE_URL') return 'http://user-service';
-        if (key === 'INTERNAL_TOKEN') return 'internal-secret';
+        if (key === 'INTERNAL_TOKEN')   return 'internal-secret';
+        if (key === 'JWT_SECRET')       return TEST_JWT_SECRET;
         throw new Error(`Unexpected key ${key}`);
       }),
     };

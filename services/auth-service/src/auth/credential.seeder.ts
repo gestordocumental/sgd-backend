@@ -19,11 +19,13 @@ export class CredentialSeeder implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    const email    = this.config.get<string>('SUPER_ADMIN_EMAIL')    ?? 'admin@sgd.local';
-    const password = this.config.get<string>('SUPER_ADMIN_PASSWORD') ?? 'Admin1234!';
+    const email    = this.config.get<string>('SUPER_ADMIN_EMAIL');
+    const password = this.config.get<string>('SUPER_ADMIN_PASSWORD');
+    if (!email)    throw new Error('SUPER_ADMIN_EMAIL is required for super-admin seeding');
+    if (!password) throw new Error('SUPER_ADMIN_PASSWORD is required for super-admin seeding');
 
     const existing = await this.credentialRepo.findOne({
-      where: { userId: SUPER_ADMIN_USER_ID },
+      where: [{ userId: SUPER_ADMIN_USER_ID }, { email }],
     });
 
     if (existing) {

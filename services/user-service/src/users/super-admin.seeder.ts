@@ -22,7 +22,10 @@ export class SuperAdminSeeder implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    const email = this.config.get<string>('SUPER_ADMIN_EMAIL') ?? 'admin@sgd.local';
+    const email = this.config.get<string>('SUPER_ADMIN_EMAIL');
+    if (!email) {
+      throw new Error('SUPER_ADMIN_EMAIL is required for super-admin seeding');
+    }
 
     await this.userRepo
       .createQueryBuilder()
@@ -46,6 +49,6 @@ export class SuperAdminSeeder implements OnApplicationBootstrap {
       .orIgnore() // ON CONFLICT DO NOTHING — idempotent on every restart
       .execute();
 
-    this.logger.log(`Super admin seeded (email: ${email})`);
+    this.logger.log('Super admin seeded');
   }
 }

@@ -208,9 +208,10 @@ describe('ExtractorService', () => {
       }));
 
       expect(deps.logger.error).toHaveBeenCalled();
+      // Raw error details stay in logs only — the Kafka event carries a safe generic message.
       expect(deps.producer.emit).toHaveBeenCalledWith(
         TOPICS.TYPOLOGY_METADATA_EXTRACTION_FAILED,
-        expect.objectContaining({ reason: 'ECONNRESET' }),
+        expect.objectContaining({ reason: 'Extraction failed due to an internal error' }),
       );
     });
 
@@ -227,9 +228,10 @@ describe('ExtractorService', () => {
         orgId: 'org-1', typologyId: 'typo-1', r2Key: 'key', mimeType: 'application/pdf',
       }));
 
+      // Raw error details stay in logs only — the Kafka event carries a safe generic message.
       expect(deps.producer.emit).toHaveBeenCalledWith(
         TOPICS.TYPOLOGY_METADATA_EXTRACTION_FAILED,
-        expect.objectContaining({ reason: 'Rule error' }),
+        expect.objectContaining({ reason: 'Extraction failed due to an internal error' }),
       );
     });
   });

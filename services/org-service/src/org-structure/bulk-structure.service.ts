@@ -22,6 +22,7 @@ import { AppLogger } from "../common/logger/app-logger.service";
 import { ResolveByIdRequestDto, ResolveByIdResponseDto } from "./dto/resolve-by-id-request.dto";
 
 const MAX_ROWS = 500;
+const MAX_RESOLVE_ITEMS = 500;
 
 @Injectable()
 export class BulkStructureService {
@@ -103,17 +104,21 @@ export class BulkStructureService {
             reason: "El cargo requiere que se especifique un área",
           });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const safeReason =
+          err instanceof BadRequestException
+            ? err.message
+            : "No se pudo procesar la fila";
         result.failed++;
         result.errors.push({
           row: rowNum,
           department,
           area,
           position,
-          reason: err?.message ?? "Error desconocido",
+          reason: safeReason,
         });
         this.logger.warn(
-          `Bulk import row ${rowNum} failed: ${err?.message}`,
+          `Bulk import row ${rowNum} failed: ${err instanceof Error ? err.message : String(err)}`,
           "BulkStructureService",
         );
       }
@@ -125,6 +130,12 @@ export class BulkStructureService {
   async resolveStructure(
     dto: ResolveStructureRequestDto,
   ): Promise<ResolveStructureResponseDto> {
+    if (dto.items.length > MAX_RESOLVE_ITEMS) {
+      throw new BadRequestException(
+        `La solicitud excede el máximo de ${MAX_RESOLVE_ITEMS} elementos`,
+      );
+    }
+
     const resolved: ResolvedStructureItem[] = [];
     const unresolved: UnresolvedStructureItem[] = [];
 
@@ -338,11 +349,12 @@ export class BulkStructureService {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as any);
 
-    const worksheet = workbook.getWorksheet('Estructura') ?? workbook.worksheets[0];
-    if (!worksheet)
+    const worksheet = workbook.getWorksheet("Estructura");
+    if (!worksheet) {
       throw new BadRequestException(
-        "El archivo Excel no tiene hojas de cálculo",
+        'No se encontró la hoja "Estructura". Asegúrese de diligenciar esa hoja y no la hoja "Ejemplo".',
       );
+    }
 
     const rows: Array<{
       department: string;
@@ -379,9 +391,7 @@ export class BulkStructureService {
   }
 
   private cellValue(cell: ExcelJS.Cell): string | undefined {
-    const raw = cell.value;
-    if (raw === null || raw === undefined) return undefined;
-    const str = String(raw).trim();
-    return str.length > 0 ? str : undefined;
+    const str = cell.text?.trim();
+    return str ? str : undefined;
   }
 }

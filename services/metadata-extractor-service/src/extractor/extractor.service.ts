@@ -121,7 +121,15 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
       this.logger.log(`Metadata extracted for typology ${typologyId}: ${JSON.stringify(extracted)}`, 'ExtractorService');
     } catch (err: any) {
       this.logger.error(`Extraction failed for typology ${typologyId}: ${err?.message}`, err?.stack, 'ExtractorService');
-      await this.emitFailure(orgId, typologyId, 'Extraction failed due to an internal error');
+      try {
+        await this.emitFailure(orgId, typologyId, 'Extraction failed due to an internal error');
+      } catch (emitErr: any) {
+        this.logger.error(
+          `Failed to emit extraction failure for typology ${typologyId}: ${emitErr?.message}`,
+          emitErr?.stack,
+          'ExtractorService',
+        );
+      }
     }
   }
 

@@ -264,7 +264,7 @@ describe('DocumentUploadService', () => {
 
       const result = await service.getSignedUrl('org-1', doc.id);
 
-      expect(storage.getSignedDownloadUrl).toHaveBeenCalledWith('org/org-1/typologies/file.pdf');
+      expect(storage.getSignedDownloadUrl).toHaveBeenCalledWith('org/org-1/typologies/file.pdf', 'file.pdf', 'application/pdf');
       expect(result.signedUrl).toBe('https://signed.url');
     });
 

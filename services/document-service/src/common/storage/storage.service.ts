@@ -58,10 +58,22 @@ export class StorageService implements OnModuleInit {
    * Generates a pre-signed GET URL valid for SIGNED_URL_EXPIRY seconds.
    * The file is never served directly through the application.
    */
-  async getSignedDownloadUrl(key: string): Promise<{ url: string; expiresAt: Date }> {
+  async getSignedDownloadUrl(
+    key: string,
+    filename?: string,
+    mimeType?: string,
+  ): Promise<{ url: string; expiresAt: Date }> {
+    const disposition = filename
+      ? `${mimeType === 'application/pdf' ? 'inline' : 'attachment'}; filename="${filename.replace(/"/g, '\\"')}"`
+      : undefined;
+
     const url = await getSignedUrl(
       this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key:    key,
+        ...(disposition ? { ResponseContentDisposition: disposition } : {}),
+      }),
       { expiresIn: this.expirySeconds },
     );
 

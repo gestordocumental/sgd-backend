@@ -115,7 +115,12 @@ export class TypologiesService {
     return doc;
   }
 
-  async update(orgId: string, id: string, dto: UpdateTypologyDto): Promise<TypologyDocument> {
+  async update(
+    orgId: string,
+    id: string,
+    dto: UpdateTypologyDto,
+    structureNames?: OrgStructureNames,
+  ): Promise<TypologyDocument> {
     const doc = await this.findOne(orgId, id);
 
     // Version change: new version must be exactly one increment above the current one
@@ -132,9 +137,14 @@ export class TypologiesService {
     if (dto.codigo  !== undefined) doc.datosDeclarados.codigo  = dto.codigo;
     if (dto.version !== undefined) doc.datosDeclarados.version = dto.version;
 
-    if (dto.departamentoId !== undefined) doc.estructuraOrg.departamentoId = dto.departamentoId;
-    if (dto.areaId         !== undefined) doc.estructuraOrg.areaId         = dto.areaId ?? null;
-    if (dto.cargoId        !== undefined) doc.estructuraOrg.cargoId        = dto.cargoId ?? null;
+    if (structureNames) {
+      doc.estructuraOrg.departamentoId     = structureNames.departamentoId;
+      doc.estructuraOrg.departamentoNombre = structureNames.departamentoNombre;
+      doc.estructuraOrg.areaId             = structureNames.areaId   ?? null;
+      doc.estructuraOrg.areaNombre         = structureNames.areaNombre ?? null;
+      doc.estructuraOrg.cargoId            = structureNames.cargoId   ?? null;
+      doc.estructuraOrg.cargoNombre        = structureNames.cargoNombre ?? null;
+    }
 
     const hasDeclaredData = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
@@ -170,6 +180,7 @@ export class TypologiesService {
     typologyId: string,
     extracted: { nombre: string | null; codigo: string | null; version: string | null },
   ): Promise<void> {
+    if (!Types.ObjectId.isValid(typologyId)) return;
     const doc = await this.model.findOne({ _id: typologyId, orgId, deletedAt: null }).exec();
     if (!doc) return; // typology deleted before extraction finished
 
@@ -237,6 +248,15 @@ export class TypologiesService {
     const hasDeclaredData = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
 
-    return doc.save();
+    try {
+      return await doc.save();
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        throw new ConflictException(
+          `An active typology with code '${doc.datosDeclarados.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+        );
+      }
+      throw err;
+    }
   }
 }

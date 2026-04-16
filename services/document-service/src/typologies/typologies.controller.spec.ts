@@ -160,7 +160,7 @@ describe('TypologiesController', () => {
 
       const result = await ctrl.update('org-1', 'typo-id-1', { nombre: 'Updated' });
 
-      expect(service.update).toHaveBeenCalledWith('org-1', 'typo-id-1', { nombre: 'Updated' });
+      expect(service.update).toHaveBeenCalledWith('org-1', 'typo-id-1', { nombre: 'Updated' }, undefined);
       expect(result).toBeInstanceOf(TypologyResponseDto);
     });
   });

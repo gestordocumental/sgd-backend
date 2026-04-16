@@ -35,8 +35,17 @@ export async function parseXlsxStructured(buffer: Buffer): Promise<XlsxStructure
   const ws = workbook.worksheets[0];
   if (!ws) return { text: '', titleCell: null, leftCell: null, rightCell: null };
 
-  // Full text from all sheets
-  const text = await parseXlsx(buffer);
+  // Full text from all sheets (reuse loaded workbook)
+  const lines: string[] = [];
+  workbook.worksheets.forEach((sheet: any) => {
+    sheet.eachRow((row: any) => {
+      row.eachCell((cell: any) => {
+        const val = cellText(cell);
+        if (val) lines.push(val);
+      });
+    });
+  });
+  const text = lines.join('\n');
 
   // Collect unique non-empty cell values from first 10 rows
   const seen   = new Set<string>();

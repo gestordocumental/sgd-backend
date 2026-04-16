@@ -30,7 +30,9 @@ export class ExtractorClientService {
     private readonly logger: AppLogger,
   ) {
     this.extractorUrl = this.config.getOrThrow<string>('METADATA_EXTRACTOR_URL');
-    this.timeoutMs = this.config.get<number>('METADATA_EXTRACTOR_TIMEOUT_MS') ?? 15_000;
+    const rawTimeout   = this.config.get<string | number>('METADATA_EXTRACTOR_TIMEOUT_MS');
+    const parsedTimeout = rawTimeout == null ? 15_000 : Number(rawTimeout);
+    this.timeoutMs      = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 15_000;
   }
 
   async previewExtract(file: Express.Multer.File, orgName?: string): Promise<PreviewExtractResult> {

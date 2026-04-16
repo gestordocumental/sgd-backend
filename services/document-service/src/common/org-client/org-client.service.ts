@@ -51,7 +51,9 @@ export class OrgClientService {
   ) {
     this.orgServiceUrl = this.config.getOrThrow<string>('ORG_SERVICE_URL');
     this.internalToken = this.config.getOrThrow<string>('INTERNAL_TOKEN');
-    this.timeoutMs     = this.config.get<number>('ORG_SERVICE_TIMEOUT_MS') ?? 5_000;
+    const rawTimeout   = this.config.get<string | number>('ORG_SERVICE_TIMEOUT_MS');
+    const parsedTimeout = rawTimeout == null ? 5_000 : Number(rawTimeout);
+    this.timeoutMs      = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 5_000;
   }
 
   async resolveStructure(

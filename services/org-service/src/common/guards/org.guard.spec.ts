@@ -1,12 +1,18 @@
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
+import { createHmac } from 'crypto';
 import { OrgGuard } from './org.guard';
 import { AuthMeta } from '../decorators/auth.decorator';
 
+const TEST_JWT_SECRET = 'test-jwt-secret';
+
 const buildJwt = (payload: Record<string, unknown>) => {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(payload)}.signature`;
+  const header = encode({ alg: 'HS256', typ: 'JWT' });
+  const body   = encode(payload);
+  const sig    = createHmac('sha256', TEST_JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${sig}`;
 };
 
 const makeContext = (
@@ -27,7 +33,13 @@ describe('OrgGuard', () => {
 
   beforeEach(() => {
     reflector = { get: jest.fn() };
-    configService = { getOrThrow: jest.fn().mockReturnValue('internal-secret') };
+    configService = {
+      getOrThrow: jest.fn((key: string) => {
+        if (key === 'INTERNAL_TOKEN') return 'internal-secret';
+        if (key === 'JWT_SECRET')     return TEST_JWT_SECRET;
+        throw new Error(`Unexpected key ${key}`);
+      }),
+    };
     guard = new OrgGuard(reflector as unknown as Reflector, configService as unknown as ConfigService);
   });
 

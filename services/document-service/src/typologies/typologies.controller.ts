@@ -148,7 +148,17 @@ export class TypologiesController {
     @Param('id') id: string,
     @Body() dto: UpdateTypologyDto,
   ): Promise<TypologyResponseDto> {
-    return TypologyResponseDto.fromDocument(await this.service.update(orgId, id, dto));
+    const hasStructureChange = dto.departamentoId !== undefined || dto.areaId !== undefined || dto.cargoId !== undefined;
+
+    if (hasStructureChange && dto.departamentoId === undefined) {
+      throw new BadRequestException('departamentoId is required when updating org structure');
+    }
+
+    const structureNames = hasStructureChange
+      ? await this.orgClient.resolveStructureById(orgId, dto.departamentoId!, dto.areaId, dto.cargoId)
+      : undefined;
+
+    return TypologyResponseDto.fromDocument(await this.service.update(orgId, id, dto, structureNames));
   }
 
   @ApiOperation({ summary: 'Soft delete a typology' })

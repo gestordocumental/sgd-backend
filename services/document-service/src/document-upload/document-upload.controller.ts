@@ -65,9 +65,21 @@ export class DocumentUploadController {
     return this.service.upload(orgId, typologyId, file, orgName);
   }
 
+  @ApiOperation({ summary: 'Re-queue metadata extraction when previous attempt failed' })
+  @ApiOkResponse({ description: 'Extraction re-queued', schema: { example: { message: 'Extracción reencolada.', extractionStatus: 'PROCESSING' } } })
+  @ApiBadRequestResponse({ description: 'No document loaded or extraction not in FAILED state' })
+  @Post('retry-extraction')
+  retryExtraction(
+    @Param('orgId') orgId: string,
+    @Param('id') typologyId: string,
+    @Body('orgName') orgName?: string,
+  ): Promise<{ message: string; extractionStatus: string }> {
+    return this.service.retryExtraction(orgId, typologyId, orgName);
+  }
+
   @ApiOperation({ summary: 'Get a temporary signed download URL for the uploaded file' })
   @ApiOkResponse({ description: 'Signed URL generated', type: SignedUrlResponseDto })
-  @Get('file')
+  @Get('signed-url')
   getSignedUrl(
     @Param('orgId') orgId: string,
     @Param('id') typologyId: string,
