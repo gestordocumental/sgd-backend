@@ -3,12 +3,12 @@
 # Las variables ${KONG_JWT_SECRET} y ${FRONTEND_URL} se resuelven
 # en runtime via envsubst (ver entrypoint.sh).
 
-FROM kong:3.4-alpine
+FROM kong:3.4
 
 USER root
 
 # envsubst viene incluido en alpine via gettext (ya presente en la imagen base)
-RUN apk add --no-cache gettext
+RUN apt-get update && apt-get install -y --no-install-recommends gettext-base && rm -rf /var/lib/apt/lists/*
 
 COPY kong.yaml /etc/kong/kong.yaml.template
 COPY entrypoint.sh /entrypoint.sh
