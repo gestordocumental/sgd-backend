@@ -72,7 +72,7 @@ describe('TypologiesController', () => {
       const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
 
       const file = { buffer: Buffer.from(''), mimetype: 'application/pdf' } as Express.Multer.File;
-      const result = await ctrl.previewExtract(file, 'Helisa SAS');
+      const result = await ctrl.previewExtract(file, {}, 'Helisa SAS');
 
       expect(extractorClient.previewExtract).toHaveBeenCalledWith(file, 'Helisa SAS');
       expect(result).toEqual({ nombre: 'Policy', codigo: 'POL-001', version: '01' });
@@ -82,7 +82,7 @@ describe('TypologiesController', () => {
       const { service, orgClient, extractorClient } = makeDeps();
       const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
 
-      await expect(ctrl.previewExtract(undefined as any)).rejects.toThrow(BadRequestException);
+      await expect(ctrl.previewExtract(undefined as any, {})).rejects.toThrow(BadRequestException);
     });
   });
 
