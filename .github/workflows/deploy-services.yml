@@ -1,60 +1,72 @@
-name: Deploy — Microservicios
+name: Deploy - Microservicios
 
-# Corre después de un merge exitoso a dev, test o master.
-# Solo despliega los servicios cuyos archivos cambiaron en el commit.
+# En push: se activa solo después de que ci.yml completa con éxito en dev/test/master.
+# En workflow_dispatch: permite desplegar manualmente un servicio específico.
 #
-# Mapeo rama → entorno:
-#   dev    → Railway env: develop    / GitHub env: dev
-#   test   → Railway env: staging    / GitHub env: staging
-#   master → Railway env: production / GitHub env: production  (requiere aprobación)
-#
-# Secrets requeridos en GitHub (Settings → Secrets → Actions):
-#   Environment: develop        → secret RAILWAY_TOKEN (token Railway para develop)
-#   Environment: staging    → secret RAILWAY_TOKEN (token Railway para staging)
-#   Environment: production → secret RAILWAY_TOKEN (token Railway para production)
-#
-# ⚠️  IMPORTANTE — gestión de secretos:
-#   Los archivos k8s/*/secret.yaml son EXCLUSIVAMENTE para entorno local (KinD).
-#   Este pipeline NUNCA ejecuta `kubectl apply` sobre esos archivos.
-#   En staging/production los secretos se gestionan directamente en Railway
-#   (Dashboard → Variables) o mediante Sealed Secrets / Vault si se migra a k8s.
+# Mapeo rama -> entorno:
+#   dev    -> Railway env: develop    / GitHub env: develop
+#   test   -> Railway env: staging    / GitHub env: staging
+#   master -> Railway env: production / GitHub env: production
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI — Build & Validate"]
+    types: [completed]
     branches: [dev, test, master]
-  # Permite lanzar el deploy manualmente desde GitHub Actions → Run workflow
   workflow_dispatch:
     inputs:
       service:
-        description: 'Servicio a desplegar (ej: auth-service)'
+        description: Servicio a desplegar manualmente
         required: true
-        default: 'auth-service'
+        default: auth-service
+        type: choice
+        options:
+          - auth-service
+          - user-service
+          - org-service
+          - document-service
+          - metadata-extractor-service
+          - workflow-service
+          - notification-service
+          - audit-service
+          - api-gateway
 
 jobs:
-  # ── 1. Detectar qué servicios cambiaron ────────────────────────────────────
+  # Abortar si ci.yml falló (solo aplica para el trigger workflow_run)
+  guard:
+    name: Verificar CI
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - run: echo "CI passed — proceeding with deploy"
+
   changes:
     name: Detectar cambios
+    needs: guard
     runs-on: ubuntu-latest
     outputs:
-      auth:         ${{ steps.filter.outputs.auth }}
-      user:         ${{ steps.filter.outputs.user }}
-      org:          ${{ steps.filter.outputs.org }}
-      document:     ${{ steps.filter.outputs.document }}
-      workflow:     ${{ steps.filter.outputs.workflow }}
-      notification: ${{ steps.filter.outputs.notification }}
-      audit:        ${{ steps.filter.outputs.audit }}
-      api-gateway:  ${{ steps.filter.outputs.api-gateway }}
+      auth: ${{ steps.targets.outputs.auth }}
+      user: ${{ steps.targets.outputs.user }}
+      org: ${{ steps.targets.outputs.org }}
+      document: ${{ steps.targets.outputs.document }}
+      metadata_extractor: ${{ steps.targets.outputs.metadata_extractor }}
+      workflow: ${{ steps.targets.outputs.workflow }}
+      notification: ${{ steps.targets.outputs.notification }}
+      audit: ${{ steps.targets.outputs.audit }}
+      api_gateway: ${{ steps.targets.outputs.api_gateway }}
     steps:
       - uses: actions/checkout@v4
+        if: github.event_name != 'workflow_dispatch'
         with:
-          fetch-depth: 0   # Necesario para que paths-filter pueda comparar commits
+          # Para workflow_run, usar el SHA del commit que disparó CI
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
 
       - name: Filtrar por carpeta modificada
+        if: github.event_name != 'workflow_dispatch'
         uses: dorny/paths-filter@v3
         id: filter
         with:
-          # En primer push a una rama nueva no hay HEAD~1 para comparar.
-          # initial-fetch-depth: 0 fuerza a comparar contra el merge base de la rama.
           initial-fetch-depth: 0
           filters: |
             auth:
@@ -65,63 +77,100 @@ jobs:
               - 'services/org-service/**'
             document:
               - 'services/document-service/**'
+            metadata_extractor:
+              - 'services/metadata-extractor-service/**'
             workflow:
               - 'services/workflow-service/**'
             notification:
               - 'services/notification-service/**'
             audit:
               - 'services/audit-service/**'
-            api-gateway:
+            api_gateway:
               - 'railway/api-gateway/**'
 
-  # ── 2. Resolver entorno según la rama ──────────────────────────────────────
+      - name: Resolver servicios objetivo
+        id: targets
+        shell: bash
+        run: |
+          emit() {
+            echo "$1=$2" >> "$GITHUB_OUTPUT"
+          }
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            selected="${{ github.event.inputs.service }}"
+
+            emit auth false
+            emit user false
+            emit org false
+            emit document false
+            emit metadata_extractor false
+            emit workflow false
+            emit notification false
+            emit audit false
+            emit api_gateway false
+
+            case "$selected" in
+              auth-service) emit auth true ;;
+              user-service) emit user true ;;
+              org-service) emit org true ;;
+              document-service) emit document true ;;
+              metadata-extractor-service) emit metadata_extractor true ;;
+              workflow-service) emit workflow true ;;
+              notification-service) emit notification true ;;
+              audit-service) emit audit true ;;
+              api-gateway) emit api_gateway true ;;
+              *)
+                echo "Servicio desconocido: $selected" >&2
+                exit 1
+                ;;
+            esac
+          else
+            emit auth "${{ steps.filter.outputs.auth }}"
+            emit user "${{ steps.filter.outputs.user }}"
+            emit org "${{ steps.filter.outputs.org }}"
+            emit document "${{ steps.filter.outputs.document }}"
+            emit metadata_extractor "${{ steps.filter.outputs.metadata_extractor }}"
+            emit workflow "${{ steps.filter.outputs.workflow }}"
+            emit notification "${{ steps.filter.outputs.notification }}"
+            emit audit "${{ steps.filter.outputs.audit }}"
+            emit api_gateway "${{ steps.filter.outputs.api_gateway }}"
+          fi
+
   set-env:
     name: Resolver entorno
+    needs: guard
     runs-on: ubuntu-latest
     outputs:
       railway_env: ${{ steps.env.outputs.railway_env }}
-      github_env:  ${{ steps.env.outputs.github_env }}
+      github_env: ${{ steps.env.outputs.github_env }}
     steps:
       - name: Mapear rama a entorno
         id: env
+        shell: bash
         run: |
-          if [ "${{ github.ref_name }}" = "master" ]; then
-            echo "railway_env=production"  >> $GITHUB_OUTPUT
-            echo "github_env=production"   >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "test" ]; then
-            echo "railway_env=Staging"  >> $GITHUB_OUTPUT
-            echo "github_env=staging"   >> $GITHUB_OUTPUT
+          # workflow_run usa head_branch; push y workflow_dispatch usan ref_name
+          BRANCH="${{ github.event.workflow_run.head_branch || github.ref_name }}"
+          if [ "$BRANCH" = "master" ]; then
+            echo "railway_env=production" >> "$GITHUB_OUTPUT"
+            echo "github_env=production" >> "$GITHUB_OUTPUT"
+          elif [ "$BRANCH" = "test" ]; then
+            echo "railway_env=staging" >> "$GITHUB_OUTPUT"
+            echo "github_env=staging" >> "$GITHUB_OUTPUT"
           else
-            echo "railway_env=Develop"  >> $GITHUB_OUTPUT
-            echo "github_env=develop"       >> $GITHUB_OUTPUT
+            echo "railway_env=develop" >> "$GITHUB_OUTPUT"
+            echo "github_env=develop" >> "$GITHUB_OUTPUT"
           fi
 
-  # ── 3. Deploy auth-service ─────────────────────────────────────────────────
   deploy-auth:
     name: Deploy auth-service
     needs: [changes, set-env]
     if: needs.changes.outputs.auth == 'true'
     runs-on: ubuntu-latest
-    # "production" tiene required reviewers configurados en GitHub Environments.
-    # "dev" y "test" no requieren aprobación.
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: services/auth-service/package-lock.json
-
-      - name: Instalar dependencias
-        working-directory: services/auth-service
-        run: npm ci
-      # TODO delete --if-present when all services are implements
-      - name: Ejecutar tests unitarios
-        working-directory: services/auth-service
-        run: npm run test --if-present
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -136,7 +185,6 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 4. Deploy user-service ─────────────────────────────────────────────────
   deploy-user:
     name: Deploy user-service
     needs: [changes, set-env]
@@ -145,22 +193,8 @@ jobs:
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: services/user-service/package-lock.json
-
-      - name: Instalar dependencias
-        working-directory: services/user-service
-        run: npm ci
-        
-      # TODO delete --if-present when all services are implements
-      - name: Ejecutar tests unitarios
-        working-directory: services/user-service
-        run: npm run test --if-present
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -175,7 +209,6 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 5. Deploy org-service ──────────────────────────────────────────────────
   deploy-org:
     name: Deploy org-service
     needs: [changes, set-env]
@@ -184,6 +217,8 @@ jobs:
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -198,7 +233,6 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 6. Deploy document-service ─────────────────────────────────────────────
   deploy-document:
     name: Deploy document-service
     needs: [changes, set-env]
@@ -207,6 +241,8 @@ jobs:
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -221,7 +257,30 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 7. Deploy workflow-service ─────────────────────────────────────────────
+  deploy-metadata-extractor:
+    name: Deploy metadata-extractor-service
+    needs: [changes, set-env]
+    if: needs.changes.outputs.metadata_extractor == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.github_env }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy a Railway
+        working-directory: services/metadata-extractor-service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service metadata-extractor-service \
+            --environment ${{ needs.set-env.outputs.railway_env }} \
+            --detach
+
   deploy-workflow:
     name: Deploy workflow-service
     needs: [changes, set-env]
@@ -230,6 +289,8 @@ jobs:
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -244,7 +305,6 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 8. Deploy notification-service ────────────────────────────────────────
   deploy-notification:
     name: Deploy notification-service
     needs: [changes, set-env]
@@ -253,6 +313,8 @@ jobs:
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -267,7 +329,6 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 9. Deploy audit-service ────────────────────────────────────────────────
   deploy-audit:
     name: Deploy audit-service
     needs: [changes, set-env]
@@ -276,6 +337,8 @@ jobs:
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -290,15 +353,16 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 10. Deploy api-gateway (Kong) ─────────────────────────────────────────
   deploy-api-gateway:
     name: Deploy api-gateway
     needs: [changes, set-env]
-    if: needs.changes.outputs.api-gateway == 'true'
+    if: needs.changes.outputs.api_gateway == 'true'
     runs-on: ubuntu-latest
     environment: ${{ needs.set-env.outputs.github_env }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Instalar Railway CLI
         run: npm install -g @railway/cli
@@ -313,7 +377,6 @@ jobs:
             --environment ${{ needs.set-env.outputs.railway_env }} \
             --detach
 
-  # ── 11. Resumen final ──────────────────────────────────────────────────────
   deploy-summary:
     name: Resumen de deploy
     runs-on: ubuntu-latest
@@ -325,41 +388,45 @@ jobs:
       - deploy-user
       - deploy-org
       - deploy-document
+      - deploy-metadata-extractor
       - deploy-workflow
       - deploy-notification
       - deploy-audit
       - deploy-api-gateway
     steps:
       - name: Imprimir resumen
+        shell: bash
         run: |
           ENV="${{ needs.set-env.outputs.railway_env }}"
-          echo "## Deploy a entorno: $ENV" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Servicio | Cambió | Resultado |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "## Deploy a entorno: $ENV" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Servicio | Cambio/seleccion | Resultado |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
 
           report_service() {
             local name=$1
             local changed=$2
             local result=$3
+
             if [ "$changed" = "true" ]; then
               if [ "$result" = "success" ]; then
-                echo "| $name | si | ✅ desplegado |" >> $GITHUB_STEP_SUMMARY
+                echo "| $name | si | desplegado |" >> "$GITHUB_STEP_SUMMARY"
               elif [ "$result" = "skipped" ]; then
-                echo "| $name | si | ⏭️ saltado (aprobación pendiente) |" >> $GITHUB_STEP_SUMMARY
+                echo "| $name | si | saltado |" >> "$GITHUB_STEP_SUMMARY"
               else
-                echo "| $name | si | ❌ fallido |" >> $GITHUB_STEP_SUMMARY
+                echo "| $name | si | fallido |" >> "$GITHUB_STEP_SUMMARY"
               fi
             else
-              echo "| $name | no | — sin cambios |" >> $GITHUB_STEP_SUMMARY
+              echo "| $name | no | sin cambios |" >> "$GITHUB_STEP_SUMMARY"
             fi
           }
 
-          report_service "auth-service"         "${{ needs.changes.outputs.auth }}"         "${{ needs.deploy-auth.result }}"
-          report_service "user-service"         "${{ needs.changes.outputs.user }}"         "${{ needs.deploy-user.result }}"
-          report_service "org-service"          "${{ needs.changes.outputs.org }}"          "${{ needs.deploy-org.result }}"
-          report_service "document-service"     "${{ needs.changes.outputs.document }}"     "${{ needs.deploy-document.result }}"
-          report_service "workflow-service"     "${{ needs.changes.outputs.workflow }}"     "${{ needs.deploy-workflow.result }}"
+          report_service "auth-service" "${{ needs.changes.outputs.auth }}" "${{ needs.deploy-auth.result }}"
+          report_service "user-service" "${{ needs.changes.outputs.user }}" "${{ needs.deploy-user.result }}"
+          report_service "org-service" "${{ needs.changes.outputs.org }}" "${{ needs.deploy-org.result }}"
+          report_service "document-service" "${{ needs.changes.outputs.document }}" "${{ needs.deploy-document.result }}"
+          report_service "metadata-extractor-service" "${{ needs.changes.outputs.metadata_extractor }}" "${{ needs.deploy-metadata-extractor.result }}"
+          report_service "workflow-service" "${{ needs.changes.outputs.workflow }}" "${{ needs.deploy-workflow.result }}"
           report_service "notification-service" "${{ needs.changes.outputs.notification }}" "${{ needs.deploy-notification.result }}"
-          report_service "audit-service"        "${{ needs.changes.outputs.audit }}"        "${{ needs.deploy-audit.result }}"
-          report_service "api-gateway"          "${{ needs.changes.outputs.api-gateway }}"  "${{ needs.deploy-api-gateway.result }}"
+          report_service "audit-service" "${{ needs.changes.outputs.audit }}" "${{ needs.deploy-audit.result }}"
+          report_service "api-gateway" "${{ needs.changes.outputs.api_gateway }}" "${{ needs.deploy-api-gateway.result }}"

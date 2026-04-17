@@ -27,8 +27,9 @@ jobs:
           - auth-service
           - user-service
           - org-service
+          - document-service
+          - metadata-extractor-service
           # Agregar aquí cuando el servicio tenga tests:
-          # - document-service
           # - workflow-service
           # - notification-service
           # - audit-service
@@ -66,8 +67,9 @@ jobs:
           - auth-service
           - user-service
           - org-service
+          - document-service
+          - metadata-extractor-service
           # Agregar aquí cuando se creen los demás servicios:
-          # - document-service
           # - workflow-service
           # - notification-service
           # - audit-service

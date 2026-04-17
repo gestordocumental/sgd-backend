@@ -14,6 +14,9 @@ import {
   ForbiddenException,
   UseGuards,
 } from "@nestjs/common";
+import {
+  ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiParam,
+} from '@nestjs/swagger';
 import { ConfigService } from "@nestjs/config";
 import { timingSafeEqual } from "crypto";
 import { UsersService } from "./users.service";
@@ -22,6 +25,7 @@ import { UpdateUserDto } from "./dto/update-user.dto";
 import { ProvisionUserDto } from "./dto/provision-user.dto";
 import { AssignOrgDto } from "./dto/assign-org.dto";
 import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
+import { CreateUserResponseDto } from "./dto/create-user-response.dto";
 import { UserResponseDto } from "./dto/user-response.dto";
 import { UserWithOrgRolesDto } from "./dto/user-with-org-roles.dto";
 import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
@@ -33,6 +37,8 @@ import { PermissionsGuard } from "../common/guards/permissions.guard";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
 import { PermissionModule, PermissionAction } from "../roles/entities/permission.entity";
 
+@ApiTags('Users')
+@ApiBearerAuth('JWT')
 @Controller("api/users")
 @UseGuards(PermissionsGuard)
 export class UsersController {
@@ -41,6 +47,9 @@ export class UsersController {
     private readonly configService: ConfigService,
   ) {}
 
+  @ApiOperation({ summary: 'Create a new user and send invitation email' })
+  @ApiResponse({ status: 201, description: 'User created, returns user + invitationToken', type: CreateUserResponseDto })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @Post()
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async create(
@@ -61,24 +70,33 @@ export class UsersController {
     return { ...UserResponseDto.from(user), invitationToken };
   }
 
+  @ApiOperation({ summary: 'List all users' })
+  @ApiResponse({ status: 200, description: 'Array of users', type: UserResponseDto, isArray: true })
   @Get()
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAll(): Promise<UserResponseDto[]> {
     return (await this.usersService.findAll()).map(UserResponseDto.from);
   }
 
+  @ApiOperation({ summary: 'List all super admin users' })
+  @ApiResponse({ status: 200, description: 'Array of super admin users', type: UserResponseDto, isArray: true })
   @Get("super-admins")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAllSuperAdmin(): Promise<UserResponseDto[]> {
     return (await this.usersService.findAllSuperAdmin()).map(UserResponseDto.from);
   }
 
+  @ApiOperation({ summary: 'Find user by email' })
+  @ApiResponse({ status: 200, description: 'User found', type: UserResponseDto })
   @Get("by-email/:email")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByEmail(@Param("email") email: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findByEmail(email));
   }
 
+  @ApiOperation({ summary: 'List users belonging to an organization' })
+  @ApiParam({ name: 'orgId', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Users found', type: UserWithOrgRolesDto, isArray: true })
   @Get('by-org/:orgId')
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByOrg(
@@ -94,6 +112,8 @@ export class UsersController {
    * No @RequirePermission needed — a user can always read their own roles.
    * Used by the frontend to derive which UI sections to display.
    */
+  @ApiOperation({ summary: "Get caller's role assignments for their current company" })
+  @ApiResponse({ status: 200, description: 'Returns role assignments', type: UserOrgRoleResponseDto, isArray: true })
   @Get("me/org-roles")
   getMyOrgRoles(@JwtPayloadParam() caller: JwtPayload): Promise<UserOrgRoleResponseDto[]> {
     if (!caller.sub) throw new UnauthorizedException('Missing sub claim');
@@ -103,6 +123,9 @@ export class UsersController {
     );
   }
 
+  @ApiOperation({ summary: "Get companies a user belongs to (internal only)" })
+  @ApiSecurity('internal-token')
+  @ApiParam({ name: 'id', format: 'uuid' })
   @Get(":id/companies")
   getCompanies(
     @Headers("x-internal-token") internalToken: string,
@@ -119,12 +142,18 @@ export class UsersController {
     return this.usersService.getCompanies(id);
   }
 
+  @ApiOperation({ summary: 'Get user by ID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User found', type: UserResponseDto })
   @Get(":id")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findOne(@Param("id") id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findOne(id));
   }
 
+  @ApiOperation({ summary: 'Update user profile fields' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User updated', type: UserResponseDto })
   @Patch(":id")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async update(
@@ -134,6 +163,9 @@ export class UsersController {
     return UserResponseDto.from(await this.usersService.update(id, dto));
   }
 
+  @ApiOperation({ summary: 'Soft delete a user' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 204, description: 'User deleted' })
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(PermissionModule.USERS, PermissionAction.DELETE)
@@ -144,23 +176,33 @@ export class UsersController {
     return this.usersService.remove(id, caller.companyId);
   }
 
+  @ApiOperation({ summary: 'Restore a previously deleted user' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User restored', type: UserResponseDto })
   @Post(":id/restore")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async restore(@Param("id") id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.restore(id));
   }
 
+  @ApiOperation({ summary: 'Complete registration using invitation token (public endpoint)' })
+  @ApiResponse({ status: 200, description: 'Registration completed', type: UserResponseDto })
   @Post("complete-registration")
   async completeRegistration(@Body() dto: CompleteRegistrationDto): Promise<UserResponseDto> {
     return this.usersService.completeRegistration(dto);
   }
 
+  @ApiOperation({ summary: 'Set initial password for a user (admin provisioning)' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   @Post(":id/provision")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   provision(@Param("id") id: string, @Body() dto: ProvisionUserDto) {
     return this.usersService.provision(id, dto);
   }
 
+  @ApiOperation({ summary: 'Grant or revoke super admin privileges (super admin only)' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User updated', type: UserResponseDto })
   @Patch(":id/super-admin")
   async setSuperAdmin(
     @RequireSuperAdmin() _caller: void,
@@ -170,6 +212,9 @@ export class UsersController {
     return UserResponseDto.from(await this.usersService.setSuperAdmin(id, dto.enabled));
   }
 
+  @ApiOperation({ summary: 'Assign a user to an organization with a role' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 201, description: 'Organization assigned', type: UserOrgRoleResponseDto })
   @Post(":id/orgs")
   @HttpCode(HttpStatus.CREATED)
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
@@ -183,6 +228,9 @@ export class UsersController {
     );
   }
 
+  @ApiOperation({ summary: "List a user's organization role assignments" })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Role assignments found', type: UserOrgRoleResponseDto, isArray: true })
   @Get(":id/orgs")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async getOrgRoles(
@@ -191,6 +239,10 @@ export class UsersController {
     return (await this.usersService.getOrgRoles(id)).map(UserOrgRoleResponseDto.from);
   }
 
+  @ApiOperation({ summary: 'Remove a user from an organization' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiParam({ name: 'orgId', format: 'uuid' })
+  @ApiResponse({ status: 204, description: 'User removed from org' })
   @Delete(":id/orgs/:orgId")
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)

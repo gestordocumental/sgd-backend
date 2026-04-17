@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Patch, Delete,
   Param, Body, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { DepartamentosService } from './departamentos.service';
 import { CreateDepartamentoDto } from './dto/create-departamento.dto';
 import { UpdateDepartamentoDto } from './dto/update-departamento.dto';
@@ -11,12 +12,17 @@ import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
 import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
 
+@ApiTags('Org Structure — Departamentos')
+@ApiBearerAuth('JWT')
+@ApiParam({ name: 'orgId', format: 'uuid' })
 @Controller('api/org/:orgId/departamentos')
 @UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class DepartamentosController {
   constructor(private readonly service: DepartamentosService) {}
 
+  @ApiOperation({ summary: 'Create a department' })
+  @ApiResponse({ status: 201, type: DepartamentoResponseDto })
   @Post()
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
@@ -26,6 +32,8 @@ export class DepartamentosController {
     return DepartamentoResponseDto.from(await this.service.create(orgId, dto));
   }
 
+  @ApiOperation({ summary: 'List all departments of an organization' })
+  @ApiResponse({ status: 200, type: DepartamentoResponseDto, isArray: true })
   @Get()
   @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findAll(
@@ -34,6 +42,9 @@ export class DepartamentosController {
     return (await this.service.findAll(orgId)).map(DepartamentoResponseDto.from);
   }
 
+  @ApiOperation({ summary: 'Get department by ID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, type: DepartamentoResponseDto })
   @Get(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'READ')
   async findOne(
@@ -43,6 +54,9 @@ export class DepartamentosController {
     return DepartamentoResponseDto.from(await this.service.findOne(orgId, id));
   }
 
+  @ApiOperation({ summary: 'Update department' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, type: DepartamentoResponseDto })
   @Patch(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
@@ -53,6 +67,9 @@ export class DepartamentosController {
     return DepartamentoResponseDto.from(await this.service.update(orgId, id, dto));
   }
 
+  @ApiOperation({ summary: 'Soft delete department' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 204 })
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
@@ -63,6 +80,9 @@ export class DepartamentosController {
     return this.service.remove(orgId, id);
   }
 
+  @ApiOperation({ summary: 'Restore a deleted department' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, type: DepartamentoResponseDto })
   @Post(':id/restore')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(

@@ -21,6 +21,10 @@ import { UserClientService } from "../user-client/user-client.service";
 // Refresh token TTL in Redis (must match JWT_REFRESH_EXPIRATION: 12h)
 const REFRESH_TTL_SECONDS = 12 * 60 * 60;
 
+// Dummy hash used when the user is not found — ensures bcrypt.compare always
+// runs so response time doesn't reveal whether an email exists in the system.
+const DUMMY_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lh86';
+
 interface TokenOptions {
   companyId?: string;
   isSuperAdmin?: boolean;
@@ -86,12 +90,17 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    if (!credential || credential.status !== CredentialStatus.ACTIVE) {
+    // Always run bcrypt.compare to prevent timing-based user enumeration.
+    // Use DUMMY_HASH when credential is missing, inactive, or has no password yet
+    // (invitation flow: user created but complete-registration not done).
+    const hashToCheck = (credential?.status === CredentialStatus.ACTIVE && credential.passwordHash)
+      ? credential.passwordHash
+      : DUMMY_HASH;
+    const valid = await bcrypt.compare(dto.password, hashToCheck);
+
+    if (!credential || credential.status !== CredentialStatus.ACTIVE || !valid) {
       throw new UnauthorizedException("Invalid credentials");
     }
-
-    const valid = await bcrypt.compare(dto.password, credential.passwordHash);
-    if (!valid) throw new UnauthorizedException("Invalid credentials");
 
     let userInfo: { isSuperAdmin: boolean };
     try {

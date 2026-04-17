@@ -13,6 +13,7 @@ import {
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { OrgsService } from './orgs.service';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
@@ -33,11 +34,15 @@ function extractUserId(authHeader: string | undefined): string | null {
   }
 }
 
+@ApiTags('Organizations')
+@ApiBearerAuth('JWT')
 @Controller('api/org')
 @UseGuards(OrgGuard)
 export class OrgsController {
   constructor(private readonly orgsService: OrgsService) {}
 
+  @ApiOperation({ summary: 'Create an organization (super admin only)' })
+  @ApiResponse({ status: 201, description: 'Organization created', type: OrgResponseDto })
   /**
    * Create an organization.
    * Super admin only.
@@ -55,6 +60,8 @@ export class OrgsController {
     return OrgResponseDto.from(await this.orgsService.create(dto, createdBy));
   }
 
+  @ApiOperation({ summary: 'List all organizations (super admin only)' })
+  @ApiResponse({ status: 200, description: 'Organizations found', type: OrgResponseDto, isArray: true })
   /**
    * List all organizations.
    * Super admin only.
@@ -65,6 +72,9 @@ export class OrgsController {
     return (await this.orgsService.findAll()).map(OrgResponseDto.from);
   }
 
+  @ApiOperation({ summary: 'Get organization by ID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Organization found', type: OrgResponseDto })
   /**
    * Get an organization by ID.
    * Super admin, org member, or internal call (x-internal-token).
@@ -75,6 +85,9 @@ export class OrgsController {
     return OrgResponseDto.from(await this.orgsService.findOne(id));
   }
 
+  @ApiOperation({ summary: 'Update organization data' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Organization updated', type: OrgResponseDto })
   /**
    * Update an organization.
    * Super admin or org member (to update data for their own org).
@@ -88,6 +101,9 @@ export class OrgsController {
     return OrgResponseDto.from(await this.orgsService.update(id, dto));
   }
 
+  @ApiOperation({ summary: 'Soft delete an organization (super admin only)' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 204, description: 'Organization deleted' })
   /**
    * Delete (soft delete) an organization.
    * Super admin only.
@@ -99,6 +115,9 @@ export class OrgsController {
     return this.orgsService.remove(id);
   }
 
+  @ApiOperation({ summary: 'Restore a deleted organization (super admin only)' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Organization restored', type: OrgResponseDto })
   /**
    * Restore a deleted organization.
    * Super admin only.

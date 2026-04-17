@@ -1,40 +1,45 @@
 import { IsBoolean, IsEmail, IsOptional, IsString, IsUUID } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateUserDto {
+  @ApiProperty({ example: 'usuario@empresa.com' })
   @Transform(({ value }) => (value as string)?.toLowerCase().trim())
   @IsEmail()
   email!: string;
 
-  // Replaced by departamento/area/cargo structure — kept for backward compatibility
+  @ApiPropertyOptional({ description: 'Legacy position field (use cargoId instead)' })
   @Transform(({ value }) => (value as string)?.trim())
   @IsString()
   @IsOptional()
   position?: string;
 
+  @ApiPropertyOptional({ default: false })
   @IsBoolean()
   @IsOptional()
   isSuperAdmin?: boolean;
 
-  // If provided, the user is automatically assigned the ADMIN role in this org
+  @ApiPropertyOptional({ format: 'uuid', description: 'Assigns user to this org with ADMIN role' })
   @IsUUID()
   @IsOptional()
   orgId?: string;
 
-  // If provided alongside orgId, overrides the default ADMIN role assignment
+  @ApiPropertyOptional({ format: 'uuid', description: 'Overrides default ADMIN role when orgId is provided' })
   @IsUUID()
   @IsOptional()
   roleId?: string;
 
-  // Org-structure assignment (plain UUID references — cross-service, no FK)
+  @ApiPropertyOptional({ format: 'uuid' })
   @IsUUID()
   @IsOptional()
   departamentoId?: string;
 
+  @ApiPropertyOptional({ format: 'uuid' })
   @IsUUID()
   @IsOptional()
   areaId?: string;
 
+  @ApiPropertyOptional({ format: 'uuid' })
   @IsUUID()
   @IsOptional()
   cargoId?: string;
