@@ -70,6 +70,9 @@ export class TypologiesController {
     @Req() req: any,
     @Body('orgName') orgName?: string,
   ): Promise<PreviewExtractResult> {
+    console.log('[preview-extract] content-type:', req.headers?.['content-type']);
+    console.log('[preview-extract] file:', file ? `${file.originalname} (${file.mimetype})` : 'undefined');
+    console.log('[preview-extract] fileValidationError:', req.fileValidationError);
     if (req.fileValidationError) throw req.fileValidationError;
     if (!file) throw new BadRequestException('El archivo es requerido');
     return this.extractorClient.previewExtract(file, orgName);
