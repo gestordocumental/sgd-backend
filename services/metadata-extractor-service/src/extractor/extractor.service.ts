@@ -49,7 +49,7 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
     this.consumer = this.kafka.consumer({ groupId });
 
     await this.consumer.connect();
-    await this.consumer.subscribe({ topics: [TOPICS.TYPOLOGY_FILE_UPLOADED], fromBeginning: false });
+    await this.subscribeWithRetry();
 
     await this.consumer.run({
       eachMessage: async (payload: EachMessagePayload) => {
@@ -58,6 +58,25 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
     });
 
     this.logger.log('Extractor consumer listening for typology.file.uploaded', 'ExtractorService');
+  }
+
+  private async subscribeWithRetry(maxAttempts = 10, delayMs = 3000): Promise<void> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.consumer.subscribe({ topics: [TOPICS.TYPOLOGY_FILE_UPLOADED], fromBeginning: false });
+        return;
+      } catch (err: any) {
+        if (err?.type === 'UNKNOWN_TOPIC_OR_PARTITION' && attempt < maxAttempts) {
+          this.logger.warn(
+            `Topic not ready yet (attempt ${attempt}/${maxAttempts}), retrying in ${delayMs}ms…`,
+            'ExtractorService',
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+        } else {
+          throw err;
+        }
+      }
+    }
   }
 
   async onApplicationShutdown() {

@@ -12,6 +12,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -66,8 +67,10 @@ export class TypologiesController {
   @UseInterceptors(FileInterceptor('file', multerOptions))
   async previewExtract(
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
     @Body('orgName') orgName?: string,
   ): Promise<PreviewExtractResult> {
+    if (req.fileValidationError) throw req.fileValidationError;
     if (!file) throw new BadRequestException('El archivo es requerido');
     return this.extractorClient.previewExtract(file, orgName);
   }
