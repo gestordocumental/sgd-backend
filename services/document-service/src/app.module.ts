@@ -5,6 +5,7 @@ import { HealthModule } from './health/health.module';
 import { TypologiesModule } from './typologies/typologies.module';
 import { BulkImportModule } from './bulk-import/bulk-import.module';
 import { DocumentUploadModule } from './document-upload/document-upload.module';
+import { WorkflowFilesModule } from './workflow-files/workflow-files.module';
 import { KafkaModule } from './common/kafka/kafka.module';
 import { KafkaConsumerService } from './common/kafka/kafka-consumer.service';
 import { TypologiesService } from './typologies/typologies.service';
@@ -31,6 +32,7 @@ import { Kafka } from 'kafkajs';
     TypologiesModule,
     BulkImportModule,
     DocumentUploadModule,
+    WorkflowFilesModule,
   ],
   providers: [
     AppLogger,

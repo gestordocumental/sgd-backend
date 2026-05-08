@@ -175,16 +175,16 @@ services:
     plugins:
       - name: jwt
 
-  # ── workflow-service (con JWT) — pendiente de implementación ───────────
-  # - name: workflow-service
-  #   url: http://host.docker.internal:3005
-  #   routes:
-  #     - name: workflow-routes
-  #       paths:
-  #         - /api/workflows
-  #       strip_path: false
-  #   plugins:
-  #     - name: jwt
+  # ── workflow-service (con JWT) ─────────────────────────────────────────
+  - name: workflow-service
+    url: http://host.docker.internal:3005
+    routes:
+      - name: workflow-routes
+        paths:
+          - /api/workflows
+        strip_path: false
+    plugins:
+      - name: jwt
 
   # ── notification-service (con JWT) — pendiente de implementación ───────
   # - name: notification-service
