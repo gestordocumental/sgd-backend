@@ -161,7 +161,7 @@ export class WorkflowsController {
     @Param('id', ParseUUIDPipe) id: string,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    await this.approvalService.startApproval(id, user.sub!);
+    await this.approvalService.startApproval(id, user.sub);
     return this.workflowsService.findOne(id, user);
   }
 
@@ -175,7 +175,7 @@ export class WorkflowsController {
     @Body() dto: ApproveWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    await this.approvalService.approve(id, user.sub!, dto);
+    await this.approvalService.approve(id, user.sub, dto);
     return this.workflowsService.findOne(id, user);
   }
 
@@ -189,7 +189,7 @@ export class WorkflowsController {
     @Body() dto: RejectWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    await this.approvalService.reject(id, user.sub!, dto);
+    await this.approvalService.reject(id, user.sub, dto);
     return this.workflowsService.findOne(id, user);
   }
 
@@ -203,7 +203,7 @@ export class WorkflowsController {
     @Body() dto: ResubmitWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    await this.approvalService.resubmit(id, user.sub!, dto);
+    await this.approvalService.resubmit(id, user.sub, dto);
     return this.workflowsService.findOne(id, user);
   }
 
@@ -220,7 +220,7 @@ export class WorkflowsController {
     @Body() dto: CreateAdminCycleDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<AdminCycleResponseDto> {
-    const cycle = await this.adminCycleService.createCycle(id, user.sub!, dto);
+    const cycle = await this.adminCycleService.createCycle(id, user.sub, dto);
     return AdminCycleResponseDto.from(cycle);
   }
 
@@ -238,7 +238,7 @@ export class WorkflowsController {
     @Body() dto: CompleteAdminStepDto,
     @JwtPayloadParam() user: JwtPayload,
   ) {
-    return this.adminCycleService.completeStep(id, cycleId, stepId, user.sub!, dto);
+    return this.adminCycleService.completeStep(id, cycleId, stepId, user.sub, dto);
   }
 
   @Post(':id/admin-cycles/:cycleId/finalize')
@@ -252,7 +252,7 @@ export class WorkflowsController {
     @Param('cycleId', ParseUUIDPipe) cycleId: string,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<AdminCycleResponseDto> {
-    const cycle = await this.adminCycleService.finalizeCycle(id, cycleId, user.sub!);
+    const cycle = await this.adminCycleService.finalizeCycle(id, cycleId, user.sub);
     return AdminCycleResponseDto.from(cycle);
   }
 
@@ -267,7 +267,7 @@ export class WorkflowsController {
     @Param('id', ParseUUIDPipe) id: string,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    await this.adminCycleService.skipReviewCycle(id, user.sub!);
+    await this.adminCycleService.skipReviewCycle(id, user.sub);
     return this.workflowsService.findOne(id, user);
   }
 
@@ -283,7 +283,7 @@ export class WorkflowsController {
     @Body() dto: CloseWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    await this.adminCycleService.closeWorkflow(id, user.sub!, dto);
+    await this.adminCycleService.closeWorkflow(id, user.sub, dto);
     return this.workflowsService.findOne(id, user);
   }
 

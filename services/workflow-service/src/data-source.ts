@@ -10,13 +10,27 @@ import { WorkflowAdminAttachment } from './workflows/entities/workflow-admin-att
 import { WorkflowNote } from './workflows/entities/workflow-note.entity';
 import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity';
 
+const isDev = process.env.NODE_ENV !== 'production';
+
+const requireEnv = (name: string, fallback?: string): string => {
+  const value = process.env[name] ?? fallback;
+  if (!value) throw new Error(`Missing required env var: ${name}`);
+  return value;
+};
+
+const dbPortRaw = process.env.DB_PORT ?? '5432';
+const dbPort = Number.parseInt(dbPortRaw, 10);
+if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
+  throw new Error(`Invalid DB_PORT: "${dbPortRaw}"`);
+}
+
 export const AppDataSource = new DataSource({
   type: 'postgres',
   host: process.env.DB_HOST ?? 'localhost',
-  port: Number(process.env.DB_PORT ?? 5432),
-  username: process.env.DB_USERNAME ?? 'workflow_user',
-  password: process.env.DB_PASSWORD ?? '',
-  database: process.env.DB_NAME ?? 'workflow_db',
+  port: dbPort,
+  username: requireEnv('DB_USERNAME', isDev ? 'workflow_user'     : undefined),
+  password: requireEnv('DB_PASSWORD', isDev ? 'workflow_password' : undefined),
+  database: requireEnv('DB_NAME',     isDev ? 'workflow_db'       : undefined),
   entities: [
     Workflow,
     WorkflowApprovalStep,
@@ -32,5 +46,9 @@ export const AppDataSource = new DataSource({
   // 'each' da a cada migración su propia transacción
   migrationsTransactionMode: 'each',
   synchronize: false,
+  // parseInt8 convierte columnas BIGINT (int8) de pg a JS number en lugar de string.
+  // Actualmente solo se usa en file_size_bytes (tamaños de archivo), cuyos valores
+  // nunca superarán Number.MAX_SAFE_INTEGER (≈9 PB). Si se agregan columnas BIGINT
+  // con valores potencialmente mayores a 2^53-1, usar BigInt o string en su lugar.
   extra: { parseInt8: true },
 });

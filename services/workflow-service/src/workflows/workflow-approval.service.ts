@@ -167,6 +167,9 @@ export class WorkflowApprovalService {
     const nextStep    = sortedSteps.find((s) => s.stepOrder > currentStep.stepOrder);
     const isLast      = !nextStep;
 
+    // Declarado fuera de la transacción para que esté disponible en los eventos Kafka/notificaciones
+    let finalUserIds: string[] = [];
+
     await this.dataSource.transaction(async (manager) => {
       // Registrar acción de aprobación
       await manager.save(WorkflowApprovalAction, {
@@ -191,11 +194,16 @@ export class WorkflowApprovalService {
       });
 
       if (isLast) {
-        // Último aprobador — el workflow pasa a PENDING_REVIEW_CYCLE para que el usuario final configure el ciclo de revisión
+        // Resolver usuarios finales dentro de la transacción para garantizar atomicidad
+        finalUserIds = (workflow.finalUserIds?.length ?? 0) > 0
+          ? workflow.finalUserIds!
+          : await this.resolveFinalUsers(workflow);
+
         await manager.update(Workflow, workflowId, {
           status:                   WorkflowStatus.PENDING_REVIEW_CYCLE,
           currentApprovalStepOrder: null,
-          currentAssignedUserId:    (workflow.finalUserIds?.[0]) ?? null,
+          currentAssignedUserId:    finalUserIds[0] ?? null,
+          finalUserIds:             finalUserIds.length > 0 ? finalUserIds : null,
         });
       } else {
         // Hay más aprobadores — activar siguiente paso
@@ -228,14 +236,6 @@ export class WorkflowApprovalService {
     });
 
     if (isLast) {
-      // Si el creador ya seleccionó los usuarios finales al crear el workflow, usarlos directamente
-      const finalUserIds = (workflow.finalUserIds?.length ?? 0) > 0
-        ? workflow.finalUserIds!
-        : await this.resolveFinalUsers(workflow);
-
-      // Guardar snapshot de usuarios finales (actualiza si ya estaba, por si acaso)
-      await this.workflowRepo.update(workflowId, { finalUserIds: finalUserIds.length > 0 ? finalUserIds : null });
-
       await this.timelineService.record({
         workflowId,
         orgId:       workflow.orgId,
