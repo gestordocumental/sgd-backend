@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -91,16 +92,16 @@ export class WorkflowApprovalService {
         currentApprovalStepOrder: firstStep.stepOrder,
         currentAssignedUserId:    firstStep.userId,
       });
-    });
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.APPROVAL_STARTED,
-      actorId:     userId,
-      targetUserId: firstStep.userId,
-      description: `Ciclo de aprobación iniciado. Aprobador asignado: paso ${firstStep.stepOrder}`,
-      metadata:    { firstApproverUserId: firstStep.userId, stepOrder: firstStep.stepOrder },
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.APPROVAL_STARTED,
+        actorId:     userId,
+        targetUserId: firstStep.userId,
+        description: `Ciclo de aprobación iniciado. Aprobador asignado: paso ${firstStep.stepOrder}`,
+        metadata:    { firstApproverUserId: firstStep.userId, stepOrder: firstStep.stepOrder },
+      }, manager);
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_APPROVAL_STARTED, {
@@ -206,24 +207,24 @@ export class WorkflowApprovalService {
           currentAssignedUserId:    nextStep!.userId,
         });
       }
-    });
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.STEP_APPROVED,
-      actorId:     userId,
-      targetUserId: isLast ? null : (nextStep?.userId ?? null),
-      description: isLast
-        ? `Aprobación final completada por paso ${currentStep.stepOrder}. Workflow disponible para usuarios finales.`
-        : `Paso ${currentStep.stepOrder} aprobado. Siguiente aprobador: paso ${nextStep!.stepOrder}`,
-      metadata: {
-        stepOrder:               currentStep.stepOrder,
-        observations:            dto.observations ?? null,
-        isLastApprover:          isLast,
-        nextStepOrder:           isLast ? null : nextStep!.stepOrder,
-        attachmentCount: (dto.attachments ?? []).length,
-      },
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.STEP_APPROVED,
+        actorId:     userId,
+        targetUserId: isLast ? null : (nextStep?.userId ?? null),
+        description: isLast
+          ? `Aprobación final completada por paso ${currentStep.stepOrder}. Workflow disponible para usuarios finales.`
+          : `Paso ${currentStep.stepOrder} aprobado. Siguiente aprobador: paso ${nextStep!.stepOrder}`,
+        metadata: {
+          stepOrder:       currentStep.stepOrder,
+          observations:    dto.observations ?? null,
+          isLastApprover:  isLast,
+          nextStepOrder:   isLast ? null : nextStep!.stepOrder,
+          attachmentCount: (dto.attachments ?? []).length,
+        },
+      }, manager);
     });
 
     if (isLast) {
@@ -352,30 +353,30 @@ export class WorkflowApprovalService {
         rejectedAtStepId:      currentStep.id,
         currentAssignedUserId: workflow.createdBy,
       });
-    });
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.STEP_REJECTED,
-      actorId:     userId,
-      targetUserId: workflow.createdBy,
-      description: `Paso ${currentStep.stepOrder} rechazado. Workflow devuelto al creador.`,
-      metadata:    {
-        stepOrder:    currentStep.stepOrder,
-        observations: dto.observations,
-        rejectedBy:   userId,
-      },
-    });
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.STEP_REJECTED,
+        actorId:     userId,
+        targetUserId: workflow.createdBy,
+        description: `Paso ${currentStep.stepOrder} rechazado. Workflow devuelto al creador.`,
+        metadata:    {
+          stepOrder:    currentStep.stepOrder,
+          observations: dto.observations,
+          rejectedBy:   userId,
+        },
+      }, manager);
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.WORKFLOW_RETURNED_TO_CREATOR,
-      actorId:     userId,
-      targetUserId: workflow.createdBy,
-      description: `Workflow devuelto al creador con observaciones.`,
-      metadata:    { observations: dto.observations },
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.WORKFLOW_RETURNED_TO_CREATOR,
+        actorId:     userId,
+        targetUserId: workflow.createdBy,
+        description: `Workflow devuelto al creador con observaciones.`,
+        metadata:    { observations: dto.observations },
+      }, manager);
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_APPROVAL_REJECTED, {
@@ -474,20 +475,20 @@ export class WorkflowApprovalService {
         status:      ApprovalStepStatus.PENDING,
         completedAt: null,
       });
-    });
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.WORKFLOW_RESUBMITTED,
-      actorId:     userId,
-      targetUserId: rejectedStep.userId,
-      description: `Workflow reenviado al aprobador del paso ${rejectedStep.stepOrder} tras ajustes del creador.`,
-      metadata: {
-        stepOrder:    rejectedStep.stepOrder,
-        observations: dto.observations ?? null,
-        documentUpdated: !!dto.updatedMainDocumentId,
-      },
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.WORKFLOW_RESUBMITTED,
+        actorId:     userId,
+        targetUserId: rejectedStep.userId,
+        description: `Workflow reenviado al aprobador del paso ${rejectedStep.stepOrder} tras ajustes del creador.`,
+        metadata: {
+          stepOrder:       rejectedStep.stepOrder,
+          observations:    dto.observations ?? null,
+          documentUpdated: !!dto.updatedMainDocumentId,
+        },
+      }, manager);
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_RESUBMITTED, {
@@ -551,7 +552,9 @@ export class WorkflowApprovalService {
         err instanceof Error ? err.stack : String(err),
         'WorkflowApprovalService',
       );
-      return [];
+      throw new InternalServerErrorException(
+        'No se pudieron resolver los usuarios finales — user-service no disponible',
+      );
     }
   }
 }

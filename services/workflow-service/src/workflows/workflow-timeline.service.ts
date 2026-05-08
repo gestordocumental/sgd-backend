@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { WorkflowTimeline } from './entities/workflow-timeline.entity';
 import { TimelineEventType } from './entities/enums';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
@@ -30,8 +30,10 @@ export class WorkflowTimelineService {
    * Registra un evento en la timeline local Y lo publica a audit-service via Kafka.
    * Este método debe llamarse dentro de la misma transacción de base de datos que el cambio.
    */
-  async record(params: RecordEventParams): Promise<WorkflowTimeline> {
-    const event = this.timelineRepo.create({
+  async record(params: RecordEventParams, manager?: EntityManager): Promise<WorkflowTimeline> {
+    const repo = manager ? manager.getRepository(WorkflowTimeline) : this.timelineRepo;
+
+    const event = repo.create({
       workflowId:   params.workflowId,
       eventType:    params.eventType,
       actorId:      params.actorId,
@@ -40,7 +42,7 @@ export class WorkflowTimelineService {
       metadata:     params.metadata ?? null,
     });
 
-    const saved = await this.timelineRepo.save(event);
+    const saved = await repo.save(event);
 
     // Publicar a audit-service de forma asíncrona — no bloquea la operación principal
     this.emitAuditLog(params).catch((err: unknown) => {

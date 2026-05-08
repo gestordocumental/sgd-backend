@@ -2,10 +2,12 @@ import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
+import { APP_GUARD } from '@nestjs/core';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { HealthModule } from './health/health.module';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
+import { JwtGuard } from './common/guards/jwt.guard';
 
 // Entities — registradas en TypeOrmModule para que el guard y los repositorios las encuentren
 import { Workflow } from './workflows/entities/workflow.entity';
@@ -50,6 +52,7 @@ import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity'
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
+          extra: { parseInt8: true },
         };
       },
     }),
@@ -60,7 +63,10 @@ import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity'
     WorkflowsModule,
     HealthModule,
   ],
-  providers: [AppLogger],
+  providers: [
+    AppLogger,
+    { provide: APP_GUARD, useClass: JwtGuard },
+  ],
   exports: [AppLogger],
 })
 export class AppModule implements NestModule {

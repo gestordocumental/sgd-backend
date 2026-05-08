@@ -2,7 +2,9 @@ import {
   Controller,
   Get,
   Param,
+  Query,
   UnauthorizedException,
+  BadRequestException,
   Req,
   OnModuleInit,
 } from '@nestjs/common';
@@ -25,6 +27,7 @@ export class InternalTypologiesController implements OnModuleInit {
   @Get(':id/public-info')
   async getPublicInfo(
     @Param('id') id: string,
+    @Query('orgId') orgId: string,
     @Req() req: Request,
   ) {
     const provided = req.headers['x-internal-token'];
@@ -36,7 +39,9 @@ export class InternalTypologiesController implements OnModuleInit {
       throw new UnauthorizedException('Invalid internal token');
     }
 
-    const doc = await this.typologiesService.findByIdPublic(id);
+    if (!orgId) throw new BadRequestException('orgId query param is required');
+
+    const doc = await this.typologiesService.findByIdPublic(orgId, id);
 
     return {
       id: (doc._id as { toString(): string }).toString(),

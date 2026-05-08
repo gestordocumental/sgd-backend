@@ -76,9 +76,9 @@ export class DocumentClientService {
    * Endpoint requerido en document-service:
    *   GET /internal/typologies/:id/public-info
    */
-  async getTypologyInfo(typologyId: string): Promise<TypologyPublicInfo> {
+  async getTypologyInfo(orgId: string, typologyId: string): Promise<TypologyPublicInfo> {
     const correlationId = getCorrelationId();
-    const url = `${this.documentServiceUrl}/internal/typologies/${typologyId}/public-info`;
+    const url = `${this.documentServiceUrl}/internal/typologies/${typologyId}/public-info?orgId=${encodeURIComponent(orgId)}`;
 
     this.logger.http({
       type: 'internal-request',

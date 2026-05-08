@@ -19,11 +19,20 @@ function verifyAndDecodeJwt(token: string, secret: string): Record<string, unkno
   if (sigBytes.length !== expectedBytes.length || !timingSafeEqual(sigBytes, expectedBytes)) {
     throw new UnauthorizedException('Invalid token');
   }
+  let decoded: Record<string, unknown>;
   try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
   } catch {
     throw new UnauthorizedException('Malformed token');
   }
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof decoded['exp'] === 'number' && decoded['exp'] < now) {
+    throw new UnauthorizedException('Token expired');
+  }
+  if (typeof decoded['nbf'] === 'number' && decoded['nbf'] > now) {
+    throw new UnauthorizedException('Token not yet valid');
+  }
+  return decoded;
 }
 
 @Injectable()
@@ -39,7 +48,7 @@ export class JwtGuard implements CanActivate {
 
     const request = ctx
       .switchToHttp()
-      .getRequest<{ headers: Record<string, string>; params: Record<string, string> }>();
+      .getRequest<{ headers: Record<string, string>; params: Record<string, string>; user?: Record<string, unknown> }>();
 
     // Llamadas internas entre microservicios — omitir validación JWT
     const internalToken = request.headers['x-internal-token'];
@@ -54,6 +63,9 @@ export class JwtGuard implements CanActivate {
 
     const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
     const payload   = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
+
+    // Exponer el payload verificado en request.user para que los decoradores lo lean de forma segura
+    request.user = payload;
 
     if (payload.isSuperAdmin) return true;
     if (meta.superAdminOnly) throw new ForbiddenException('Super admin access required');

@@ -77,9 +77,10 @@ export class WorkflowFilesController {
   @ApiOkResponse({ schema: { example: { signedUrl: 'https://...', expiresAt: '2025-01-01T00:00:00Z' } } })
   @Post('signed-url')
   getSignedUrl(
+    @Param('orgId') orgId: string,
     @Body('storageKey') storageKey: string,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     if (!storageKey) throw new BadRequestException('storageKey es requerido');
-    return this.service.getSignedUrl(storageKey);
+    return this.service.getSignedUrl(orgId, storageKey);
   }
 }

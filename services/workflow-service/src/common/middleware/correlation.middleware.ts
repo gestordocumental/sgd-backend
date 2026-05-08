@@ -10,9 +10,10 @@ export class CorrelationMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     const rawHeader = req.headers[CORRELATION_ID_HEADER];
     const incomingCorrelationId = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    const normalized = typeof incomingCorrelationId === 'string' ? incomingCorrelationId.trim() : '';
     const correlationId =
-      typeof incomingCorrelationId === 'string' && incomingCorrelationId.trim().length > 0
-        ? incomingCorrelationId
+      /^[A-Za-z0-9._:-]{1,128}$/.test(normalized)
+        ? normalized
         : randomUUID();
 
     res.setHeader(CORRELATION_ID_HEADER, correlationId);

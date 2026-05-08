@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { StorageService } from '../common/storage/storage.service';
 import { MAX_FILE_SIZE } from '../document-upload/document-upload.constants';
@@ -44,8 +44,13 @@ export class WorkflowFilesService {
   }
 
   async getSignedUrl(
+    orgId: string,
     storageKey: string,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
+    const expectedPrefix = `org/${orgId}/workflow-uploads/`;
+    if (!storageKey.startsWith(expectedPrefix)) {
+      throw new ForbiddenException('El storageKey no pertenece a la organización solicitante');
+    }
     const { url, expiresAt } = await this.storage.getSignedDownloadUrl(storageKey);
     return { signedUrl: url, expiresAt };
   }

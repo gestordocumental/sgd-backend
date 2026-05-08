@@ -190,7 +190,7 @@ export class InitialWorkflowSchema1714300000000 implements MigrationInterface {
       DO $$ BEGIN
         ALTER TABLE "workflow_approval_actions"
           ADD CONSTRAINT "FK_approval_actions_step_id"
-          FOREIGN KEY ("step_id") REFERENCES "workflow_approval_steps"("id");
+          FOREIGN KEY ("step_id") REFERENCES "workflow_approval_steps"("id") ON DELETE CASCADE;
       EXCEPTION WHEN duplicate_object THEN NULL;
       END $$
     `);

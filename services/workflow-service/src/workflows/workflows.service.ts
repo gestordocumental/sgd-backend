@@ -61,17 +61,10 @@ export class WorkflowsService {
     const userId    = user.sub!;
     const orgId     = user.companyId!;
 
-    // Validar órdenes únicos en aprobadores
-    const orders = dto.approvers.map((a) => a.stepOrder).sort((a, b) => a - b);
-    if (orders[0] !== 1 || orders.some((o, i) => i > 0 && o !== orders[i - 1] + 1)) {
-      throw new BadRequestException('Approver stepOrders must be consecutive starting from 1');
-    }
-    if (new Set(orders).size !== orders.length) {
-      throw new BadRequestException('Duplicate stepOrder values in approvers');
-    }
+    this.validateApproverStepOrders(dto.approvers);
 
     // Obtener info de la tipología desde document-service
-    const typologyInfo = await this.documentClientService.getTypologyInfo(dto.typologyId);
+    const typologyInfo = await this.documentClientService.getTypologyInfo(orgId, dto.typologyId);
 
     // Documento principal: el frontend ya validó la coincidencia, sólo persistimos la referencia
     const mainDocumentValidated = !!dto.mainDocument;
@@ -263,6 +256,10 @@ export class WorkflowsService {
       throw new ForbiddenException('Only the workflow creator can update it');
     }
 
+    if (dto.approvers) {
+      this.validateApproverStepOrders(dto.approvers);
+    }
+
     await this.dataSource.transaction(async (manager) => {
       const updatePayload: Partial<Workflow> = {};
 
@@ -384,7 +381,17 @@ export class WorkflowsService {
     return events.map(TimelineEventResponseDto.from);
   }
 
-  // ── Helper privado ────────────────────────────────────────────────────────────
+  // ── Helpers privados ──────────────────────────────────────────────────────────
+
+  private validateApproverStepOrders(approvers: { stepOrder: number }[]): void {
+    const orders = approvers.map((a) => a.stepOrder).sort((a, b) => a - b);
+    if (orders[0] !== 1 || orders.some((o, i) => i > 0 && o !== orders[i - 1] + 1)) {
+      throw new BadRequestException('Approver stepOrders must be consecutive starting from 1');
+    }
+    if (new Set(orders).size !== orders.length) {
+      throw new BadRequestException('Duplicate stepOrder values in approvers');
+    }
+  }
 
   private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
     const orgId    = user.companyId!;

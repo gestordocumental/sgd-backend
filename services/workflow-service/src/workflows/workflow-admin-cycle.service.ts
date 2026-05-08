@@ -121,16 +121,16 @@ export class WorkflowAdminCycleService {
         activeAdminCycleId:  savedCycle.id,
         currentAssignedUserId: firstStep.userId,
       });
-    });
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.ADMIN_CYCLE_STARTED,
-      actorId:     userId,
-      targetUserId: firstStep.userId,
-      description: `Ciclo administrativo #${cycleNumber} iniciado. Primer paso asignado al usuario.`,
-      metadata:    { cycleId: savedCycle.id, cycleNumber, firstUserId: firstStep.userId },
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.ADMIN_CYCLE_STARTED,
+        actorId:     userId,
+        targetUserId: firstStep.userId,
+        description: `Ciclo administrativo #${cycleNumber} iniciado. Primer paso asignado al usuario.`,
+        metadata:    { cycleId: savedCycle.id, cycleNumber, firstUserId: firstStep.userId },
+      }, manager);
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_ADMIN_CYCLE_STARTED, {
@@ -256,25 +256,37 @@ export class WorkflowAdminCycleService {
           currentAssignedUserId: nextStep!.userId,
         });
       }
-    });
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.ADMIN_STEP_COMPLETED,
-      actorId:     userId,
-      targetUserId: isLast ? cycle.initiatedBy : (nextStep?.userId ?? null),
-      description: isLast
-        ? `Último paso administrativo completado. Ciclo #${cycle.cycleNumber} finalizado. Workflow devuelto al usuario final.`
-        : `Paso administrativo ${step.stepOrder} completado. Siguiente: paso ${nextStep!.stepOrder}.`,
-      metadata: {
-        cycleId,
-        stepId,
-        stepOrder:      step.stepOrder,
-        hasNotes:       !!dto.notes,
-        hasAttachments: (dto.attachments?.length ?? 0) > 0,
-        isLastStep:     isLast,
-      },
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.ADMIN_STEP_COMPLETED,
+        actorId:     userId,
+        targetUserId: isLast ? cycle.initiatedBy : (nextStep?.userId ?? null),
+        description: isLast
+          ? `Último paso administrativo completado. Ciclo #${cycle.cycleNumber} finalizado. Workflow devuelto al usuario final.`
+          : `Paso administrativo ${step.stepOrder} completado. Siguiente: paso ${nextStep!.stepOrder}.`,
+        metadata: {
+          cycleId,
+          stepId,
+          stepOrder:      step.stepOrder,
+          hasNotes:       !!dto.notes,
+          hasAttachments: (dto.attachments?.length ?? 0) > 0,
+          isLastStep:     isLast,
+        },
+      }, manager);
+
+      if (isLast) {
+        await this.timelineService.record({
+          workflowId,
+          orgId:       workflow.orgId,
+          eventType:   TimelineEventType.ADMIN_CYCLE_COMPLETED,
+          actorId:     userId,
+          targetUserId: cycle.initiatedBy,
+          description: `Ciclo administrativo #${cycle.cycleNumber} completado. Workflow disponible para el usuario final.`,
+          metadata:    { cycleId, cycleNumber: cycle.cycleNumber },
+        }, manager);
+      }
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_ADMIN_CYCLE_STEP_COMPLETED, {
@@ -289,16 +301,6 @@ export class WorkflowAdminCycleService {
     });
 
     if (isLast) {
-      await this.timelineService.record({
-        workflowId,
-        orgId:       workflow.orgId,
-        eventType:   TimelineEventType.ADMIN_CYCLE_COMPLETED,
-        actorId:     userId,
-        targetUserId: cycle.initiatedBy,
-        description: `Ciclo administrativo #${cycle.cycleNumber} completado. Workflow disponible para el usuario final.`,
-        metadata:    { cycleId, cycleNumber: cycle.cycleNumber },
-      });
-
       this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_ADMIN_CYCLE_COMPLETED, {
         workflowId,
         cycleId,
@@ -435,16 +437,16 @@ export class WorkflowAdminCycleService {
         currentAssignedUserId: workflow.createdBy, // llega al creador original para visualización
         activeAdminCycleId:    null,
       });
-    });
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.WORKFLOW_CLOSED,
-      actorId:     userId,
-      targetUserId: workflow.createdBy,
-      description: `Workflow cerrado definitivamente por usuario final. No se permiten más modificaciones.`,
-      metadata:    { closingNotes: dto.closingNotes ?? null, closedBy: userId },
+      await this.timelineService.record({
+        workflowId,
+        orgId:       workflow.orgId,
+        eventType:   TimelineEventType.WORKFLOW_CLOSED,
+        actorId:     userId,
+        targetUserId: workflow.createdBy,
+        description: `Workflow cerrado definitivamente por usuario final. No se permiten más modificaciones.`,
+        metadata:    { closingNotes: dto.closingNotes ?? null, closedBy: userId },
+      }, manager);
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_CLOSED, {

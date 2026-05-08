@@ -12,24 +12,13 @@ export interface JwtPayload {
 }
 
 /**
- * Extrae el payload del JWT sin re-verificar la firma.
- * Kong ya verificó la firma antes de reenviar la petición.
- * En llamadas directas (dev/test) la firma se verifica en JwtGuard.
+ * Extrae el payload del JWT desde request.user, que fue asignado por JwtGuard
+ * tras verificar la firma. Nunca re-decodifica el token directamente.
  */
 export const JwtPayloadParam = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): JwtPayload => {
-    const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string> }>();
-    const auth = request.headers['authorization'];
-
-    if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
-
-    const parts = auth.split(' ')[1].split('.');
-    if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
-
-    try {
-      return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as JwtPayload;
-    } catch {
-      throw new UnauthorizedException('Malformed token');
-    }
+    const request = ctx.switchToHttp().getRequest<{ user?: JwtPayload }>();
+    if (!request.user) throw new UnauthorizedException('Missing authenticated user');
+    return request.user;
   },
 );

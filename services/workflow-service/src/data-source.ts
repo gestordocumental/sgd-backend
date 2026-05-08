@@ -32,4 +32,5 @@ export const AppDataSource = new DataSource({
   // 'each' da a cada migración su propia transacción
   migrationsTransactionMode: 'each',
   synchronize: false,
+  extra: { parseInt8: true },
 });

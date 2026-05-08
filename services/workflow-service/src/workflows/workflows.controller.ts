@@ -9,7 +9,6 @@ import {
   Query,
   HttpCode,
   HttpStatus,
-  UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import {
@@ -19,8 +18,6 @@ import {
   ApiResponse,
   ApiParam,
 } from '@nestjs/swagger';
-import { Reflector } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
 
 import { WorkflowsService } from './workflows.service';
 import { WorkflowApprovalService } from './workflow-approval.service';
@@ -43,7 +40,6 @@ import {
   AdminCycleResponseDto,
 } from './dto/workflow-response.dto';
 
-import { JwtGuard } from '../common/guards/jwt.guard';
 import { OrgMember } from '../common/decorators/auth.decorator';
 import { JwtPayloadParam, JwtPayload } from '../common/decorators/jwt-payload.decorator';
 
@@ -54,7 +50,6 @@ import { JwtPayloadParam, JwtPayload } from '../common/decorators/jwt-payload.de
  */
 @ApiTags('Workflows')
 @ApiBearerAuth('JWT')
-@UseGuards(new JwtGuard(new Reflector(), new ConfigService()))
 @Controller('api/workflows')
 export class WorkflowsController {
   constructor(
@@ -162,11 +157,12 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Iniciar ciclo de aprobación (creador → PENDING_APPROVAL)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
-  startApproval(
+  async startApproval(
     @Param('id', ParseUUIDPipe) id: string,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    return this.approvalService.startApproval(id, user.sub!) as unknown as Promise<WorkflowResponseDto>;
+    await this.approvalService.startApproval(id, user.sub!);
+    return this.workflowsService.findOne(id, user);
   }
 
   @Post(':id/approve')
@@ -174,12 +170,13 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Aprobar el paso actual (aprobador actual)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
-  approve(
+  async approve(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ApproveWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    return this.approvalService.approve(id, user.sub!, dto) as unknown as Promise<WorkflowResponseDto>;
+    await this.approvalService.approve(id, user.sub!, dto);
+    return this.workflowsService.findOne(id, user);
   }
 
   @Post(':id/reject')
@@ -187,12 +184,13 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Rechazar con observaciones obligatorias (aprobador actual)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
-  reject(
+  async reject(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    return this.approvalService.reject(id, user.sub!, dto) as unknown as Promise<WorkflowResponseDto>;
+    await this.approvalService.reject(id, user.sub!, dto);
+    return this.workflowsService.findOne(id, user);
   }
 
   @Post(':id/resubmit')
@@ -200,12 +198,13 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Reenviar al aprobador tras corregir (creador)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
-  resubmit(
+  async resubmit(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResubmitWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    return this.approvalService.resubmit(id, user.sub!, dto) as unknown as Promise<WorkflowResponseDto>;
+    await this.approvalService.resubmit(id, user.sub!, dto);
+    return this.workflowsService.findOne(id, user);
   }
 
   // ── Ciclos administrativos ────────────────────────────────────────────────────
@@ -216,12 +215,13 @@ export class WorkflowsController {
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 201, type: AdminCycleResponseDto })
   @HttpCode(HttpStatus.CREATED)
-  createAdminCycle(
+  async createAdminCycle(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateAdminCycleDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<AdminCycleResponseDto> {
-    return this.adminCycleService.createCycle(id, user.sub!, dto) as unknown as Promise<AdminCycleResponseDto>;
+    const cycle = await this.adminCycleService.createCycle(id, user.sub!, dto);
+    return AdminCycleResponseDto.from(cycle);
   }
 
   @Patch(':id/admin-cycles/:cycleId/steps/:stepId/complete')
@@ -247,12 +247,13 @@ export class WorkflowsController {
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiParam({ name: 'cycleId', format: 'uuid' })
   @ApiResponse({ status: 200, type: AdminCycleResponseDto })
-  finalizeAdminCycle(
+  async finalizeAdminCycle(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('cycleId', ParseUUIDPipe) cycleId: string,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<AdminCycleResponseDto> {
-    return this.adminCycleService.finalizeCycle(id, cycleId, user.sub!) as unknown as Promise<AdminCycleResponseDto>;
+    const cycle = await this.adminCycleService.finalizeCycle(id, cycleId, user.sub!);
+    return AdminCycleResponseDto.from(cycle);
   }
 
   // ── Omitir ciclo de revisión ──────────────────────────────────────────────────
@@ -262,11 +263,12 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Omitir ciclo de revisión y pasar directamente a AVAILABLE (usuario final)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
-  skipReviewCycle(
+  async skipReviewCycle(
     @Param('id', ParseUUIDPipe) id: string,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    return this.adminCycleService.skipReviewCycle(id, user.sub!) as unknown as Promise<WorkflowResponseDto>;
+    await this.adminCycleService.skipReviewCycle(id, user.sub!);
+    return this.workflowsService.findOne(id, user);
   }
 
   // ── Cierre ────────────────────────────────────────────────────────────────────
@@ -276,12 +278,13 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Cerrar definitivamente el workflow (usuario final)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
-  close(
+  async close(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CloseWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    return this.adminCycleService.closeWorkflow(id, user.sub!, dto) as unknown as Promise<WorkflowResponseDto>;
+    await this.adminCycleService.closeWorkflow(id, user.sub!, dto);
+    return this.workflowsService.findOne(id, user);
   }
 
   // ── Trazabilidad ──────────────────────────────────────────────────────────────
