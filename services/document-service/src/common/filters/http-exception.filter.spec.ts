@@ -104,6 +104,7 @@ describe('HttpExceptionFilter', () => {
     const body = mockJson.mock.calls[0][0];
     expect(body).toHaveProperty('correlationId', 'filter-correlation-id');
     expect(body).toHaveProperty('timestamp');
+    expect(Number.isNaN(Date.parse(body.timestamp))).toBe(false);
     expect(body).toHaveProperty('path');
   });
 

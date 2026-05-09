@@ -4,7 +4,9 @@ import { Request, Response, NextFunction } from 'express';
 const mockRun = jest.fn((store: unknown, cb: () => void) => cb());
 
 jest.mock('../correlation/correlation.context', () => ({
-  correlationStorage: { run: (...args: any[]) => mockRun(...args) },
+  correlationStorage: {
+    run: (store: unknown, cb: () => void) => mockRun(store, cb),
+  },
 }));
 
 jest.mock('crypto', () => ({

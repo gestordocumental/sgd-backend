@@ -121,6 +121,10 @@ describe('WorkflowFilesService', () => {
       await expect(
         service.upload('org-1', null as any),
       ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.upload('org-1', undefined as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(storage.upload).not.toHaveBeenCalled();
     });
 
     it('includes the orgId in the storage key path', async () => {

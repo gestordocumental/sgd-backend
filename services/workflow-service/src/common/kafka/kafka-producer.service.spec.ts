@@ -25,6 +25,8 @@ function makeLogger(): jest.Mocked<AppLogger> {
   } as unknown as jest.Mocked<AppLogger>;
 }
 
+const flushAsync = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 describe('KafkaProducerService', () => {
   let producer: jest.Mocked<Producer>;
   let kafka: jest.Mocked<Kafka>;
@@ -106,9 +108,7 @@ describe('KafkaProducerService', () => {
     it('logs an error when emit fails', async () => {
       producer.send.mockRejectedValueOnce(new Error('Kafka unavailable'));
       service.emitSafe('some.topic', { id: 1 });
-
-      // Wait for the promise to settle
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await flushAsync();
 
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to emit'),
@@ -119,7 +119,7 @@ describe('KafkaProducerService', () => {
     it('handles non-Error rejections', async () => {
       producer.send.mockRejectedValueOnce('string error');
       service.emitSafe('some.topic', {});
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await flushAsync();
       expect(logger.error).toHaveBeenCalled();
     });
   });

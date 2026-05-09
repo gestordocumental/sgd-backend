@@ -109,6 +109,7 @@ describe('WorkflowFilesController', () => {
       const ctrl    = new WorkflowFilesController(service as any);
 
       await expect(ctrl.getSignedUrl('org-1', undefined as any)).rejects.toThrow(BadRequestException);
+      expect(service.getSignedUrl).not.toHaveBeenCalled();
     });
 
     it('propagates errors from service.getSignedUrl', async () => {

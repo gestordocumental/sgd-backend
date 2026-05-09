@@ -116,6 +116,8 @@ describe('WorkflowTimelineService', () => {
 
       // Should not throw despite Kafka failure
       await expect(service.record(BASE_PARAMS)).resolves.toBeDefined();
+      await Promise.resolve();
+      expect(logger.error).toHaveBeenCalled();
     });
   });
 

@@ -123,6 +123,7 @@ describe('HttpExceptionFilter', () => {
     expect(body).toHaveProperty('correlationId', 'filter-correlation-id');
     expect(body).toHaveProperty('timestamp');
     expect(typeof body.timestamp).toBe('string');
+    expect(Number.isNaN(Date.parse(body.timestamp))).toBe(false);
   });
 
   it('handles a non-Error object thrown as exception', () => {

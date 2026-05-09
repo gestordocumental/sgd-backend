@@ -4,7 +4,7 @@ import { parsePdf } from './pdf.parser';
 
 jest.mock('pdf-parse', () => jest.fn());
 
-import pdfParse from 'pdf-parse';
+import * as pdfParse from 'pdf-parse';
 
 const mockPdfParse = pdfParse as jest.MockedFunction<typeof pdfParse>;
 

@@ -99,7 +99,7 @@ describe('HttpExceptionFilter', () => {
 
       const body = mockJson.mock.calls[0][0] as Record<string, unknown>;
       expect(typeof body.timestamp).toBe('string');
-      expect(() => new Date(body.timestamp as string)).not.toThrow();
+      expect(Number.isNaN(Date.parse(body.timestamp as string))).toBe(false);
     });
   });
 

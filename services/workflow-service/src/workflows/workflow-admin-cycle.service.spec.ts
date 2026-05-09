@@ -195,9 +195,12 @@ describe('WorkflowAdminCycleService', () => {
 
       await service.createCycle('wf-1', 'final-user-1', validDto);
 
-      // The cycle created should have cycleNumber = 4
-      const saveCall = dataSource._manager.save.mock.calls[0];
-      expect(saveCall).toBeDefined();
+      const cycleSaveCall = (dataSource._manager.save as jest.Mock).mock.calls.find(
+        (c: [unknown, unknown]) => c[0] === WorkflowAdminCycle,
+      );
+      expect(cycleSaveCall?.[1]).toEqual(
+        expect.objectContaining({ cycleNumber: 4 }),
+      );
     });
 
     it('also works when workflow is AVAILABLE_FOR_FINAL_USERS', async () => {

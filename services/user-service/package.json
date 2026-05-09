@@ -47,28 +47,5 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
-  },
-  "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": { "^.+\\.(t|j)s$": "ts-jest" },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s",
-      "!**/*.spec.(t|j)s",
-      "!**/migrations/**",
-      "!**/*.entity.(t|j)s",
-      "!**/*.module.(t|j)s",
-      "!main.(t|j)s",
-      "!data-source.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node",
-    "coverageThreshold": {
-      "global": {
-        "statements": 85,
-        "lines": 85
-      }
-    }
   }
 }

@@ -12,10 +12,10 @@ jest.mock('winston', () => {
   return {
     ...actualWinston,
     createLogger: jest.fn().mockReturnValue({
-      info:  mockInfo,
-      error: mockError,
-      warn:  mockWarn,
-      debug: mockDebug,
+      info:  (...args: any[]) => mockInfo(...args),
+      error: (...args: any[]) => mockError(...args),
+      warn:  (...args: any[]) => mockWarn(...args),
+      debug: (...args: any[]) => mockDebug(...args),
     }),
   };
 });

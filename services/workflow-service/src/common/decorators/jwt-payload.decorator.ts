@@ -16,11 +16,14 @@ export interface JwtPayload {
  * tras verificar la firma. Nunca re-decodifica el token directamente.
  * Lanza UnauthorizedException si el usuario o su identificador (sub) no están presentes.
  */
-export const JwtPayloadParam = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): JwtPayload => {
-    const request = ctx.switchToHttp().getRequest<{ user?: JwtPayload }>();
-    if (!request.user) throw new UnauthorizedException('Missing authenticated user');
-    if (!request.user.sub) throw new UnauthorizedException('Missing user identifier');
-    return request.user;
-  },
-);
+export function jwtPayloadFactory(
+  _data: unknown,
+  ctx: ExecutionContext,
+): JwtPayload {
+  const request = ctx.switchToHttp().getRequest<{ user?: JwtPayload }>();
+  if (!request.user) throw new UnauthorizedException('Missing authenticated user');
+  if (!request.user.sub) throw new UnauthorizedException('Missing user identifier');
+  return request.user;
+}
+
+export const JwtPayloadParam = createParamDecorator(jwtPayloadFactory);

@@ -123,5 +123,6 @@ describe('HttpExceptionFilter', () => {
     const jsonArg = (res.status as jest.Mock).mock.results[0].value.json.mock.calls[0][0];
     expect(jsonArg).toHaveProperty('correlationId');
     expect(jsonArg).toHaveProperty('timestamp');
+    expect(Number.isNaN(Date.parse(jsonArg.timestamp))).toBe(false);
   });
 });
