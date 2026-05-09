@@ -141,6 +141,19 @@ services:
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic user.invited --partitions 1 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.send --partitions 2 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.log --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.created --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.cancelled --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.approval.started --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.approval.rejected --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.approval.approved --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.approval.completed --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.returned.to.creator --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.resubmitted --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.available.for.final.users --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.admin.cycle.started --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.admin.cycle.step.completed --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.admin.cycle.completed --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic workflow.closed --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.file.uploaded --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extracted --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extraction.failed --partitions 3 --replication-factor 1 &&

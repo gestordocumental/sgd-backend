@@ -55,7 +55,7 @@ export class DocumentUploadController {
   @ApiBadRequestResponse({ description: 'Missing file or invalid mimetype' })
   @Post('file')
   @UseInterceptors(FileInterceptor('file', multerOptions))
-  upload(
+  async upload(
     @Param('orgId') orgId: string,
     @Param('id') typologyId: string,
     @UploadedFile() file: Express.Multer.File,
@@ -107,7 +107,7 @@ export class DocumentUploadController {
   @ApiCreatedResponse({ description: 'New version created', type: TypologyResponseDto })
   @Post('new-version')
   @UseInterceptors(FileInterceptor('file', multerOptions))
-  createNewVersion(
+  async createNewVersion(
     @Param('orgId') orgId: string,
     @Param('id') typologyId: string,
     @UploadedFile() file: Express.Multer.File,

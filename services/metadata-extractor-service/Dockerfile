@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-COPY nest-cli.json tsconfig.json ./
+COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY src ./src
 
 RUN npm run build

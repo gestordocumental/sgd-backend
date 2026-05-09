@@ -29,8 +29,8 @@ jobs:
           - org-service
           - document-service
           - metadata-extractor-service
+          - workflow-service
           # Agregar aquí cuando el servicio tenga tests:
-          # - workflow-service
           # - notification-service
           # - audit-service
 
@@ -49,12 +49,11 @@ jobs:
         working-directory: services/${{ matrix.service }}
         run: npm ci
 
-      - name: Ejecutar tests unitarios
+      - name: Ejecutar tests con cobertura (mínimo 85%)
         working-directory: services/${{ matrix.service }}
-        # --if-present: exit 0 si el script "test" no está definido en package.json
-        # Permite agregar el job antes de que el servicio tenga tests escritos.
-        # TODO delete --if-present when all services are implements
-        run: npm run test --if-present
+        # test:cov ejecuta jest --coverage y falla si coverageThreshold no se cumple.
+        # --if-present: exit 0 si el script no está definido (servicios sin tests aún).
+        run: npm run test:cov --if-present
 
   # ── Validar que cada Dockerfile compila sin errores ─────────────────────
   build-services:
@@ -69,8 +68,8 @@ jobs:
           - org-service
           - document-service
           - metadata-extractor-service
+          - workflow-service
           # Agregar aquí cuando se creen los demás servicios:
-          # - workflow-service
           # - notification-service
           # - audit-service
 

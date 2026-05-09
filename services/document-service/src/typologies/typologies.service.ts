@@ -220,6 +220,14 @@ export class TypologiesService {
     ).exec();
   }
 
+  /** Finds a typology by ID scoped to an org — used by internal service calls */
+  async findByIdPublic(orgId: string, id: string): Promise<TypologyDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('Invalid typology ID');
+    const doc = await this.model.findOne({ _id: id, orgId, deletedAt: null }).exec();
+    if (!doc) throw new NotFoundException(`Typology ${id} not found`);
+    return doc;
+  }
+
   /** Called when user resolves discrepancy or confirms extracted values */
   async resolveDiscrepancy(orgId: string, id: string, dto: ResolveDiscrepancyDto): Promise<TypologyDocument> {
     const doc = await this.findOne(orgId, id);

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Read(//c/Users/juanc/proyectos/GD_helisa_ms/proyectos/document-management-system-web/sgd-frontend/**)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm test:*)"
     ]
   }
 }
