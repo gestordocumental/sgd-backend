@@ -54,7 +54,7 @@
     "moduleFileExtensions": ["js", "json", "ts"],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
-    "transform": { "^.+\\.{ts,js}$": "ts-jest" },
+    "transform": { "^.+\\.(t|j)s$": "ts-jest" },
     "collectCoverageFrom": [
       "**/*.{ts,js}",
       "!**/*.spec.{ts,js}",
