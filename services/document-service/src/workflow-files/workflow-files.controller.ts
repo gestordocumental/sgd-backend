@@ -65,7 +65,7 @@ export class WorkflowFilesController {
   @ApiCreatedResponse({ type: WorkflowFileUploadResponseDto })
   @Post()
   @UseInterceptors(FileInterceptor('file', workflowMulterOptions))
-  upload(
+  async upload(
     @Param('orgId') orgId: string,
     @UploadedFile() file: Express.Multer.File,
   ): Promise<WorkflowFileUploadResponseDto> {
@@ -76,7 +76,7 @@ export class WorkflowFilesController {
   @ApiOperation({ summary: 'Obtener URL firmada de descarga para un archivo de workflow' })
   @ApiOkResponse({ schema: { example: { signedUrl: 'https://...', expiresAt: '2025-01-01T00:00:00Z' } } })
   @Post('signed-url')
-  getSignedUrl(
+  async getSignedUrl(
     @Param('orgId') orgId: string,
     @Body('storageKey') storageKey: string,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
