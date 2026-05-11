@@ -10,6 +10,7 @@ import { KAFKA_CLIENT, TOPICS } from '../common/kafka/kafka.constants';
 import { runWithCorrelation } from '../common/kafka/kafka-consumer.util';
 import { AppLogger } from '../common/logger/app-logger.service';
 import { NotificationsService } from './notifications.service';
+import { EmailService } from './email/email.service';
 import { NotificationType } from './entities/notification.entity';
 
 interface NotificationPayload {
@@ -22,7 +23,14 @@ interface NotificationPayload {
   timestamp?: string;
 }
 
-function isValidPayload(raw: unknown): raw is NotificationPayload {
+interface UserInvitedPayload {
+  userId: string;
+  email: string;
+  invitationToken: string;
+  expiresAt: string;
+}
+
+function isValidNotificationPayload(raw: unknown): raw is NotificationPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;
   return (
@@ -30,6 +38,17 @@ function isValidPayload(raw: unknown): raw is NotificationPayload {
     Array.isArray(p['recipientUserIds']) &&
     (p['recipientUserIds'] as unknown[]).every((id) => typeof id === 'string') &&
     typeof p['message'] === 'string'
+  );
+}
+
+function isValidUserInvitedPayload(raw: unknown): raw is UserInvitedPayload {
+  if (!raw || typeof raw !== 'object') return false;
+  const p = raw as Record<string, unknown>;
+  return (
+    typeof p['userId'] === 'string' &&
+    typeof p['email'] === 'string' &&
+    typeof p['invitationToken'] === 'string' &&
+    typeof p['expiresAt'] === 'string'
   );
 }
 
@@ -43,6 +62,7 @@ export class NotificationsConsumer
     @Inject(KAFKA_CLIENT) private readonly kafka: Kafka,
     private readonly config: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly emailService: EmailService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -52,7 +72,7 @@ export class NotificationsConsumer
 
     await this.consumer.connect();
     await this.consumer.subscribe({
-      topics: [TOPICS.NOTIFICATION_SEND],
+      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED],
       fromBeginning: false,
     });
 
@@ -65,7 +85,7 @@ export class NotificationsConsumer
     });
 
     this.logger.log(
-      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}]`,
+      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}]`,
       'NotificationsConsumer',
     );
   }
@@ -91,7 +111,23 @@ export class NotificationsConsumer
 
     this.logger.http({ type: 'kafka-consume', topic, message: `← [kafka] ${topic}` });
 
-    if (!isValidPayload(raw)) {
+    if (topic === TOPICS.USER_INVITED) {
+      if (!isValidUserInvitedPayload(raw)) {
+        this.logger.warn(
+          `[kafka] Invalid user.invited payload — skipping: ${JSON.stringify(raw)}`,
+          'NotificationsConsumer',
+        );
+        return;
+      }
+      await this.emailService.sendInvitation({
+        to:              raw.email,
+        invitationToken: raw.invitationToken,
+        expiresAt:       raw.expiresAt,
+      });
+      return;
+    }
+
+    if (!isValidNotificationPayload(raw)) {
       this.logger.warn(
         `[kafka] Invalid payload in ${topic} — skipping: ${JSON.stringify(raw)}`,
         'NotificationsConsumer',
