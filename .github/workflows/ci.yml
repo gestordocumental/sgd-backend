@@ -30,8 +30,7 @@ jobs:
           - document-service
           - metadata-extractor-service
           - workflow-service
-          # Agregar aquí cuando el servicio tenga tests:
-          # - notification-service
+          - notification-service
           # - audit-service
 
     steps:
@@ -69,8 +68,7 @@ jobs:
           - document-service
           - metadata-extractor-service
           - workflow-service
-          # Agregar aquí cuando se creen los demás servicios:
-          # - notification-service
+          - notification-service
           # - audit-service
 
     steps:
