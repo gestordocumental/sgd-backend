@@ -69,7 +69,7 @@ describe('TypologiesService', () => {
     mockKafkaProducer = { send: jest.fn().mockResolvedValue(undefined) };
   });
 
-  const makeService = (Model: any) => makeService(Model);
+  const makeService = (Model: any): TypologiesService => new TypologiesService(Model, mockKafkaProducer as any);
   // ── create ───────────────────────────────────────────────────────────────
 
   describe('create()', () => {
