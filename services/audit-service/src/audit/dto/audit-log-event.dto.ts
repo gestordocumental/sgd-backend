@@ -27,6 +27,9 @@ export function isValidAuditLogEvent(raw: unknown): raw is AuditLogEvent {
     typeof p['resourceType'] === 'string' &&
     typeof p['resourceId']   === 'string' &&
     typeof p['timestamp']    === 'string' &&
-    (p['resourceName'] === undefined || p['resourceName'] === null || typeof p['resourceName'] === 'string')
+    (p['resourceName']  === undefined || p['resourceName']  === null || typeof p['resourceName']  === 'string') &&
+    (p['metadata']      === undefined || p['metadata']      === null || (typeof p['metadata'] === 'object' && !Array.isArray(p['metadata']))) &&
+    (p['correlationId'] === undefined || p['correlationId'] === null || typeof p['correlationId'] === 'string') &&
+    (p['ip']            === undefined || p['ip']            === null || typeof p['ip']            === 'string')
   );
 }

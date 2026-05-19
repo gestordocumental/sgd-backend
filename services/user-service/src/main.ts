@@ -13,7 +13,9 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
 
   // Serve uploaded avatars as static files: GET /uploads/avatars/<filename>
-  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
+  app.useStaticAssets(join(process.cwd(), 'uploads', 'avatars'), {
+    prefix: '/uploads/avatars',
+  });
 
   const logger = app.get(AppLogger);
 

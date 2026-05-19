@@ -26,6 +26,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   cargoId: null,
   isActive: true,
   registrationStatus: overrides.registrationStatus ?? RegistrationStatus.ACTIVE,
+  avatarUrl: null,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],
@@ -107,7 +108,7 @@ describe('UsersController', () => {
 
       const result = await controller.create(caller, dto as any);
 
-      expect(usersService.create).toHaveBeenCalledWith(dto);
+      expect(usersService.create).toHaveBeenCalledWith(dto, caller.sub, caller.companyId);
       expect(result.email).toBe(user.email);
       expect(result.invitationToken).toBe(invitationToken);
     });
@@ -267,9 +268,10 @@ describe('UsersController', () => {
 
       usersService.update.mockResolvedValue(updated);
 
-      const result = await controller.update(user.id, dto as any);
+      const caller = { sub: 'caller-id', companyId: 'org-uuid-1' };
+      const result = await controller.update(caller as any, user.id, dto as any);
 
-      expect(usersService.update).toHaveBeenCalledWith(user.id, dto);
+      expect(usersService.update).toHaveBeenCalledWith(user.id, dto, caller.sub, caller.companyId);
       expect(result).toBeInstanceOf(UserResponseDto);
       expect(result.firstName).toBe('Jane');
     });
@@ -283,7 +285,7 @@ describe('UsersController', () => {
 
       await controller.remove({ sub: 'caller-id', companyId: 'org-uuid' } as any, 'user-uuid-1');
 
-      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', 'org-uuid');
+      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', 'org-uuid', 'caller-id');
     });
 
     it('passes undefined companyId when caller is super admin (global delete)', async () => {
@@ -291,7 +293,7 @@ describe('UsersController', () => {
 
       await controller.remove({ sub: 'caller-id', isSuperAdmin: true } as any, 'user-uuid-1');
 
-      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', undefined);
+      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', undefined, 'caller-id');
     });
   });
 
@@ -302,9 +304,9 @@ describe('UsersController', () => {
       const user = makeUser();
       usersService.restore.mockResolvedValue(user);
 
-      const result = await controller.restore(user.id);
+      const result = await controller.restore({ sub: 'caller-id' } as any, user.id);
 
-      expect(usersService.restore).toHaveBeenCalledWith(user.id);
+      expect(usersService.restore).toHaveBeenCalledWith(user.id, 'caller-id');
       expect(result).toBeInstanceOf(UserResponseDto);
     });
   });
@@ -333,9 +335,14 @@ describe('UsersController', () => {
       usersService.setSuperAdmin.mockResolvedValue(user);
 
       // _caller (from @RequireSuperAdmin()) is passed as undefined in unit tests
-      const result = await controller.setSuperAdmin(undefined as any, user.id, dto);
+      const result = await controller.setSuperAdmin(
+        undefined as any,
+        { sub: 'caller-id' } as any,
+        user.id,
+        dto,
+      );
 
-      expect(usersService.setSuperAdmin).toHaveBeenCalledWith(user.id, dto.enabled);
+      expect(usersService.setSuperAdmin).toHaveBeenCalledWith(user.id, dto.enabled, 'caller-id');
       expect(result).toBeInstanceOf(UserResponseDto);
       expect(result.isSuperAdmin).toBe(true);
     });
@@ -377,9 +384,9 @@ describe('UsersController', () => {
     it('delegates to service.removeFromOrg', async () => {
       usersService.removeFromOrg.mockResolvedValue(undefined);
 
-      await controller.removeFromOrg('user-uuid-1', 'org-uuid-1');
+      await controller.removeFromOrg({ sub: 'caller-id' } as any, 'user-uuid-1', 'org-uuid-1');
 
-      expect(usersService.removeFromOrg).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1');
+      expect(usersService.removeFromOrg).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1', 'caller-id');
     });
   });
 });

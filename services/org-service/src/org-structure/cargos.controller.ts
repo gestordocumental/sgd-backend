@@ -1,7 +1,13 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Param, Body, Headers, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
+  Param, Body, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
+  InternalServerErrorException,
 } from '@nestjs/common';
+
+function requireActor(actorId: string | undefined): string {
+  if (!actorId) throw new InternalServerErrorException('Could not resolve caller identity');
+  return actorId;
+}
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { CargosService } from './cargos.service';
 import { CreateCargoDto } from './dto/create-cargo.dto';
@@ -11,18 +17,7 @@ import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
 import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
-
-function extractUserId(authHeader: string | undefined): string | undefined {
-  if (!authHeader?.startsWith('Bearer ')) return undefined;
-  try {
-    const payload = JSON.parse(
-      Buffer.from(authHeader.split(' ')[1].split('.')[1], 'base64url').toString('utf8'),
-    );
-    return (payload.sub as string) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Org Structure — Cargos')
 @ApiBearerAuth('JWT')
@@ -40,13 +35,13 @@ export class CargosController {
   @Post()
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('areaId', ParseUUIDPipe) areaId: string,
     @Body() dto: CreateCargoDto,
   ): Promise<CargoResponseDto> {
-    return CargoResponseDto.from(await this.service.create(orgId, departamentoId, areaId, dto, extractUserId(auth)));
+    return CargoResponseDto.from(await this.service.create(orgId, departamentoId, areaId, dto, requireActor(actorId)));
   }
 
   @ApiOperation({ summary: 'List all positions within an area' })
@@ -81,14 +76,14 @@ export class CargosController {
   @Patch(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('areaId', ParseUUIDPipe) areaId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCargoDto,
   ): Promise<CargoResponseDto> {
-    return CargoResponseDto.from(await this.service.update(orgId, departamentoId, areaId, id, dto, extractUserId(auth)));
+    return CargoResponseDto.from(await this.service.update(orgId, departamentoId, areaId, id, dto, requireActor(actorId)));
   }
 
   @ApiOperation({ summary: 'Soft delete position' })
@@ -98,13 +93,13 @@ export class CargosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
   async remove(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('areaId', ParseUUIDPipe) areaId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
-    return this.service.remove(orgId, departamentoId, areaId, id, extractUserId(auth));
+    return this.service.remove(orgId, departamentoId, areaId, id, requireActor(actorId));
   }
 
   @ApiOperation({ summary: 'Restore a deleted position' })
@@ -113,12 +108,12 @@ export class CargosController {
   @Post(':id/restore')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('areaId', ParseUUIDPipe) areaId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CargoResponseDto> {
-    return CargoResponseDto.from(await this.service.restore(orgId, departamentoId, areaId, id, extractUserId(auth)));
+    return CargoResponseDto.from(await this.service.restore(orgId, departamentoId, areaId, id, requireActor(actorId)));
   }
 }

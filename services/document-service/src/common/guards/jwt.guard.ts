@@ -3,22 +3,18 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'crypto';
+import { verify, JsonWebTokenError } from 'jsonwebtoken';
 import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
 
 function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
-  const [header, payload, signature] = parts;
-  const sigBytes = Buffer.from(signature, 'base64url');
-  const expectedBytes = createHmac('sha256', secret).update(`${header}.${payload}`).digest();
-  if (sigBytes.length !== expectedBytes.length || !timingSafeEqual(sigBytes, expectedBytes)) {
-    throw new UnauthorizedException('Invalid token');
-  }
   try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-  } catch {
-    throw new UnauthorizedException('Malformed token');
+    return verify(token, secret, { algorithms: ['HS256'] }) as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof JsonWebTokenError) {
+      throw new UnauthorizedException(err.message);
+    }
+    throw err;
   }
 }
 
@@ -30,10 +26,13 @@ export class JwtGuard implements CanActivate {
   ) {}
 
   canActivate(ctx: ExecutionContext): boolean {
-    const meta = this.reflector.get<AuthMeta | undefined>(AUTH_KEY, ctx.getHandler());
+    const meta = this.reflector.getAllAndOverride<AuthMeta | undefined>(AUTH_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
     if (!meta) return true;
 
-    const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string>; params: Record<string, string> }>();
+    const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string>; params: Record<string, string>; user?: Record<string, unknown> }>();
 
     // Allow service-to-service calls via x-internal-token
     const internalToken = request.headers['x-internal-token'];
@@ -48,6 +47,8 @@ export class JwtGuard implements CanActivate {
 
     const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
     const payload = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
+
+    request.user = payload;
 
     if (payload.isSuperAdmin) return true;
     if (meta.superAdminOnly) throw new ForbiddenException('Super admin access required');

@@ -7,7 +7,7 @@ import { StorageService } from '../common/storage/storage.service';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 import { TOPICS } from '../common/kafka/kafka.constants';
 import { AppLogger } from '../common/logger/app-logger.service';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
 import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
 
@@ -72,7 +72,8 @@ export class DocumentUploadService {
       resourceType:  'typology',
       resourceId:    params.resourceId,
       resourceName:  params.resourceName ?? null,
-      correlationId: params.resourceId,   // ID de negocio: agrupa toda la trazabilidad de la tipología
+      correlationId:         getCorrelationId(),
+      businessCorrelationId: params.resourceId,
       ip:            getClientIp(),
       metadata:      params.metadata,
       timestamp:     new Date().toISOString(),

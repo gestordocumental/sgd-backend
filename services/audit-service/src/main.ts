@@ -7,6 +7,9 @@ require('dotenv').config();
 // Deshabilita validación de certificados TLS si hay un proxy SSL corporativo local.
 // Solo activar en máquinas de desarrollo con proxy — NUNCA en Railway ni producción.
 if (process.env.DISABLE_TLS_VERIFY === 'true') {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DISABLE_TLS_VERIFY no puede habilitarse en producción');
+  }
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 

@@ -1,13 +1,12 @@
-import { IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
-import { NotificationType } from '../entities/notification.entity';
+import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { NotificationType, NOTIFICATION_TYPES } from '../entities/notification.entity';
 
 /**
  * Payload que llega desde Kafka en el tópico notification.send.
  * Publicado principalmente por workflow-service.
  */
 export class NotificationEventDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsIn(NOTIFICATION_TYPES)
   type!: NotificationType;
 
   @IsArray()

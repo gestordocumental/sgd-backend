@@ -11,7 +11,7 @@ import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { ResolveDiscrepancyDto, ResolveAction } from './dto/resolve-discrepancy.dto';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
 
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const parse = (v: string) =>
@@ -66,7 +66,7 @@ export class TypologiesService {
       resourceType:  'typology',
       resourceId:    params.resourceId,
       resourceName:  params.resourceName ?? null,
-      correlationId: params.resourceId,   // ID de negocio: agrupa toda la trazabilidad de la tipología
+      correlationId: getCorrelationId(),
       ip:            getClientIp(),
       metadata:      params.metadata,
       timestamp:     new Date().toISOString(),

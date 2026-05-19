@@ -35,6 +35,18 @@ export class MakeCargoAreaNullable1775400000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    // Abort if any department-level cargos (area_id IS NULL) exist — reimposing NOT NULL
+    // would fail anyway, and silently deleting data during a rollback is unsafe.
+    const [{ count }] = await queryRunner.query(
+      `SELECT COUNT(*)::int AS count FROM "cargos" WHERE "area_id" IS NULL`,
+    ) as [{ count: number }];
+    if (count > 0) {
+      throw new Error(
+        `Cannot roll back MakeCargoAreaNullable: ${count} cargo(s) have area_id = NULL. ` +
+        'Remove or reassign them before running this rollback.',
+      );
+    }
+
     await queryRunner.query(`DROP INDEX IF EXISTS "UQ_cargos_dept_name"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "UQ_cargos_area_name"`);
     await queryRunner.query(`ALTER TABLE "cargos" ALTER COLUMN "area_id" SET NOT NULL`);

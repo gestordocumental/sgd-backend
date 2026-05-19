@@ -86,6 +86,7 @@ export class NotificationsConsumer
             err instanceof Error ? err.stack : undefined,
             'NotificationsConsumer',
           );
+          throw err;
         });
       },
     });
@@ -120,7 +121,7 @@ export class NotificationsConsumer
     if (topic === TOPICS.USER_INVITED) {
       if (!isValidUserInvitedPayload(raw)) {
         this.logger.warn(
-          `[kafka] Invalid user.invited payload — skipping: ${JSON.stringify(raw)}`,
+          `[kafka] Invalid user.invited payload — skipping`,
           'NotificationsConsumer',
         );
         return;
@@ -135,7 +136,7 @@ export class NotificationsConsumer
 
     if (!isValidNotificationPayload(raw)) {
       this.logger.warn(
-        `[kafka] Invalid payload in ${topic} — skipping: ${JSON.stringify(raw)}`,
+        `[kafka] Invalid payload in ${topic} — skipping`,
         'NotificationsConsumer',
       );
       return;

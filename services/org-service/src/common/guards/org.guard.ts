@@ -7,22 +7,18 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'crypto';
+import { verify, JsonWebTokenError } from 'jsonwebtoken';
 import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
 
 function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
-  const [header, payload, signature] = parts;
-  const sigBytes = Buffer.from(signature, 'base64url');
-  const expectedBytes = createHmac('sha256', secret).update(`${header}.${payload}`).digest();
-  if (sigBytes.length !== expectedBytes.length || !timingSafeEqual(sigBytes, expectedBytes)) {
-    throw new UnauthorizedException('Invalid token');
-  }
   try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-  } catch {
-    throw new UnauthorizedException('Malformed token');
+    return verify(token, secret, { algorithms: ['HS256'] }) as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof JsonWebTokenError) {
+      throw new UnauthorizedException(err.message);
+    }
+    throw err;
   }
 }
 
@@ -34,7 +30,10 @@ export class OrgGuard implements CanActivate {
   ) {}
 
   canActivate(ctx: ExecutionContext): boolean {
-    const meta = this.reflector.get<AuthMeta | undefined>(AUTH_KEY, ctx.getHandler());
+    const meta = this.reflector.getAllAndOverride<AuthMeta | undefined>(AUTH_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
 
     // Endpoints without auth decorator pass through directly (e.g.: health)
     if (!meta) return true;
@@ -42,6 +41,7 @@ export class OrgGuard implements CanActivate {
     const request = ctx.switchToHttp().getRequest<{
       headers: Record<string, string>;
       params: Record<string, string>;
+      user?: Record<string, unknown>;
     }>();
 
     // Internal calls between microservices — only allowed for non-superAdminOnly endpoints
@@ -61,6 +61,9 @@ export class OrgGuard implements CanActivate {
 
     const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
     const payload = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
+
+    // Store the verified principal so controllers can access it without re-parsing the token
+    request.user = payload;
 
     // Super admin has access to everything
     if (payload.isSuperAdmin) return true;

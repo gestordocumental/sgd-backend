@@ -5,14 +5,17 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 
-export type NotificationType =
-  | 'WORKFLOW_TASK_ASSIGNED'
-  | 'WORKFLOW_APPROVED'
-  | 'WORKFLOW_REJECTED'
-  | 'ADMIN_CYCLE_TASK'
-  | 'ADMIN_CYCLE_COMPLETED'
-  | 'WORKFLOW_CLOSED'
-  | 'NO_FINAL_USER_ALERT';
+export const NOTIFICATION_TYPES = [
+  'WORKFLOW_TASK_ASSIGNED',
+  'WORKFLOW_APPROVED',
+  'WORKFLOW_REJECTED',
+  'ADMIN_CYCLE_TASK',
+  'ADMIN_CYCLE_COMPLETED',
+  'WORKFLOW_CLOSED',
+  'NO_FINAL_USER_ALERT',
+] as const;
+
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 @Entity('notifications')
 export class Notification {
@@ -20,7 +23,7 @@ export class Notification {
   id!: string;
 
   /** ID del usuario destinatario */
-  @Column({ name: 'user_id' })
+  @Column({ name: 'user_id', type: 'uuid' })
   userId!: string;
 
   @Column({ length: 60 })

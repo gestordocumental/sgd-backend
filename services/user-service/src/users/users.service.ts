@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
   InternalServerErrorException,
   HttpException,
   Inject,
@@ -92,6 +93,19 @@ export class UsersService {
     if (existing) {
       // PENDING user — token may have expired. Resend invitation instead of failing.
       if (existing.registrationStatus === RegistrationStatus.PENDING_CREDENTIALS) {
+        // Security: only resend if the caller's org already has a membership for this user,
+        // or there is no org scope (super-admin creating a global user).
+        if (orgId) {
+          const membership = await this.userOrgRoleRepository.findOne({
+            where: { userId: existing.id, orgId },
+          });
+          if (!membership) {
+            throw new ConflictException({
+              message: "User with this email already exists in another organization",
+              userId: existing.id,
+            });
+          }
+        }
         const { user, invitationToken } = await this.generateAndEmitInvitation(existing);
         return { user, invitationToken, invitationResent: true };
       }
@@ -154,11 +168,20 @@ export class UsersService {
    * Generates a new token (the previous one expires naturally in Redis).
    * Throws ConflictException if the user is already ACTIVE.
    */
-  async resendInvitation(userId: string): Promise<{ user: User; invitationToken: string }> {
+  async resendInvitation(userId: string, callerOrgId?: string): Promise<{ user: User; invitationToken: string }> {
     const user = await this.findOne(userId);
 
     if (user.registrationStatus !== RegistrationStatus.PENDING_CREDENTIALS) {
       throw new ConflictException("User has already completed registration");
+    }
+
+    if (callerOrgId) {
+      const membership = await this.userOrgRoleRepository.findOne({
+        where: { userId: user.id, orgId: callerOrgId },
+      });
+      if (!membership) {
+        throw new ForbiddenException("You can only resend invitations for users in your organization");
+      }
     }
 
     return this.generateAndEmitInvitation(user);
@@ -557,7 +580,8 @@ export class UsersService {
         `COUNT(DISTINCT CASE WHEN u.is_active = true AND u.deleted_at IS NULL THEN u.id END)`,
         'active',
       )
-      .where('u.is_super_admin = false')
+      .where('uor.role_id IS NOT NULL')
+      .andWhere('u.is_super_admin = false')
       .groupBy('uor.org_id')
       .getRawMany<{ orgId: string; total: string; active: string }>()
 

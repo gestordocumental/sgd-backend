@@ -18,7 +18,7 @@ if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
-  host:     process.env.DB_HOST ?? 'localhost',
+  host:     requireEnv('DB_HOST', isDev ? 'localhost' : undefined),
   port:     dbPort,
   username: requireEnv('DB_USERNAME', isDev ? 'postgres' : undefined),
   password: requireEnv('DB_PASSWORD', isDev ? 'postgres' : undefined),

@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DepartamentosService } from './departamentos.service';
 import { Departamento } from './entities/departamento.entity';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -37,6 +38,7 @@ describe('DepartamentosService', () => {
       providers: [
         DepartamentosService,
         { provide: getRepositoryToken(Departamento), useValue: repo },
+        { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
     }).compile();
 

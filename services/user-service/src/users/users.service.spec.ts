@@ -37,6 +37,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   isActive: true,
   registrationStatus:
     overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
+  avatarUrl: null,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],
@@ -67,11 +68,14 @@ describe('UsersService', () => {
   let roleRepo: jest.Mocked<Repository<Role>>;
   let authClient: jest.Mocked<AuthClientService>;
   let redis: { getdel: jest.Mock; setex: jest.Mock };
-  let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit'>>;
+  let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit' | 'emitSafe'>>;
 
   beforeEach(async () => {
     redis = { getdel: jest.fn(), setex: jest.fn() };
-    kafkaProducer = { emit: jest.fn().mockResolvedValue(undefined) };
+    kafkaProducer = {
+      emit: jest.fn().mockResolvedValue(undefined),
+      emitSafe: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -214,7 +218,10 @@ describe('UsersService', () => {
 
     it('throws ConflictException with userId when an active user already exists', async () => {
       const dto = { email: 'existing@example.com', position: 'Dev' };
-      const existingUser = makeUser({ email: dto.email });
+      const existingUser = makeUser({
+        email: dto.email,
+        registrationStatus: RegistrationStatus.ACTIVE,
+      });
 
       usersRepo.findOne.mockResolvedValue(existingUser);
 

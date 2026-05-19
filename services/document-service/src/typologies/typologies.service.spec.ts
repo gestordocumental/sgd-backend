@@ -60,6 +60,8 @@ function makeModel(docOrNull: TypologyDocument | null = null) {
   return { Model, instance };
 }
 
+const mockKafkaProducer = { send: jest.fn().mockResolvedValue(undefined) };
+
 // ── TypologiesService ──────────────────────────────────────────────────────
 
 describe('TypologiesService', () => {
@@ -72,7 +74,7 @@ describe('TypologiesService', () => {
       Model.findOne.mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(null) });
       instance.save = jest.fn().mockResolvedValue(instance);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       const result = await service.create(
         'org-1',
         { departamentoId: 'dept-1', nombre: 'Policy', codigo: 'POL-001', version: '01' },
@@ -89,7 +91,7 @@ describe('TypologiesService', () => {
       instance.typologyStatus = TypologyStatus.INCOMPLETE;
       instance.save = jest.fn().mockResolvedValue(instance);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.create(
         'org-1',
         { departamentoId: 'dept-1' }, // no nombre/codigo/version
@@ -104,7 +106,7 @@ describe('TypologiesService', () => {
       // Pre-check returns an existing active typology
       Model.findOne.mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(makeDoc()) });
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(
         service.create(
           'org-1',
@@ -121,7 +123,7 @@ describe('TypologiesService', () => {
       dupErr.code = 11000;
       instance.save = jest.fn().mockRejectedValue(dupErr);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(
         service.create('org-1', { departamentoId: 'dept-1', codigo: 'POL-001' }, STRUCTURE_NAMES),
       ).rejects.toThrow(ConflictException);
@@ -132,7 +134,7 @@ describe('TypologiesService', () => {
       Model.findOne.mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(null) });
       instance.save = jest.fn().mockRejectedValue(new Error('DB connection lost'));
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(
         service.create('org-1', { departamentoId: 'dept-1' }, STRUCTURE_NAMES),
       ).rejects.toThrow('DB connection lost');
@@ -149,7 +151,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel();
       Model.find = jest.fn().mockReturnValue(chain);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       const result = await service.findAll('org-1', 2, 10);
 
       expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1', typologyStatus: TypologyStatus.ACTIVE });
@@ -166,7 +168,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc();
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       const result = await service.findOne('org-1', doc.id);
 
       expect(result).toBe(doc);
@@ -174,7 +176,7 @@ describe('TypologiesService', () => {
 
     it('throws BadRequestException for invalid ObjectId', async () => {
       const { Model } = makeModel();
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
 
       await expect(service.findOne('org-1', 'not-an-id')).rejects.toThrow(BadRequestException);
     });
@@ -183,7 +185,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel();
       Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       const validId = makeId();
       await expect(service.findOne('org-1', validId)).rejects.toThrow(NotFoundException);
     });
@@ -196,7 +198,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc();
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.update('org-1', doc.id, { nombre: 'New Name' });
 
       expect(doc.datosDeclarados.nombre).toBe('New Name');
@@ -207,7 +209,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: '01', fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { version: '02' })).resolves.not.toThrow();
       expect(doc.datosDeclarados.version).toBe('02');
     });
@@ -216,7 +218,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: 'v1.0', fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { version: 'v1.1' })).resolves.not.toThrow();
     });
 
@@ -224,7 +226,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: '01', fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { version: '03' })).rejects.toThrow(BadRequestException);
     });
 
@@ -232,7 +234,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: '01', fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { version: '01' })).resolves.not.toThrow();
       expect(doc.datosDeclarados.version).toBe('01');
     });
@@ -241,7 +243,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: '02', fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { version: '01' })).rejects.toThrow(BadRequestException);
     });
 
@@ -249,7 +251,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: 'v1.0', fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { version: 'v2.1' })).rejects.toThrow(BadRequestException);
     });
 
@@ -257,7 +259,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: null, fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { version: '05' })).resolves.not.toThrow();
     });
 
@@ -268,7 +270,7 @@ describe('TypologiesService', () => {
       dupErr.code = 11000;
       (doc.save as jest.Mock).mockRejectedValue(dupErr);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(service.update('org-1', doc.id, { nombre: 'X' })).rejects.toThrow(ConflictException);
     });
   });
@@ -280,7 +282,7 @@ describe('TypologiesService', () => {
       const doc = makeDoc();
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.remove('org-1', doc.id);
 
       expect(doc.deletedAt).toBeInstanceOf(Date);
@@ -298,7 +300,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel();
       Model.find = jest.fn().mockReturnValue(chain);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       const result = await service.findHistory('org-1', 'POL-001');
 
       expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1', 'datosDeclarados.codigo': 'POL-001' });
@@ -316,7 +318,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
       Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.applyExtractedMetadata('org-1', doc.id, {
         nombre: 'Different Name', codigo: 'POL-001', version: '01',
       });
@@ -333,7 +335,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
       Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.applyExtractedMetadata('org-1', doc.id, {
         nombre: 'Policy', codigo: 'POL-001', version: '01',
       });
@@ -349,7 +351,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
       Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.applyExtractedMetadata('org-1', doc.id, {
         nombre: 'Extracted', codigo: 'EXT-001', version: 'v1.0',
       });
@@ -361,7 +363,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel();
       Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       // Should not throw
       await expect(
         service.applyExtractedMetadata('org-1', makeId(), { nombre: 'X', codigo: null, version: null }),
@@ -376,7 +378,7 @@ describe('TypologiesService', () => {
       const id = makeId();
       const { Model } = makeModel();
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.markExtractionFailed('org-1', id, 'parse error');
 
       expect(Model.updateOne).toHaveBeenCalledWith(
@@ -387,7 +389,7 @@ describe('TypologiesService', () => {
 
     it('does nothing for invalid ObjectId', async () => {
       const { Model } = makeModel();
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
 
       await expect(service.markExtractionFailed('org-1', 'bad-id', 'err')).resolves.toBeUndefined();
       expect(Model.updateOne).not.toHaveBeenCalled();
@@ -404,7 +406,7 @@ describe('TypologiesService', () => {
       });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED });
 
       expect(doc.datosDeclarados.nombre).toBe('Policy');
@@ -418,7 +420,7 @@ describe('TypologiesService', () => {
       });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.ADOPT_EXTRACTED });
 
       expect(doc.datosDeclarados.nombre).toBe('Extracted');
@@ -432,7 +434,7 @@ describe('TypologiesService', () => {
       });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await service.resolveDiscrepancy('org-1', doc.id, {
         action: ResolveAction.MANUAL_OVERRIDE,
         nombre: 'Manual Name',
@@ -449,7 +451,7 @@ describe('TypologiesService', () => {
       });
       const { Model } = makeModel(doc);
 
-      const service = new TypologiesService(Model);
+      const service = new TypologiesService(Model, mockKafkaProducer as any);
       await expect(
         service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED }),
       ).rejects.toThrow(BadRequestException);

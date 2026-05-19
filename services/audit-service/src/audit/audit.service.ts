@@ -95,7 +95,7 @@ export class AuditService implements OnModuleInit {
     if (dto.resourceId)    must.push({ term: { resourceId:    dto.resourceId } });
     if (dto.action)        must.push({ term: { action:        dto.action } });
     if (dto.service)       must.push({ term: { service:       dto.service } });
-    if (dto.correlationId) must.push({ term: { 'correlationId.keyword': dto.correlationId } });
+    if (dto.correlationId) must.push({ term: { correlationId: dto.correlationId } });
 
     if (dto.from || dto.to) {
       const range: Record<string, string> = {};
@@ -134,7 +134,7 @@ export class AuditService implements OnModuleInit {
     if (dto.resourceType)  must.push({ term: { resourceType:  dto.resourceType } });
     if (dto.action)        must.push({ term: { action:        dto.action } });
     if (dto.service)       must.push({ term: { service:       dto.service } });
-    if (dto.correlationId) must.push({ term: { 'correlationId.keyword': dto.correlationId } });
+    if (dto.correlationId) must.push({ term: { correlationId: dto.correlationId } });
 
     if (dto.from || dto.to) {
       const range: Record<string, string> = {};
@@ -162,8 +162,10 @@ export class AuditService implements OnModuleInit {
       const response = await this.es.get<AuditLogDocument>({ index: INDEX, id });
       if (!response.found) return null;
       return { id: response._id, ...response._source } as AuditLogDocument;
-    } catch {
-      return null;
+    } catch (err: unknown) {
+      const statusCode = (err as { meta?: { statusCode?: number } })?.meta?.statusCode;
+      if (statusCode === 404) return null;
+      throw err;
     }
   }
 }

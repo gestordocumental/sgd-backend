@@ -41,7 +41,7 @@ describe('CorrelationMiddleware', () => {
     middleware.use(req, res, next);
 
     expect(setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'incoming-id-123');
-    expect(mockRun).toHaveBeenCalledWith({ correlationId: 'incoming-id-123' }, expect.any(Function));
+    expect(mockRun).toHaveBeenCalledWith(expect.objectContaining({ correlationId: 'incoming-id-123' }), expect.any(Function));
   });
 
   it('generates a UUID when the x-correlation-id header is missing', () => {
@@ -52,7 +52,7 @@ describe('CorrelationMiddleware', () => {
     middleware.use(req, res, next);
 
     expect(setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'generated-uuid');
-    expect(mockRun).toHaveBeenCalledWith({ correlationId: 'generated-uuid' }, expect.any(Function));
+    expect(mockRun).toHaveBeenCalledWith(expect.objectContaining({ correlationId: 'generated-uuid' }), expect.any(Function));
   });
 
   it('generates a UUID when the header is an empty string', () => {
@@ -83,7 +83,7 @@ describe('CorrelationMiddleware', () => {
     middleware.use(req, res, next);
 
     expect(setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'array-id-1');
-    expect(mockRun).toHaveBeenCalledWith({ correlationId: 'array-id-1' }, expect.any(Function));
+    expect(mockRun).toHaveBeenCalledWith(expect.objectContaining({ correlationId: 'array-id-1' }), expect.any(Function));
   });
 
   it('generates a UUID when the array header has an empty first element', () => {

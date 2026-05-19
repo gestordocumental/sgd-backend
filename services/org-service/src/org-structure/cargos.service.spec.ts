@@ -5,6 +5,8 @@ import { Repository } from 'typeorm';
 import { CargosService } from './cargos.service';
 import { Cargo } from './entities/cargo.entity';
 import { AreasService } from './areas.service';
+import { DepartamentosService } from './departamentos.service';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -43,6 +45,8 @@ describe('CargosService', () => {
         CargosService,
         { provide: getRepositoryToken(Cargo), useValue: repo },
         { provide: AreasService, useValue: areasService },
+        { provide: DepartamentosService, useValue: { findOne: jest.fn() } },
+        { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
     }).compile();
 
@@ -95,7 +99,7 @@ describe('CargosService', () => {
     const cargo = makeCargo();
     repo.findOne!.mockResolvedValue(cargo);
 
-    await expect(service.findOne(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id)).resolves.toBe(
+    await expect(service.findOne(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id)).resolves.toBe(
       cargo,
     );
   });
@@ -116,7 +120,7 @@ describe('CargosService', () => {
       .mockResolvedValueOnce(null);
     repo.save!.mockResolvedValue(saved);
 
-    const result = await service.update(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id, {
+    const result = await service.update(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id, {
       name: 'Coordinador',
     });
 
@@ -138,7 +142,7 @@ describe('CargosService', () => {
     const cargo = makeCargo();
     repo.findOne!.mockResolvedValue(cargo);
 
-    await service.remove(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id);
+    await service.remove(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id);
 
     expect(repo.softRemove).toHaveBeenCalledWith(cargo);
   });
@@ -149,7 +153,7 @@ describe('CargosService', () => {
     repo.findOne!.mockResolvedValueOnce(deleted).mockResolvedValueOnce(null).mockResolvedValueOnce(restored);
     repo.restore!.mockResolvedValue({ affected: 1 });
 
-    const result = await service.restore(deleted.orgId, deleted.departamentoId, deleted.areaId, deleted.id);
+    const result = await service.restore(deleted.orgId, deleted.departamentoId, deleted.areaId!, deleted.id);
 
     expect(repo.restore).toHaveBeenCalledWith(deleted.id);
     expect(result).toBe(restored);
@@ -167,7 +171,7 @@ describe('CargosService', () => {
     const deleted = makeCargo({ deletedAt: new Date('2026-01-03T00:00:00.000Z') });
     repo.findOne!.mockResolvedValueOnce(deleted).mockResolvedValueOnce(makeCargo({ id: 'other' }));
 
-    await expect(service.restore(deleted.orgId, deleted.departamentoId, deleted.areaId, deleted.id)).rejects.toThrow(
+    await expect(service.restore(deleted.orgId, deleted.departamentoId, deleted.areaId!, deleted.id)).rejects.toThrow(
       ConflictException,
     );
   });

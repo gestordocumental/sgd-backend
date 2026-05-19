@@ -5,6 +5,7 @@ import { Cargo } from './entities/cargo.entity';
 import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
 import { AreasService } from './areas.service';
+import { DepartamentosService } from './departamentos.service';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 import { TOPICS } from '../common/kafka/kafka.constants';
 import { getClientIp } from '../common/correlation/correlation.context';
@@ -15,6 +16,7 @@ export class CargosService {
     @InjectRepository(Cargo)
     private readonly repo: Repository<Cargo>,
     private readonly areasService: AreasService,
+    private readonly departamentosService: DepartamentosService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
@@ -58,6 +60,7 @@ export class CargosService {
       const existing = await this.repo.findOne({ where: { areaId, name: dto.name } });
       if (existing) throw new ConflictException(`Cargo "${dto.name}" already exists in this area`);
     } else {
+      await this.departamentosService.findOne(orgId, departamentoId);
       const existing = await this.repo.findOne({
         where: { departamentoId, name: dto.name, areaId: IsNull() },
       });

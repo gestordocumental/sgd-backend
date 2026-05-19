@@ -7,32 +7,19 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'crypto';
+import { verify, JsonWebTokenError } from 'jsonwebtoken';
 import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
 
 function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new UnauthorizedException('Malformed token');
-  const [header, payload, signature] = parts;
-  const sigBytes      = Buffer.from(signature, 'base64url');
-  const expectedBytes = createHmac('sha256', secret).update(`${header}.${payload}`).digest();
-  if (sigBytes.length !== expectedBytes.length || !timingSafeEqual(sigBytes, expectedBytes)) {
-    throw new UnauthorizedException('Invalid token');
-  }
-  let decoded: Record<string, unknown>;
   try {
-    decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-  } catch {
-    throw new UnauthorizedException('Malformed token');
+    return verify(token, secret, { algorithms: ['HS256'] }) as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof JsonWebTokenError) {
+      throw new UnauthorizedException(err.message);
+    }
+    throw err;
   }
-  const now = Math.floor(Date.now() / 1000);
-  if (typeof decoded['exp'] === 'number' && decoded['exp'] < now) {
-    throw new UnauthorizedException('Token expired');
-  }
-  if (typeof decoded['nbf'] === 'number' && decoded['nbf'] > now) {
-    throw new UnauthorizedException('Token not yet valid');
-  }
-  return decoded;
 }
 
 @Injectable()
@@ -43,7 +30,10 @@ export class JwtGuard implements CanActivate {
   ) {}
 
   canActivate(ctx: ExecutionContext): boolean {
-    const meta = this.reflector.get<AuthMeta | undefined>(AUTH_KEY, ctx.getHandler());
+    const meta = this.reflector.getAllAndOverride<AuthMeta | undefined>(AUTH_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
     if (!meta) return true;
 
     const request = ctx

@@ -29,6 +29,7 @@ export class UserClientService {
     try {
       const { data } = await firstValueFrom(
         this.http.get<UserInfo>(`${this.baseUrl}/api/users/${userId}`, {
+          timeout: 3000,
           headers: {
             'x-internal-token':  this.internalToken,
             'x-correlation-id':  getCorrelationId(),

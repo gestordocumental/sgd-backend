@@ -250,18 +250,21 @@ describe('BulkStructureService', () => {
       expect(result.positionsCreated).toBe(0);
     });
 
-    it('records an error when position is given without an area', async () => {
+    it('creates a dept-level position when no area is provided', async () => {
       const dept = makeDept();
+      const cargo = makeCargo({ areaId: null });
       mockGetWorksheet.mockReturnValue(
         makeWorksheet([{ cells: ['Engineering', '', '', '', 'Senior Dev', ''] }]),
       );
       deptRepo.findOne.mockResolvedValue(dept);
+      cargoRepo.findOne.mockResolvedValue(null);
+      cargoRepo.create.mockReturnValue(cargo);
+      cargoRepo.save.mockResolvedValue(cargo);
 
       const result = await service.importFromExcel(ORG_ID, Buffer.from(''));
 
-      expect(result.failed).toBe(1);
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].reason).toContain('área');
+      expect(result.failed).toBe(0);
+      expect(result.positionsCreated).toBe(1);
     });
 
     it('records a generic error and logs a warning when an unexpected exception is thrown', async () => {
@@ -352,16 +355,18 @@ describe('BulkStructureService', () => {
       expect(result.unresolved[0].reason).toContain('Missing');
     });
 
-    it('returns unresolved when position is given without area', async () => {
+    it('returns unresolved when dept-level position is not found', async () => {
       const dept = makeDept();
       deptRepo.findOne.mockResolvedValue(dept);
+      cargoRepo.findOne.mockResolvedValue(null);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,
         items: [{ department: 'Engineering', position: 'Dev' }],
       });
 
-      expect(result.unresolved[0].reason).toContain('área');
+      expect(result.unresolved).toHaveLength(1);
+      expect(result.unresolved[0].reason).toContain('Dev');
     });
 
     it('resolves department + area', async () => {

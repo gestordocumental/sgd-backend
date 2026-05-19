@@ -429,7 +429,7 @@ export class WorkflowsService {
         .createQueryBuilder('w')
         .select('w.status', 'status')
         .addSelect('COUNT(*)', 'count')
-        .where('w.orgId = :orgId', { orgId })
+        .where('w.org_id = :orgId', { orgId })
         .groupBy('w.status')
         .getRawMany<{ status: string; count: string }>(),
       userId
@@ -460,7 +460,7 @@ export class WorkflowsService {
       weekEnd.setDate(weekStart.getDate() + 7);
       const count = await this.workflowRepo
         .createQueryBuilder('w')
-        .where('w.orgId = :orgId', { orgId })
+        .where('w.org_id = :orgId', { orgId })
         .andWhere('w.createdAt >= :start', { start: weekStart })
         .andWhere('w.createdAt < :end', { end: weekEnd })
         .getCount();
@@ -500,6 +500,7 @@ export class WorkflowsService {
       SELECT
         w.org_id,
         COALESCE(SUM(bytes), 0)::text AS total_bytes,
+        COALESCE(SUM(bytes), 0)       AS total_bytes_num,
         COUNT(*)::text                AS total_files
       FROM (
         SELECT wa.workflow_id, wa.file_size_bytes AS bytes
@@ -514,7 +515,7 @@ export class WorkflowsService {
       ) sub
       JOIN workflows w ON w.id = sub.workflow_id
       GROUP BY w.org_id
-      ORDER BY total_bytes DESC
+      ORDER BY total_bytes_num DESC
     `);
 
     return rows.map((r) => ({

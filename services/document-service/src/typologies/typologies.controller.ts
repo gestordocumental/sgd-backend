@@ -5,7 +5,6 @@ import {
   DefaultValuePipe,
   Delete,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -36,6 +35,7 @@ import { ExtractorClientService, PreviewExtractResult } from '../common/extracto
 import { OrgClientService } from '../common/org-client/org-client.service';
 import { JwtGuard } from '../common/guards/jwt.guard';
 import { OrgMember } from '../common/decorators/auth.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { ResolveDiscrepancyDto } from './dto/resolve-discrepancy.dto';
 import { TypologyResponseDto } from './dto/typology-response.dto';
@@ -43,18 +43,6 @@ import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { CreationSource } from './schemas/typology.schema';
 import { TypologiesService } from './typologies.service';
 import { multerOptions } from '../document-upload/document-upload.constants';
-
-function extractUserId(authHeader: string | undefined): string | undefined {
-  if (!authHeader?.startsWith('Bearer ')) return undefined;
-  try {
-    const payload = JSON.parse(
-      Buffer.from(authHeader.split(' ')[1].split('.')[1], 'base64url').toString('utf8'),
-    );
-    return (payload.sub as string) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 @ApiTags('Typologies')
 @ApiBearerAuth('JWT')
@@ -103,7 +91,7 @@ export class TypologiesController {
   })
   @Post()
   async create(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId') orgId: string,
     @Body() dto: CreateTypologyDto,
   ): Promise<TypologyResponseDto> {
@@ -121,7 +109,7 @@ export class TypologiesController {
       areaNombre:         structure.areaNombre,
       cargoId:            structure.cargoId,
       cargoNombre:        structure.cargoNombre,
-    }, CreationSource.MANUAL, extractUserId(auth));
+    }, CreationSource.MANUAL, actorId);
 
     return TypologyResponseDto.fromDocument(created);
   }
@@ -168,7 +156,7 @@ export class TypologiesController {
   @ApiOkResponse({ description: 'Typology updated', type: TypologyResponseDto })
   @Patch(':id')
   async update(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId') orgId: string,
     @Param('id') id: string,
     @Body() dto: UpdateTypologyDto,
@@ -183,7 +171,7 @@ export class TypologiesController {
       ? await this.orgClient.resolveStructureById(orgId, dto.departamentoId!, dto.areaId, dto.cargoId)
       : undefined;
 
-    return TypologyResponseDto.fromDocument(await this.service.update(orgId, id, dto, structureNames, extractUserId(auth)));
+    return TypologyResponseDto.fromDocument(await this.service.update(orgId, id, dto, structureNames, actorId));
   }
 
   @ApiOperation({ summary: 'Soft delete a typology' })
@@ -192,11 +180,11 @@ export class TypologiesController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId') orgId: string,
     @Param('id') id: string,
   ): Promise<void> {
-    return this.service.remove(orgId, id, extractUserId(auth));
+    return this.service.remove(orgId, id, actorId);
   }
 
   @ApiOperation({ summary: 'Resolve extraction discrepancies or confirm extracted metadata' })
@@ -204,12 +192,12 @@ export class TypologiesController {
   @ApiOkResponse({ description: 'Typology updated after resolution', type: TypologyResponseDto })
   @Patch(':id/resolve-extraction')
   async resolveDiscrepancy(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId') orgId: string,
     @Param('id') id: string,
     @Body() dto: ResolveDiscrepancyDto,
   ): Promise<TypologyResponseDto> {
-    return this.service.resolveDiscrepancy(orgId, id, dto, extractUserId(auth)).then(
+    return this.service.resolveDiscrepancy(orgId, id, dto, actorId).then(
       TypologyResponseDto.fromDocument,
     );
   }

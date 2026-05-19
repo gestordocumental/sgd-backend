@@ -67,7 +67,7 @@ export class EmailService {
   }): Promise<void> {
     if (!this.enabled) {
       this.logger.warn(
-        `Resend disabled — invitation email not sent to ${opts.to}. Token: ${opts.invitationToken}`,
+        `Resend disabled — invitation email not sent to ${opts.to}.`,
         'EmailService',
       );
       return;
@@ -101,14 +101,18 @@ export class EmailService {
 
   private async sendEmail(opts: { to: string; subject: string; html: string }): Promise<string | null> {
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
       const response = await fetch(RESEND_API_URL, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ from: this.from, to: opts.to, subject: opts.subject, html: opts.html }),
       });
+      clearTimeout(timeout);
 
       const body = await response.json() as { id?: string; message?: string; name?: string };
 

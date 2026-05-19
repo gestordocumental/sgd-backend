@@ -43,7 +43,9 @@ export class InternalUsersController {
     @Body() dto: ByPositionDto,
   ) {
     this.verifyToken(token);
-    const { orgId, cargoId, areaId, departamentoId } = dto;
-    return this.usersService.findByPosition(orgId, { cargoId, areaId, departamentoId });
+    const { orgId, cargoId, departamentoId } = dto;
+    const filters: { cargoId?: string; areaId?: string | null; departamentoId?: string } = { cargoId, departamentoId };
+    if (dto.areaId !== undefined) filters.areaId = dto.areaId;
+    return this.usersService.findByPosition(orgId, filters);
   }
 }

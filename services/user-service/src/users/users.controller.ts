@@ -244,8 +244,12 @@ export class UsersController {
   @Post(":id/resend-invitation")
   @HttpCode(HttpStatus.OK)
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
-  async resendInvitation(@Param("id", ParseUUIDPipe) id: string) {
-    const { user, invitationToken } = await this.usersService.resendInvitation(id);
+  async resendInvitation(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    const callerOrgId = caller.isSuperAdmin ? undefined : caller.companyId;
+    const { user, invitationToken } = await this.usersService.resendInvitation(id, callerOrgId);
     return { ...UserResponseDto.from(user), invitationToken };
   }
 

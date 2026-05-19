@@ -45,6 +45,7 @@ export class AuditConsumer
             err instanceof Error ? err.stack : undefined,
             'AuditConsumer',
           );
+          throw err;
         });
       },
     });
@@ -77,8 +78,9 @@ export class AuditConsumer
     this.logger.http({ type: 'kafka-consume', topic, message: `← [kafka] ${topic}` });
 
     if (!isValidAuditLogEvent(raw)) {
+      const keys = raw && typeof raw === 'object' ? Object.keys(raw as Record<string, unknown>) : [];
       this.logger.warn(
-        `[kafka] Invalid audit.log payload — skipping: ${JSON.stringify(raw)}`,
+        `[kafka] Invalid audit.log payload — skipping (keys=${keys.join(',')})`,
         'AuditConsumer',
       );
       return;

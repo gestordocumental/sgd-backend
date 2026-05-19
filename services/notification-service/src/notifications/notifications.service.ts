@@ -57,7 +57,7 @@ export class NotificationsService {
     // Enviar emails — obtener datos de usuario de forma paralela
     const userMap = await this.userClient.getUsersByIds(recipientUserIds);
 
-    await Promise.all(
+    const results = await Promise.allSettled(
       recipientUserIds.map(async (userId) => {
         const user = userMap.get(userId);
         if (!user?.email) {
@@ -73,6 +73,10 @@ export class NotificationsService {
         });
       }),
     );
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      this.logger.warn(`Failed to send ${failed} notification email(s)`, 'NotificationsService');
+    }
   }
 
   async list(userId: string, dto: ListNotificationsDto): Promise<PaginatedNotificationsDto> {

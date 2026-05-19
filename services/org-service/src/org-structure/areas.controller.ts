@@ -1,7 +1,13 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Param, Body, Headers, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
+  Param, Body, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
+  InternalServerErrorException,
 } from '@nestjs/common';
+
+function requireActor(actorId: string | undefined): string {
+  if (!actorId) throw new InternalServerErrorException('Could not resolve caller identity');
+  return actorId;
+}
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { AreasService } from './areas.service';
 import { CreateAreaDto } from './dto/create-area.dto';
@@ -11,18 +17,7 @@ import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
 import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
-
-function extractUserId(authHeader: string | undefined): string | undefined {
-  if (!authHeader?.startsWith('Bearer ')) return undefined;
-  try {
-    const payload = JSON.parse(
-      Buffer.from(authHeader.split(' ')[1].split('.')[1], 'base64url').toString('utf8'),
-    );
-    return (payload.sub as string) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Org Structure — Areas')
 @ApiBearerAuth('JWT')
@@ -39,12 +34,12 @@ export class AreasController {
   @Post()
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Body() dto: CreateAreaDto,
   ): Promise<AreaResponseDto> {
-    return AreaResponseDto.from(await this.service.create(orgId, departamentoId, dto, extractUserId(auth)));
+    return AreaResponseDto.from(await this.service.create(orgId, departamentoId, dto, requireActor(actorId)));
   }
 
   @ApiOperation({ summary: 'List all areas of a department' })
@@ -77,13 +72,13 @@ export class AreasController {
   @Patch(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAreaDto,
   ): Promise<AreaResponseDto> {
-    return AreaResponseDto.from(await this.service.update(orgId, departamentoId, id, dto, extractUserId(auth)));
+    return AreaResponseDto.from(await this.service.update(orgId, departamentoId, id, dto, requireActor(actorId)));
   }
 
   @ApiOperation({ summary: 'Soft delete area' })
@@ -93,12 +88,12 @@ export class AreasController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
   async remove(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
-    return this.service.remove(orgId, departamentoId, id, extractUserId(auth));
+    return this.service.remove(orgId, departamentoId, id, requireActor(actorId));
   }
 
   @ApiOperation({ summary: 'Restore a deleted area' })
@@ -107,11 +102,11 @@ export class AreasController {
   @Post(':id/restore')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(
-    @Headers('authorization') auth: string,
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<AreaResponseDto> {
-    return AreaResponseDto.from(await this.service.restore(orgId, departamentoId, id, extractUserId(auth)));
+    return AreaResponseDto.from(await this.service.restore(orgId, departamentoId, id, requireActor(actorId)));
   }
 }

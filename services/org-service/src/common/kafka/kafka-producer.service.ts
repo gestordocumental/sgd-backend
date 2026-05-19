@@ -23,12 +23,16 @@ export class KafkaProducerService
   }
 
   async onApplicationBootstrap() {
-    this.producer.connect()
-      .then(() => this.logger.log('Kafka producer connected', 'KafkaProducerService'))
-      .catch((err: unknown) => this.logger.error(
-        `Kafka producer failed to connect (will retry on next emit): ${err instanceof Error ? err.message : String(err)}`,
+    try {
+      await this.producer.connect();
+      this.logger.log('Kafka producer connected', 'KafkaProducerService');
+    } catch (err: unknown) {
+      this.logger.error(
+        `Kafka producer failed to connect: ${err instanceof Error ? err.message : String(err)}`,
         'KafkaProducerService',
-      ));
+      );
+      throw err;
+    }
   }
 
   async onApplicationShutdown() {

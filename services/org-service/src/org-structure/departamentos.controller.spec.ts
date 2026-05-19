@@ -48,9 +48,9 @@ describe('DepartamentosController', () => {
     const departamento = makeDepartamento();
     service.create.mockResolvedValue(departamento);
 
-    const result = await controller.create(departamento.orgId, { name: departamento.name });
+    const result = await controller.create('actor-1', departamento.orgId, { name: departamento.name });
 
-    expect(service.create).toHaveBeenCalledWith(departamento.orgId, { name: departamento.name });
+    expect(service.create).toHaveBeenCalledWith(departamento.orgId, { name: departamento.name }, 'actor-1');
     expect(result).toMatchObject({ id: departamento.id, orgId: departamento.orgId, name: departamento.name });
   });
 
@@ -78,27 +78,27 @@ describe('DepartamentosController', () => {
     const departamento = makeDepartamento({ name: 'Tesoreria' });
     service.update.mockResolvedValue(departamento);
 
-    const result = await controller.update(departamento.orgId, departamento.id, { name: 'Tesoreria' });
+    const result = await controller.update('actor-1', departamento.orgId, departamento.id, { name: 'Tesoreria' });
 
-    expect(service.update).toHaveBeenCalledWith(departamento.orgId, departamento.id, { name: 'Tesoreria' });
+    expect(service.update).toHaveBeenCalledWith(departamento.orgId, departamento.id, { name: 'Tesoreria' }, 'actor-1');
     expect(result).toMatchObject({ name: 'Tesoreria' });
   });
 
   it('delegates remove to the service', async () => {
     service.remove.mockResolvedValue(undefined);
 
-    await controller.remove('org-1', 'dep-1');
+    await controller.remove('actor-1', 'org-1', 'dep-1');
 
-    expect(service.remove).toHaveBeenCalledWith('org-1', 'dep-1');
+    expect(service.remove).toHaveBeenCalledWith('org-1', 'dep-1', 'actor-1');
   });
 
   it('restores and maps a departamento', async () => {
     const departamento = makeDepartamento();
     service.restore.mockResolvedValue(departamento);
 
-    const result = await controller.restore(departamento.orgId, departamento.id);
+    const result = await controller.restore('actor-1', departamento.orgId, departamento.id);
 
-    expect(service.restore).toHaveBeenCalledWith(departamento.orgId, departamento.id);
+    expect(service.restore).toHaveBeenCalledWith(departamento.orgId, departamento.id, 'actor-1');
     expect(result).toMatchObject({ id: departamento.id });
   });
 });
