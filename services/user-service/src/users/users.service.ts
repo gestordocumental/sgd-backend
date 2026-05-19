@@ -21,6 +21,8 @@ import { AuthClientService } from "../auth-client/auth-client.service";
 import { UserOrgRole } from "../roles/entities/user-org-role.entity";
 import { Role, SystemRoleName, RoleScope } from "../roles/entities/role.entity";
 import { KafkaProducerService } from "../common/kafka/kafka-producer.service";
+import { TOPICS } from "../common/kafka/kafka.constants";
+import { getClientIp } from "../common/correlation/correlation.context";
 
 const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
 
@@ -39,9 +41,39 @@ export class UsersService {
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
+  private static userDisplayName(user: { firstName?: string | null; lastName?: string | null; email: string }): string {
+    const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+    return name || user.email;
+  }
+
+  private emitAuditLog(params: {
+    actorId?: string;
+    orgId?: string;
+    action: string;
+    resourceId: string;
+    resourceName?: string;
+    metadata?: Record<string, unknown>;
+  }): void {
+    if (!params.actorId) return;
+    this.kafkaProducer.emitSafe(TOPICS.AUDIT_LOG, {
+      service:      'user-service',
+      actorId:      params.actorId,
+      orgId:        params.orgId ?? null,
+      action:       params.action,
+      resourceType: 'user',
+      resourceId:   params.resourceId,
+      resourceName: params.resourceName ?? null,
+      ip:           getClientIp(),
+      metadata:     params.metadata,
+      timestamp:    new Date().toISOString(),
+    });
+  }
+
   async create(
     dto: CreateUserDto,
-  ): Promise<{ user: User; invitationToken: string }> {
+    actorId?: string,
+    orgId?: string,
+  ): Promise<{ user: User; invitationToken: string; invitationResent?: boolean }> {
     const existing = await this.usersRepository.findOne({
       where: { email: dto.email },
       withDeleted: true,
@@ -57,8 +89,13 @@ export class UsersService {
       });
     }
 
-    // Active user already exists — caller should assign them to the org via user_org_roles
     if (existing) {
+      // PENDING user — token may have expired. Resend invitation instead of failing.
+      if (existing.registrationStatus === RegistrationStatus.PENDING_CREDENTIALS) {
+        const { user, invitationToken } = await this.generateAndEmitInvitation(existing);
+        return { user, invitationToken, invitationResent: true };
+      }
+      // Active user already exists — caller should assign them to the org via user_org_roles
       throw new ConflictException({
         message: "User with this email already exists",
         userId: existing.id,
@@ -67,6 +104,15 @@ export class UsersService {
 
     const user = this.usersRepository.create(dto);
     await this.usersRepository.save(user);
+
+    this.emitAuditLog({
+      actorId:      actorId,
+      orgId:        orgId ?? dto.orgId,
+      action:       'USER_CREATED',
+      resourceId:   user.id,
+      resourceName: UsersService.userDisplayName(user),
+      metadata:     { isSuperAdmin: user.isSuperAdmin },
+    });
 
     // Assign role in the org if orgId was provided
     if (dto.orgId) {
@@ -100,20 +146,37 @@ export class UsersService {
       }
     }
 
-    // Generate a cryptographically secure one-time invitation token
-    const token = randomBytes(32).toString("hex");
-    await this.redis.setex(
-      `invitation:${token}`,
-      INVITATION_TTL_SECONDS,
-      user.id,
-    );
+    return this.generateAndEmitInvitation(user);
+  }
 
-    // Emit Kafka event — failure must not break the main flow
+  /**
+   * Resends the invitation email for a user that has not yet completed registration.
+   * Generates a new token (the previous one expires naturally in Redis).
+   * Throws ConflictException if the user is already ACTIVE.
+   */
+  async resendInvitation(userId: string): Promise<{ user: User; invitationToken: string }> {
+    const user = await this.findOne(userId);
+
+    if (user.registrationStatus !== RegistrationStatus.PENDING_CREDENTIALS) {
+      throw new ConflictException("User has already completed registration");
+    }
+
+    return this.generateAndEmitInvitation(user);
+  }
+
+  /**
+   * Generates a one-time invitation token, stores it in Redis and emits the Kafka event.
+   * Shared between create() and resendInvitation().
+   */
+  private async generateAndEmitInvitation(
+    user: User,
+  ): Promise<{ user: User; invitationToken: string }> {
+    const token = randomBytes(32).toString("hex");
+    await this.redis.setex(`invitation:${token}`, INVITATION_TTL_SECONDS, user.id);
+
     try {
-      const expiresAt = new Date(
-        Date.now() + INVITATION_TTL_SECONDS * 1000,
-      ).toISOString();
-      await this.kafkaProducer.emit("user.invited", {
+      const expiresAt = new Date(Date.now() + INVITATION_TTL_SECONDS * 1000).toISOString();
+      await this.kafkaProducer.emit(TOPICS.USER_INVITED, {
         userId: user.id,
         email: user.email,
         invitationToken: token,
@@ -146,17 +209,44 @@ export class UsersService {
     return user;
   }
 
-  async update(id: string, dto: UpdateUserDto): Promise<User> {
+  async update(id: string, dto: UpdateUserDto, actorId?: string, orgId?: string): Promise<User> {
     const user = await this.findOne(id);
+
+    const before: Record<string, unknown> = {}
+    for (const key of Object.keys(dto)) before[key] = (user as unknown as Record<string, unknown>)[key]
+
     Object.assign(user, dto);
+    const saved = await this.usersRepository.save(user);
+
+    if (actorId) {
+      const changes: Record<string, { from: unknown; to: unknown }> = {}
+      for (const key of Object.keys(dto)) {
+        const to = (dto as Record<string, unknown>)[key]
+        if (before[key] !== to) changes[key] = { from: before[key], to }
+      }
+      this.emitAuditLog({
+        actorId,
+        orgId,
+        action:       'USER_UPDATED',
+        resourceId:   id,
+        resourceName: UsersService.userDisplayName(saved),
+        metadata:     { changes },
+      });
+    }
+    return saved;
+  }
+
+  async uploadAvatar(userId: string, filename: string): Promise<User> {
+    const user = await this.findOne(userId);
+    user.avatarUrl = `/uploads/avatars/${filename}`;
     return this.usersRepository.save(user);
   }
 
-  async remove(id: string, callerOrgId?: string): Promise<void> {
+  async remove(id: string, callerOrgId?: string, actorId?: string): Promise<void> {
     if (callerOrgId) {
       // Org-scoped delete: only remove the user's membership from the caller's org.
       // The user account and credentials remain intact so they can still access other orgs.
-      return this.removeFromOrg(id, callerOrgId);
+      return this.removeFromOrg(id, callerOrgId, actorId);
     }
     // Global delete (super admin, no companyId): soft-delete the account and disable credentials.
     const user = await this.findOne(id);
@@ -164,14 +254,24 @@ export class UsersService {
     // Disable credentials so the soft-deleted user cannot log in.
     // If auth-service fails the user record stays soft-deleted — the admin can retry.
     await this.authClientService.disableCredentials(user.id);
+    if (actorId) {
+      this.emitAuditLog({
+        actorId,
+        action:       'USER_DELETED',
+        resourceId:   id,
+        resourceName: UsersService.userDisplayName(user),
+      });
+    }
   }
 
-  async restore(id: string): Promise<User> {
+  async restore(id: string, actorId?: string): Promise<User> {
     await this.usersRepository.restore(id);
     // Re-enable credentials so the restored user can log in again.
     // If auth-service fails the user record stays restored — the admin can retry.
     await this.authClientService.enableCredentials(id);
-    return this.findOne(id);
+    const restored = await this.findOne(id);
+    this.emitAuditLog({ actorId, action: 'USER_RESTORED', resourceId: id, resourceName: UsersService.userDisplayName(restored) });
+    return restored;
   }
 
   /**
@@ -217,10 +317,18 @@ export class UsersService {
     return { ok: true };
   }
 
-  async setSuperAdmin(id: string, enabled: boolean): Promise<User> {
+  async setSuperAdmin(id: string, enabled: boolean, actorId?: string): Promise<User> {
     const user = await this.findOne(id);
     user.isSuperAdmin = enabled;
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+    this.emitAuditLog({
+      actorId,
+      action:       'USER_SUPER_ADMIN_CHANGED',
+      resourceId:   id,
+      resourceName: UsersService.userDisplayName(saved),
+      metadata:     { enabled },
+    });
+    return saved;
   }
 
   async assignOrg(
@@ -228,7 +336,7 @@ export class UsersService {
     dto: AssignOrgDto,
     assignedBy: string,
   ): Promise<UserOrgRole> {
-    await this.findOne(userId);
+    const targetUser = await this.findOne(userId);
     const roleId = dto.roleId ?? null;
 
     // If the user already has a membership record for this org, just update the role
@@ -244,6 +352,14 @@ export class UsersService {
         roleId,
         assignedBy,
       });
+      this.emitAuditLog({
+        actorId:      assignedBy,
+        orgId:        dto.orgId,
+        action:       'USER_ORG_ROLE_UPDATED',
+        resourceId:   userId,
+        resourceName: UsersService.userDisplayName(targetUser),
+        metadata:     { orgId: dto.orgId, roleId },
+      });
       return this.userOrgRoleRepository.findOne({
         where: { id: existing.id },
         relations: ['role'],
@@ -256,7 +372,16 @@ export class UsersService {
       roleId,
       assignedBy,
     });
-    return this.userOrgRoleRepository.save(record);
+    const saved = await this.userOrgRoleRepository.save(record);
+    this.emitAuditLog({
+      actorId:      assignedBy,
+      orgId:        dto.orgId,
+      action:       'USER_ORG_ASSIGNED',
+      resourceId:   userId,
+      resourceName: UsersService.userDisplayName(targetUser),
+      metadata:     { orgId: dto.orgId, roleId },
+    });
+    return saved;
   }
 
   async findByOrg(
@@ -306,12 +431,22 @@ export class UsersService {
     });
   }
 
-  async removeFromOrg(userId: string, orgId: string): Promise<void> {
-    await this.findOne(userId);
+  async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
+    const targetUser = await this.findOne(userId);
     await this.userOrgRoleRepository.query(
       `UPDATE user_org_roles SET role_id = NULL, assigned_by = NULL WHERE user_id = $1 AND org_id = $2`,
       [userId, orgId],
     );
+    if (actorId) {
+      this.emitAuditLog({
+        actorId,
+        orgId,
+        action:       'USER_REMOVED_FROM_ORG',
+        resourceId:   userId,
+        resourceName: UsersService.userDisplayName(targetUser),
+        metadata:     { orgId },
+      });
+    }
   }
 
   /**
@@ -369,5 +504,68 @@ export class UsersService {
     const completedUser = await this.findOne(user.id);
 
     return UserResponseDto.from(completedUser);
+  }
+
+  /**
+   * Returns active users in a given org that match the provided org-structure position.
+   * Called internally by workflow-service when a workflow is approved, to determine
+   * which users should receive the finalized document.
+   *
+   * Filters are applied with AND logic. Passing areaId = null explicitly matches
+   * users whose area_id IS NULL (dept-level position).
+   */
+  async findByPosition(
+    orgId: string,
+    filters: { cargoId?: string; areaId?: string | null; departamentoId?: string },
+  ): Promise<{ id: string; firstName: string | null; lastName: string | null; email: string }[]> {
+    const qb = this.usersRepository
+      .createQueryBuilder('u')
+      .innerJoin(
+        'user_org_roles',
+        'uor',
+        'uor.user_id = u.id AND uor.org_id = :orgId AND uor.role_id IS NOT NULL',
+        { orgId },
+      )
+      .where('u.is_active = true')
+      .andWhere('u.deleted_at IS NULL');
+
+    if (filters.departamentoId) {
+      qb.andWhere('u.departamento_id = :departamentoId', { departamentoId: filters.departamentoId });
+    }
+    if (filters.cargoId) {
+      qb.andWhere('u.cargo_id = :cargoId', { cargoId: filters.cargoId });
+    }
+    if ('areaId' in filters) {
+      if (filters.areaId === null || filters.areaId === undefined) {
+        qb.andWhere('u.area_id IS NULL');
+      } else {
+        qb.andWhere('u.area_id = :areaId', { areaId: filters.areaId });
+      }
+    }
+
+    const users = await qb.getMany();
+    return users.map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email }));
+  }
+
+  async getCountsByOrg(): Promise<{ orgId: string; total: number; active: number; inactive: number }[]> {
+    const rows = await this.userOrgRoleRepository
+      .createQueryBuilder('uor')
+      .innerJoin('uor.user', 'u')
+      .select('uor.org_id', 'orgId')
+      .addSelect('COUNT(DISTINCT u.id)', 'total')
+      .addSelect(
+        `COUNT(DISTINCT CASE WHEN u.is_active = true AND u.deleted_at IS NULL THEN u.id END)`,
+        'active',
+      )
+      .where('u.is_super_admin = false')
+      .groupBy('uor.org_id')
+      .getRawMany<{ orgId: string; total: string; active: string }>()
+
+    return rows.map((r) => ({
+      orgId:    r.orgId,
+      total:    parseInt(r.total,  10),
+      active:   parseInt(r.active, 10),
+      inactive: parseInt(r.total,  10) - parseInt(r.active, 10),
+    }))
   }
 }

@@ -64,6 +64,9 @@ export class User {
   })
   registrationStatus!: RegistrationStatus;
 
+  @Column({ name: 'avatar_url', type: 'varchar', length: 500, nullable: true })
+  avatarUrl!: string | null;
+
   // Platform-level flag — bypasses all org/role checks
   @Column({ name: 'is_super_admin', type: 'boolean', default: false })
   isSuperAdmin!: boolean;

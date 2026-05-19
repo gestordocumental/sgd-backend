@@ -46,7 +46,7 @@ export class NotificationResponseDto {
 
 export class PaginatedNotificationsDto {
   @ApiProperty({ type: [NotificationResponseDto] })
-  items!: NotificationResponseDto[];
+  data!: NotificationResponseDto[];
 
   @ApiProperty()
   total!: number;

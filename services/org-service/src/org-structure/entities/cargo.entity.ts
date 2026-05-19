@@ -12,7 +12,6 @@ import {
 import { Area } from './area.entity';
 
 @Entity('cargos')
-@Index(['areaId', 'name'], { unique: true, where: '"deleted_at" IS NULL' })
 export class Cargo {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -22,9 +21,13 @@ export class Cargo {
   @Column({ name: 'org_id', type: 'uuid' })
   orgId!: string;
 
+  /**
+   * Null when the cargo belongs directly to a departamento (no area).
+   * Unique indexes are managed in migration MakeCargoAreaNullable1775400000000.
+   */
   @Index()
-  @Column({ name: 'area_id', type: 'uuid' })
-  areaId!: string;
+  @Column({ name: 'area_id', type: 'uuid', nullable: true })
+  areaId!: string | null;
 
   /**
    * Denormalized for easy filtering without joins.
@@ -40,9 +43,9 @@ export class Cargo {
   @Column({ type: 'text', nullable: true })
   description!: string | null;
 
-  @ManyToOne(() => Area, (a) => a.cargos, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => Area, (a) => a.cargos, { onDelete: 'RESTRICT', nullable: true, eager: false })
   @JoinColumn({ name: 'area_id' })
-  area!: Area;
+  area!: Area | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

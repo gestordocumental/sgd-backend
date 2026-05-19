@@ -6,6 +6,7 @@ import { TimelineEventType } from './entities/enums';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 import { TOPICS } from '../common/kafka/kafka.constants';
 import { AppLogger } from '../common/logger/app-logger.service';
+import { getClientIp } from '../common/correlation/correlation.context';
 
 interface RecordEventParams {
   workflowId: string;
@@ -14,6 +15,7 @@ interface RecordEventParams {
   actorId: string;
   targetUserId?: string | null;
   description: string;
+  resourceName?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -65,14 +67,17 @@ export class WorkflowTimelineService {
 
   private async emitAuditLog(params: RecordEventParams): Promise<void> {
     this.kafkaProducer.emitSafe(TOPICS.AUDIT_LOG, {
-      service:      'workflow-service',
-      actorId:      params.actorId,
-      orgId:        params.orgId,
-      action:       params.eventType,
-      resourceType: 'workflow',
-      resourceId:   params.workflowId,
-      metadata:     params.metadata ?? null,
-      timestamp:    new Date().toISOString(),
+      service:       'workflow-service',
+      actorId:       params.actorId,
+      orgId:         params.orgId,
+      action:        params.eventType,
+      resourceType:  'workflow',
+      resourceId:    params.workflowId,
+      resourceName:  params.resourceName ?? null,
+      correlationId: params.workflowId,   // ID de negocio: agrupa toda la trazabilidad del workflow
+      ip:            getClientIp(),
+      metadata:      params.metadata ?? null,
+      timestamp:     new Date().toISOString(),
     });
   }
 }

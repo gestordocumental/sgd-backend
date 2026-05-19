@@ -3,7 +3,9 @@
     "allow": [
       "Read(//c/Users/juanc/proyectos/GD_helisa_ms/proyectos/document-management-system-web/sgd-frontend/**)",
       "Bash(npx tsc:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(xargs grep:*)",
+      "Bash(find C:/Users/juanc/proyectos/GD_helisa_ms/proyectos/document-management-system-web/sgd-frontend/src -name admin.tsx -o -name dashboard*)"
     ]
   }
 }

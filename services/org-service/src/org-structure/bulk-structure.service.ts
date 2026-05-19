@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { IsNull, Repository } from "typeorm";
 import * as ExcelJS from "exceljs";
 import { Departamento } from "./entities/departamento.entity";
 import { Area } from "./entities/area.entity";
@@ -94,15 +94,10 @@ export class BulkStructureService {
             else result.positionsExisting++;
           }
         } else if (position) {
-          // position without area → invalid
-          result.failed++;
-          result.errors.push({
-            row: rowNum,
-            department,
-            area,
-            position,
-            reason: "El cargo requiere que se especifique un área",
-          });
+          // position without area → department-level cargo
+          const posResult = await this.upsertDeptPosition(orgId, dept.id, position, descriptionPosition);
+          if (posResult.wasCreated) result.positionsCreated++;
+          else result.positionsExisting++;
         }
       } catch (err: unknown) {
         const safeReason =
@@ -169,10 +164,17 @@ export class BulkStructureService {
     }
 
     if (item.position && !item.area) {
-      return {
-        index,
-        reason: `Cargo '${item.position}' requiere un área para poder resolverse.`,
-      };
+      // dept-level cargo (no area)
+      const cargo = await this.cargoRepo.findOne({
+        where: { orgId, departamentoId: dept.id, areaId: IsNull(), name: item.position },
+      });
+      if (!cargo) {
+        return {
+          index,
+          reason: `Cargo '${item.position}' no encontrado a nivel de departamento '${item.department}'. Ejecute primero la carga de estructura organizacional.`,
+        };
+      }
+      return { index, departamentoId: dept.id, areaId: null, cargoId: cargo.id };
     }
 
     let areaId: string | null = null;
@@ -228,7 +230,23 @@ export class BulkStructureService {
     let cargoNombre: string | null = null;
 
     if (dto.cargoId && !dto.areaId) {
-      throw new BadRequestException('cargoId requiere areaId');
+      // dept-level cargo (no area)
+      const cargo = await this.cargoRepo.findOne({
+        where: { orgId: dto.orgId, departamentoId: dept.id, areaId: IsNull(), id: dto.cargoId },
+      });
+      if (!cargo) {
+        throw new BadRequestException(
+          `Cargo '${dto.cargoId}' no encontrado a nivel de departamento '${dept.name}'`,
+        );
+      }
+      return {
+        departamentoId: dept.id,
+        departamentoNombre: dept.name,
+        areaId: null,
+        areaNombre: null,
+        cargoId: cargo.id,
+        cargoNombre: cargo.name,
+      };
     }
 
     if (dto.areaId) {
@@ -326,6 +344,30 @@ export class BulkStructureService {
       this.cargoRepo.create({
         orgId,
         areaId,
+        departamentoId,
+        name: normalizedName,
+        description: description ?? null,
+      }),
+    );
+    return Object.assign(created, { wasCreated: true });
+  }
+
+  private async upsertDeptPosition(
+    orgId: string,
+    departamentoId: string,
+    name: string,
+    description?: string,
+  ): Promise<Cargo & { wasCreated: boolean }> {
+    const normalizedName = name.trim();
+    const existing = await this.cargoRepo.findOne({
+      where: { orgId, departamentoId, areaId: IsNull(), name: normalizedName },
+    });
+    if (existing) return Object.assign(existing, { wasCreated: false });
+
+    const created = await this.cargoRepo.save(
+      this.cargoRepo.create({
+        orgId,
+        areaId: null,
         departamentoId,
         name: normalizedName,
         description: description ?? null,

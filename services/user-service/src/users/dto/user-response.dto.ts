@@ -38,6 +38,9 @@ export class UserResponseDto {
   @ApiProperty()
   isSuperAdmin!: boolean;
 
+  @ApiPropertyOptional({ type: String, nullable: true })
+  avatarUrl!: string | null;
+
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;
 
@@ -58,6 +61,7 @@ export class UserResponseDto {
     dto.registrationStatus = user.registrationStatus;
     dto.isActive = user.isActive;
     dto.isSuperAdmin = user.isSuperAdmin;
+    dto.avatarUrl = user.avatarUrl ?? null;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;
     return dto;

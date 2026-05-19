@@ -5,6 +5,7 @@ import {
   DefaultValuePipe,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -43,6 +44,18 @@ import { CreationSource } from './schemas/typology.schema';
 import { TypologiesService } from './typologies.service';
 import { multerOptions } from '../document-upload/document-upload.constants';
 
+function extractUserId(authHeader: string | undefined): string | undefined {
+  if (!authHeader?.startsWith('Bearer ')) return undefined;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(authHeader.split(' ')[1].split('.')[1], 'base64url').toString('utf8'),
+    );
+    return (payload.sub as string) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 @ApiTags('Typologies')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
@@ -75,6 +88,13 @@ export class TypologiesController {
     return this.extractorClient.previewExtract(file, orgName);
   }
 
+  @ApiOperation({ summary: 'Storage and typology statistics for an organization' })
+  @ApiOkResponse({ schema: { example: { totalTypologies: 10, activeTypologies: 7, uploadedDocuments: 5, storageTotalBytes: 10485760, extractionStatusCounts: {} } } })
+  @Get('stats')
+  getStats(@Param('orgId') orgId: string) {
+    return this.service.getStats(orgId);
+  }
+
   @ApiOperation({ summary: 'Create a typology for an organization' })
   @ApiCreatedResponse({ description: 'Typology created', type: TypologyResponseDto })
   @ApiBadRequestResponse({
@@ -83,6 +103,7 @@ export class TypologiesController {
   })
   @Post()
   async create(
+    @Headers('authorization') auth: string,
     @Param('orgId') orgId: string,
     @Body() dto: CreateTypologyDto,
   ): Promise<TypologyResponseDto> {
@@ -100,7 +121,7 @@ export class TypologiesController {
       areaNombre:         structure.areaNombre,
       cargoId:            structure.cargoId,
       cargoNombre:        structure.cargoNombre,
-    }, CreationSource.MANUAL);
+    }, CreationSource.MANUAL, extractUserId(auth));
 
     return TypologyResponseDto.fromDocument(created);
   }
@@ -147,6 +168,7 @@ export class TypologiesController {
   @ApiOkResponse({ description: 'Typology updated', type: TypologyResponseDto })
   @Patch(':id')
   async update(
+    @Headers('authorization') auth: string,
     @Param('orgId') orgId: string,
     @Param('id') id: string,
     @Body() dto: UpdateTypologyDto,
@@ -161,7 +183,7 @@ export class TypologiesController {
       ? await this.orgClient.resolveStructureById(orgId, dto.departamentoId!, dto.areaId, dto.cargoId)
       : undefined;
 
-    return TypologyResponseDto.fromDocument(await this.service.update(orgId, id, dto, structureNames));
+    return TypologyResponseDto.fromDocument(await this.service.update(orgId, id, dto, structureNames, extractUserId(auth)));
   }
 
   @ApiOperation({ summary: 'Soft delete a typology' })
@@ -170,10 +192,11 @@ export class TypologiesController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
+    @Headers('authorization') auth: string,
     @Param('orgId') orgId: string,
     @Param('id') id: string,
   ): Promise<void> {
-    return this.service.remove(orgId, id);
+    return this.service.remove(orgId, id, extractUserId(auth));
   }
 
   @ApiOperation({ summary: 'Resolve extraction discrepancies or confirm extracted metadata' })
@@ -181,11 +204,12 @@ export class TypologiesController {
   @ApiOkResponse({ description: 'Typology updated after resolution', type: TypologyResponseDto })
   @Patch(':id/resolve-extraction')
   async resolveDiscrepancy(
+    @Headers('authorization') auth: string,
     @Param('orgId') orgId: string,
     @Param('id') id: string,
     @Body() dto: ResolveDiscrepancyDto,
   ): Promise<TypologyResponseDto> {
-    return this.service.resolveDiscrepancy(orgId, id, dto).then(
+    return this.service.resolveDiscrepancy(orgId, id, dto, extractUserId(auth)).then(
       TypologyResponseDto.fromDocument,
     );
   }

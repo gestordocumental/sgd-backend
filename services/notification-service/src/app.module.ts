@@ -31,7 +31,11 @@ import { Notification } from './notifications/entities/notification.entity';
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
-          extra: { parseInt8: true },
+          extra: {
+            parseInt8: true,
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000,
+          },
         };
       },
     }),

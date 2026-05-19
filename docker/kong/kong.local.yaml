@@ -141,6 +141,16 @@ services:
     plugins:
       - name: jwt
 
+  # ── user-service: avatares estáticos (sin JWT) ─────────────────────────
+  - name: user-avatars
+    url: http://host.docker.internal:3001
+    routes:
+      - name: user-avatars-route
+        paths:
+          - /uploads/avatars
+        methods: [GET]
+        strip_path: false
+
   # ── user-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
   - name: user-service-public
     url: http://host.docker.internal:3001
@@ -186,24 +196,33 @@ services:
     plugins:
       - name: jwt
 
-  # ── notification-service (con JWT) — pendiente de implementación ───────
-  # - name: notification-service
-  #   url: http://host.docker.internal:3006
-  #   routes:
-  #     - name: notification-routes
-  #       paths:
-  #         - /api/notifications
-  #       strip_path: false
-  #   plugins:
-  #     - name: jwt
+  # ── notification-service ───────────────────────────────────────────────
+  - name: notification-service
+    url: http://host.docker.internal:3006
+    routes:
+      - name: notification-routes
+        paths:
+          - /api/notifications
+        strip_path: false
+    plugins:
+      - name: jwt
 
-  # ── audit-service (con JWT) — pendiente de implementación ──────────────
-  # - name: audit-service
-  #   url: http://host.docker.internal:3007
-  #   routes:
-  #     - name: audit-routes
-  #       paths:
-  #         - /api/audit
-  #       strip_path: false
-  #   plugins:
-  #     - name: jwt
+  # ── audit-service: Swagger docs (sin JWT) ──────────────────────────────
+  - name: audit-docs
+    url: http://host.docker.internal:3007
+    routes:
+      - name: audit-docs-route
+        paths:
+          - /api/audit/docs
+        strip_path: false
+
+  # ── audit-service (con JWT) ─────────────────────────────────────────────
+  - name: audit-service
+    url: http://host.docker.internal:3007
+    routes:
+      - name: audit-routes
+        paths:
+          - /api/audit
+        strip_path: false
+    plugins:
+      - name: jwt

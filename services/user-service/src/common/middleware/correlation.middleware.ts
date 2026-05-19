@@ -19,10 +19,17 @@ export class CorrelationMiddleware implements NestMiddleware {
         ? incomingCorrelationId
         : randomUUID();
 
+    // Extract real client IP: Kong sets x-forwarded-for, fall back to req.ip
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const rawIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+    const clientIp = rawIp
+      ? rawIp.split(',')[0].trim()
+      : (req.headers['x-real-ip'] as string | undefined) ?? req.ip ?? null;
+
     // Echo the ID back so the caller can trace the request
     res.setHeader(CORRELATION_ID_HEADER, correlationId);
 
     // Run the rest of the request inside the AsyncLocalStorage context
-    correlationStorage.run({ correlationId }, () => next());
+    correlationStorage.run({ correlationId, clientIp: clientIp ?? null }, () => next());
   }
 }

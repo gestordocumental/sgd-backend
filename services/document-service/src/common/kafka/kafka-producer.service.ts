@@ -27,6 +27,16 @@ export class KafkaProducerService implements OnApplicationBootstrap, OnApplicati
     this.logger.log('Kafka producer disconnected', 'KafkaProducerService');
   }
 
+  /** Fire-and-forget: loguea el error pero no lo propaga al caller. */
+  emitSafe(topic: string, payload: unknown): void {
+    this.emit(topic, payload).catch((err: unknown) => {
+      this.logger.error(
+        `Failed to emit Kafka event to topic "${topic}": ${err instanceof Error ? err.message : String(err)}`,
+        'KafkaProducerService',
+      );
+    });
+  }
+
   async emit(topic: string, payload: unknown): Promise<void> {
     const correlationId = getCorrelationId();
     this.logger.http({ type: 'kafka-produce', topic, correlationId, message: `→ [kafka] ${topic}` });

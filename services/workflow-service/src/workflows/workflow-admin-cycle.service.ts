@@ -124,12 +124,13 @@ export class WorkflowAdminCycleService {
 
       await this.timelineService.record({
         workflowId,
-        orgId:       workflow.orgId,
-        eventType:   TimelineEventType.ADMIN_CYCLE_STARTED,
-        actorId:     userId,
+        orgId:        workflow.orgId,
+        eventType:    TimelineEventType.ADMIN_CYCLE_STARTED,
+        actorId:      userId,
         targetUserId: firstStep.userId,
-        description: `Ciclo administrativo #${cycleNumber} iniciado. Primer paso asignado al usuario.`,
-        metadata:    { cycleId: savedCycle.id, cycleNumber, firstUserId: firstStep.userId },
+        resourceName: workflow.title,
+        description:  `Ciclo administrativo #${cycleNumber} iniciado. Primer paso asignado al usuario.`,
+        metadata:     { cycleId: savedCycle.id, cycleNumber, firstUserId: firstStep.userId },
       }, manager);
     });
 
@@ -259,11 +260,12 @@ export class WorkflowAdminCycleService {
 
       await this.timelineService.record({
         workflowId,
-        orgId:       workflow.orgId,
-        eventType:   TimelineEventType.ADMIN_STEP_COMPLETED,
-        actorId:     userId,
+        orgId:        workflow.orgId,
+        eventType:    TimelineEventType.ADMIN_STEP_COMPLETED,
+        actorId:      userId,
         targetUserId: isLast ? cycle.initiatedBy : (nextStep?.userId ?? null),
-        description: isLast
+        resourceName: workflow.title,
+        description:  isLast
           ? `Último paso administrativo completado. Ciclo #${cycle.cycleNumber} finalizado. Workflow devuelto al usuario final.`
           : `Paso administrativo ${step.stepOrder} completado. Siguiente: paso ${nextStep!.stepOrder}.`,
         metadata: {
@@ -279,12 +281,13 @@ export class WorkflowAdminCycleService {
       if (isLast) {
         await this.timelineService.record({
           workflowId,
-          orgId:       workflow.orgId,
-          eventType:   TimelineEventType.ADMIN_CYCLE_COMPLETED,
-          actorId:     userId,
+          orgId:        workflow.orgId,
+          eventType:    TimelineEventType.ADMIN_CYCLE_COMPLETED,
+          actorId:      userId,
           targetUserId: cycle.initiatedBy,
-          description: `Ciclo administrativo #${cycle.cycleNumber} completado. Workflow disponible para el usuario final.`,
-          metadata:    { cycleId, cycleNumber: cycle.cycleNumber },
+          resourceName: workflow.title,
+          description:  `Ciclo administrativo #${cycle.cycleNumber} completado. Workflow disponible para el usuario final.`,
+          metadata:     { cycleId, cycleNumber: cycle.cycleNumber },
         }, manager);
       }
     });
@@ -353,11 +356,12 @@ export class WorkflowAdminCycleService {
 
     await this.timelineService.record({
       workflowId,
-      orgId:       workflow.orgId,
-      eventType:   TimelineEventType.WORKFLOW_APPROVED,
-      actorId:     userId,
-      description: `Ciclo de revisión omitido. Workflow marcado como disponible directamente.`,
-      metadata:    { skippedBy: userId },
+      orgId:        workflow.orgId,
+      eventType:    TimelineEventType.WORKFLOW_APPROVED,
+      actorId:      userId,
+      resourceName: workflow.title,
+      description:  `Ciclo de revisión omitido. Workflow marcado como disponible directamente.`,
+      metadata:     { skippedBy: userId },
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_AVAILABLE_FOR_FINAL_USERS, {
@@ -440,12 +444,13 @@ export class WorkflowAdminCycleService {
 
       await this.timelineService.record({
         workflowId,
-        orgId:       workflow.orgId,
-        eventType:   TimelineEventType.WORKFLOW_CLOSED,
-        actorId:     userId,
+        orgId:        workflow.orgId,
+        eventType:    TimelineEventType.WORKFLOW_CLOSED,
+        actorId:      userId,
         targetUserId: workflow.createdBy,
-        description: `Workflow cerrado definitivamente por usuario final. No se permiten más modificaciones.`,
-        metadata:    { closingNotes: dto.closingNotes ?? null, closedBy: userId },
+        resourceName: workflow.title,
+        description:  `Workflow cerrado definitivamente por usuario final. No se permiten más modificaciones.`,
+        metadata:     { closingNotes: dto.closingNotes ?? null, closedBy: userId },
       }, manager);
     });
 

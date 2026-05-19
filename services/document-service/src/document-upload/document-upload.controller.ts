@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   UploadedFile,
@@ -28,6 +29,18 @@ import { SignedUrlResponseDto } from './dto/signed-url-response.dto';
 import { DocumentUploadService } from './document-upload.service';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
 import { multerOptions } from './document-upload.constants';
+
+function extractUserId(authHeader: string | undefined): string | undefined {
+  if (!authHeader?.startsWith('Bearer ')) return undefined;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(authHeader.split(' ')[1].split('.')[1], 'base64url').toString('utf8'),
+    );
+    return (payload.sub as string) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 @ApiTags('Document Upload')
 @ApiBearerAuth('JWT')
@@ -56,13 +69,14 @@ export class DocumentUploadController {
   @Post('file')
   @UseInterceptors(FileInterceptor('file', multerOptions))
   async upload(
+    @Headers('authorization') auth: string,
     @Param('orgId') orgId: string,
     @Param('id') typologyId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body('orgName') orgName?: string,
   ): Promise<DocumentUploadResponseDto> {
     if (!file) throw new BadRequestException('El archivo es requerido');
-    return this.service.upload(orgId, typologyId, file, orgName);
+    return this.service.upload(orgId, typologyId, file, orgName, extractUserId(auth));
   }
 
   @ApiOperation({ summary: 'Re-queue metadata extraction when previous attempt failed' })
@@ -70,11 +84,12 @@ export class DocumentUploadController {
   @ApiBadRequestResponse({ description: 'No document loaded or extraction not in FAILED state' })
   @Post('retry-extraction')
   retryExtraction(
+    @Headers('authorization') auth: string,
     @Param('orgId') orgId: string,
     @Param('id') typologyId: string,
     @Body('orgName') orgName?: string,
   ): Promise<{ message: string; extractionStatus: string }> {
-    return this.service.retryExtraction(orgId, typologyId, orgName);
+    return this.service.retryExtraction(orgId, typologyId, orgName, extractUserId(auth));
   }
 
   @ApiOperation({ summary: 'Get a temporary signed download URL for the uploaded file' })
@@ -108,6 +123,7 @@ export class DocumentUploadController {
   @Post('new-version')
   @UseInterceptors(FileInterceptor('file', multerOptions))
   async createNewVersion(
+    @Headers('authorization') auth: string,
     @Param('orgId') orgId: string,
     @Param('id') typologyId: string,
     @UploadedFile() file: Express.Multer.File,
@@ -116,6 +132,6 @@ export class DocumentUploadController {
     @Body('orgName') orgName?: string,
   ): Promise<TypologyResponseDto> {
     if (!file) throw new BadRequestException('El archivo es requerido');
-    return this.service.createNewVersion(orgId, typologyId, file, { nombre, version, orgName });
+    return this.service.createNewVersion(orgId, typologyId, file, { nombre, version, orgName, actorId: extractUserId(auth) });
   }
 }

@@ -80,6 +80,12 @@ export class NotificationsConsumer
       eachMessage: async (payload: EachMessagePayload) => {
         await runWithCorrelation(payload.message, async () => {
           await this.handleMessage(payload);
+        }).catch((err: unknown) => {
+          this.logger.error(
+            `[kafka] Unhandled error processing message from topic ${payload.topic}: ${err instanceof Error ? err.message : String(err)}`,
+            err instanceof Error ? err.stack : undefined,
+            'NotificationsConsumer',
+          );
         });
       },
     });

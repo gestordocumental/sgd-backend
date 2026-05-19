@@ -96,7 +96,7 @@ export class NotificationsService {
     });
 
     const result = new PaginatedNotificationsDto();
-    result.items       = items.map(NotificationResponseDto.from);
+    result.data        = items.map(NotificationResponseDto.from);
     result.total       = total;
     result.page        = page;
     result.limit       = limit;

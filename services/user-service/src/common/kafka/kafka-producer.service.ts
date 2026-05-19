@@ -23,8 +23,12 @@ export class KafkaProducerService
   }
 
   async onApplicationBootstrap() {
-    await this.producer.connect();
-    this.logger.log('Kafka producer connected', 'KafkaProducerService');
+    this.producer.connect()
+      .then(() => this.logger.log('Kafka producer connected', 'KafkaProducerService'))
+      .catch((err: unknown) => this.logger.error(
+        `Kafka producer failed to connect (will retry on next emit): ${err instanceof Error ? err.message : String(err)}`,
+        'KafkaProducerService',
+      ));
   }
 
   async onApplicationShutdown() {
@@ -37,6 +41,16 @@ export class KafkaProducerService
    * Automatically injects x-correlation-id from the current AsyncLocalStorage
    * context so consumers can continue the trace.
    */
+  /** Fire-and-forget: loguea el error pero no lo propaga al caller. */
+  emitSafe(topic: string, payload: unknown): void {
+    this.emit(topic, payload).catch((err: unknown) => {
+      this.logger.error(
+        `Failed to emit Kafka event to topic "${topic}": ${err instanceof Error ? err.message : String(err)}`,
+        'KafkaProducerService',
+      );
+    });
+  }
+
   async emit(topic: string, payload: unknown): Promise<void> {
     const correlationId = getCorrelationId();
 

@@ -10,7 +10,7 @@ name: sgd-infra
 services:
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # PostgreSQL — Auth, Org, User, Workflow services
+  # PostgreSQL — Auth, Org, User, Workflow, Notification services
   # ─────────────────────────────────────────────────────────────────────────────
   postgresql:
     image: postgres:15-alpine

@@ -1,0 +1,32 @@
+/**
+ * Forma del mensaje publicado al tópico audit.log por cualquier microservicio.
+ * El workflow-service emite este payload desde WorkflowTimelineService.emitAuditLog().
+ */
+export interface AuditLogEvent {
+  service:        string;
+  actorId:        string;
+  orgId:          string;
+  action:         string;
+  resourceType:   string;
+  resourceId:     string;
+  resourceName?:  string | null;
+  metadata:       Record<string, unknown> | null;
+  timestamp:      string;
+  correlationId?: string | null;
+  ip?:            string | null;
+}
+
+export function isValidAuditLogEvent(raw: unknown): raw is AuditLogEvent {
+  if (!raw || typeof raw !== 'object') return false;
+  const p = raw as Record<string, unknown>;
+  return (
+    typeof p['service']      === 'string' &&
+    typeof p['actorId']      === 'string' &&
+    typeof p['orgId']        === 'string' &&
+    typeof p['action']       === 'string' &&
+    typeof p['resourceType'] === 'string' &&
+    typeof p['resourceId']   === 'string' &&
+    typeof p['timestamp']    === 'string' &&
+    (p['resourceName'] === undefined || p['resourceName'] === null || typeof p['resourceName'] === 'string')
+  );
+}

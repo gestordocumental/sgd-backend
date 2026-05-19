@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Param, Body, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
+  Param, Body, Headers, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { DepartamentosService } from './departamentos.service';
@@ -11,6 +11,18 @@ import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
 import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
+
+function extractUserId(authHeader: string | undefined): string | undefined {
+  if (!authHeader?.startsWith('Bearer ')) return undefined;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(authHeader.split(' ')[1].split('.')[1], 'base64url').toString('utf8'),
+    );
+    return (payload.sub as string) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 @ApiTags('Org Structure — Departamentos')
 @ApiBearerAuth('JWT')
@@ -26,10 +38,11 @@ export class DepartamentosController {
   @Post()
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
+    @Headers('authorization') auth: string,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Body() dto: CreateDepartamentoDto,
   ): Promise<DepartamentoResponseDto> {
-    return DepartamentoResponseDto.from(await this.service.create(orgId, dto));
+    return DepartamentoResponseDto.from(await this.service.create(orgId, dto, extractUserId(auth)));
   }
 
   @ApiOperation({ summary: 'List all departments of an organization' })
@@ -60,11 +73,12 @@ export class DepartamentosController {
   @Patch(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
+    @Headers('authorization') auth: string,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateDepartamentoDto,
   ): Promise<DepartamentoResponseDto> {
-    return DepartamentoResponseDto.from(await this.service.update(orgId, id, dto));
+    return DepartamentoResponseDto.from(await this.service.update(orgId, id, dto, extractUserId(auth)));
   }
 
   @ApiOperation({ summary: 'Soft delete department' })
@@ -74,10 +88,11 @@ export class DepartamentosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
   async remove(
+    @Headers('authorization') auth: string,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
-    return this.service.remove(orgId, id);
+    return this.service.remove(orgId, id, extractUserId(auth));
   }
 
   @ApiOperation({ summary: 'Restore a deleted department' })
@@ -86,9 +101,10 @@ export class DepartamentosController {
   @Post(':id/restore')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(
+    @Headers('authorization') auth: string,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<DepartamentoResponseDto> {
-    return DepartamentoResponseDto.from(await this.service.restore(orgId, id));
+    return DepartamentoResponseDto.from(await this.service.restore(orgId, id, extractUserId(auth)));
   }
 }

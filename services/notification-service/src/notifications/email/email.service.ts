@@ -1,8 +1,9 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
 import { AppLogger } from '../../common/logger/app-logger.service';
 import { NotificationType } from '../entities/notification.entity';
+
+const RESEND_API_URL = 'https://api.resend.com/emails';
 
 const TITLES: Record<NotificationType, string> = {
   WORKFLOW_TASK_ASSIGNED:  'Nueva tarea de aprobación pendiente',
@@ -19,8 +20,8 @@ export function getNotificationTitle(type: NotificationType): string {
 }
 
 @Injectable()
-export class EmailService implements OnModuleInit {
-  private transporter!: nodemailer.Transporter;
+export class EmailService {
+  private readonly apiKey: string | null;
   private readonly from: string;
   private readonly enabled: boolean;
   private readonly frontendUrl: string;
@@ -29,29 +30,14 @@ export class EmailService implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly logger: AppLogger,
   ) {
-    this.from        = config.get<string>('SMTP_FROM') ?? 'SGD Helisa <no-reply@helisa.com>';
-    const host       = config.get<string>('SMTP_HOST');
-    this.enabled     = Boolean(host);
+    this.apiKey      = config.get<string>('RESEND_API_KEY') ?? null;
+    this.from        = config.get<string>('RESEND_FROM') ?? 'SGD Helisa <no-reply@helisa.com>';
+    this.enabled     = Boolean(this.apiKey);
     this.frontendUrl = config.get<string>('FRONTEND_URL') ?? '';
-  }
 
-  onModuleInit() {
     if (!this.enabled) {
-      this.logger.warn('SMTP_HOST not set — email notifications disabled', 'EmailService');
-      return;
+      this.logger.warn('RESEND_API_KEY not set — email notifications disabled', 'EmailService');
     }
-
-    this.transporter = nodemailer.createTransport({
-      host:   this.config.getOrThrow<string>('SMTP_HOST'),
-      port:   Number(this.config.get<string>('SMTP_PORT') ?? 587),
-      secure: this.config.get<string>('SMTP_SECURE') === 'true',
-      auth: {
-        user: this.config.get<string>('SMTP_USER') || undefined,
-        pass: this.config.get<string>('SMTP_PASS') || undefined,
-      },
-    });
-
-    this.logger.log('Email transporter initialized', 'EmailService');
   }
 
   async sendNotification(opts: {
@@ -66,20 +52,11 @@ export class EmailService implements OnModuleInit {
     const subject = getNotificationTitle(opts.type);
     const html    = this.buildHtml(subject, opts.message, opts.workflowTitle);
 
-    try {
-      await this.transporter.sendMail({
-        from:    this.from,
-        to:      opts.to,
-        subject,
-        html,
-      });
+    const error = await this.sendEmail({ to: opts.to, subject, html });
+    if (error) {
+      this.logger.error(`Failed to send email to ${opts.to}: ${error}`, undefined, 'EmailService');
+    } else {
       this.logger.log(`Email sent to ${opts.to} [${opts.type}]`, 'EmailService');
-    } catch (err) {
-      this.logger.error(
-        `Failed to send email to ${opts.to}: ${err instanceof Error ? err.message : String(err)}`,
-        undefined,
-        'EmailService',
-      );
     }
   }
 
@@ -90,7 +67,7 @@ export class EmailService implements OnModuleInit {
   }): Promise<void> {
     if (!this.enabled) {
       this.logger.warn(
-        `SMTP disabled — invitation email not sent to ${opts.to}. Token: ${opts.invitationToken}`,
+        `Resend disabled — invitation email not sent to ${opts.to}. Token: ${opts.invitationToken}`,
         'EmailService',
       );
       return;
@@ -114,15 +91,34 @@ export class EmailService implements OnModuleInit {
     const subject = 'Bienvenido a SGD Helisa — Completa tu registro';
     const html    = this.buildInvitationHtml(registrationUrl, expiresDate);
 
-    try {
-      await this.transporter.sendMail({ from: this.from, to: opts.to, subject, html });
+    const error = await this.sendEmail({ to: opts.to, subject, html });
+    if (error) {
+      this.logger.error(`Failed to send invitation email to ${opts.to}: ${error}`, undefined, 'EmailService');
+    } else {
       this.logger.log(`Invitation email sent to ${opts.to}`, 'EmailService');
+    }
+  }
+
+  private async sendEmail(opts: { to: string; subject: string; html: string }): Promise<string | null> {
+    try {
+      const response = await fetch(RESEND_API_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ from: this.from, to: opts.to, subject: opts.subject, html: opts.html }),
+      });
+
+      const body = await response.json() as { id?: string; message?: string; name?: string };
+
+      if (!response.ok) {
+        return body.message ?? body.name ?? `HTTP ${response.status}`;
+      }
+      return null;
     } catch (err) {
-      this.logger.error(
-        `Failed to send invitation email to ${opts.to}: ${err instanceof Error ? err.message : String(err)}`,
-        undefined,
-        'EmailService',
-      );
+      const cause = err instanceof Error ? ((err as any).cause ?? err) : err;
+      return `${err instanceof Error ? err.message : String(err)} | cause: ${cause instanceof Error ? cause.message : JSON.stringify(cause)}`;
     }
   }
 

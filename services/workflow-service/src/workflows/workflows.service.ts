@@ -129,14 +129,15 @@ export class WorkflowsService {
     });
 
     await this.timelineService.record({
-      workflowId: savedWorkflow.id,
+      workflowId:   savedWorkflow.id,
       orgId,
-      eventType:  TimelineEventType.WORKFLOW_CREATED,
-      actorId:    userId,
-      description: `Workflow "${dto.title}" creado en borrador con ${dto.approvers.length} aprobador(es).`,
+      eventType:    TimelineEventType.WORKFLOW_CREATED,
+      actorId:      userId,
+      resourceName: dto.title,
+      description:  `Workflow "${dto.title}" creado en borrador con ${dto.approvers.length} aprobador(es).`,
       metadata: {
-        typologyId:   dto.typologyId,
-        typologyCode: typologyInfo.codigo,
+        typologyId:     dto.typologyId,
+        typologyCode:   typologyInfo.codigo,
         approversCount: dto.approvers.length,
       },
     });
@@ -260,6 +261,15 @@ export class WorkflowsService {
       this.validateApproverStepOrders(dto.approvers);
     }
 
+    const changes: Record<string, { from: unknown; to: unknown }> = {}
+    if (dto.title !== undefined && dto.title !== workflow.title)
+      changes['title'] = { from: workflow.title, to: dto.title }
+    if (dto.description !== undefined && dto.description !== workflow.description)
+      changes['description'] = { from: workflow.description, to: dto.description ?? null }
+    if (dto.approvers   !== undefined) changes['approvers']   = { from: null, to: null }
+    if (dto.mainDocument !== undefined) changes['mainDocument'] = { from: null, to: null }
+    if (dto.attachments !== undefined) changes['attachments'] = { from: null, to: null }
+
     await this.dataSource.transaction(async (manager) => {
       const updatePayload: Partial<Workflow> = {};
 
@@ -319,6 +329,18 @@ export class WorkflowsService {
         }
       }
     });
+
+    if (Object.keys(changes).length > 0) {
+      await this.timelineService.record({
+        workflowId:   id,
+        orgId:        workflow.orgId,
+        eventType:    TimelineEventType.WORKFLOW_UPDATED,
+        actorId:      userId,
+        resourceName: dto.title ?? workflow.title,
+        description:  `Workflow "${dto.title ?? workflow.title}" actualizado.`,
+        metadata:     { changes },
+      });
+    }
 
     return this.findOneOrFail(id, user);
   }
@@ -391,6 +413,115 @@ export class WorkflowsService {
     if (new Set(orders).size !== orders.length) {
       throw new BadRequestException('Duplicate stepOrder values in approvers');
     }
+  }
+
+  async getStats(orgId: string, userId?: string): Promise<{
+    totalWorkflows: number;
+    statusCounts: Record<string, number>;
+    myPendingTasks: number;
+    weeklyTrend: { week: string; count: number }[];
+    storageTotalBytes: number;
+    totalAttachments: number;
+  }> {
+    const [totalWorkflows, statusRows, myPendingTasks] = await Promise.all([
+      this.workflowRepo.count({ where: { orgId } }),
+      this.workflowRepo
+        .createQueryBuilder('w')
+        .select('w.status', 'status')
+        .addSelect('COUNT(*)', 'count')
+        .where('w.orgId = :orgId', { orgId })
+        .groupBy('w.status')
+        .getRawMany<{ status: string; count: string }>(),
+      userId
+        ? this.workflowRepo.count({
+            where: [
+              { orgId, currentAssignedUserId: userId, status: WorkflowStatus.PENDING_APPROVAL },
+              { orgId, currentAssignedUserId: userId, status: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS },
+            ],
+          })
+        : Promise.resolve(0),
+    ]);
+
+    const statusCounts: Record<string, number> = {};
+    for (const row of statusRows) {
+      statusCounts[row.status] = parseInt(row.count, 10);
+    }
+
+    // 8 weeks trend (week start date label MM/DD)
+    const weeks: { week: string; count: number }[] = [];
+    const now = new Date();
+    for (let i = 7; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 7);
+      const weekStart = new Date(d);
+      weekStart.setDate(d.getDate() - d.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 7);
+      const count = await this.workflowRepo
+        .createQueryBuilder('w')
+        .where('w.orgId = :orgId', { orgId })
+        .andWhere('w.createdAt >= :start', { start: weekStart })
+        .andWhere('w.createdAt < :end', { end: weekEnd })
+        .getCount();
+      const mm = String(weekStart.getMonth() + 1).padStart(2, '0');
+      const dd = String(weekStart.getDate()).padStart(2, '0');
+      weeks.push({ week: `${mm}/${dd}`, count });
+    }
+
+    // Storage: workflow_attachments + workflow_admin_attachments joined via org
+    const storageRow = await this.dataSource.query<{ total_bytes: string; total_files: string }[]>(`
+      SELECT
+        COALESCE(SUM(bytes), 0)::text AS total_bytes,
+        COUNT(*)::text                AS total_files
+      FROM (
+        SELECT wa.file_size_bytes AS bytes
+        FROM   workflow_attachments wa
+        JOIN   workflows w ON w.id = wa.workflow_id
+        WHERE  w.org_id = $1 AND wa.file_size_bytes IS NOT NULL
+        UNION ALL
+        SELECT waa.file_size_bytes AS bytes
+        FROM   workflow_admin_attachments waa
+        JOIN   workflow_admin_steps was ON was.id = waa.step_id
+        JOIN   workflow_admin_cycles wac ON wac.id = was.cycle_id
+        JOIN   workflows w ON w.id = wac.workflow_id
+        WHERE  w.org_id = $1 AND waa.file_size_bytes IS NOT NULL
+      ) sub
+    `, [orgId]);
+
+    const storageTotalBytes = parseInt(storageRow[0]?.total_bytes ?? '0', 10);
+    const totalAttachments  = parseInt(storageRow[0]?.total_files ?? '0', 10);
+
+    return { totalWorkflows, statusCounts, myPendingTasks, weeklyTrend: weeks, storageTotalBytes, totalAttachments };
+  }
+
+  async getStoragePerOrg(): Promise<{ orgId: string; storageTotalBytes: number; totalAttachments: number }[]> {
+    const rows = await this.dataSource.query<{ org_id: string; total_bytes: string; total_files: string }[]>(`
+      SELECT
+        w.org_id,
+        COALESCE(SUM(bytes), 0)::text AS total_bytes,
+        COUNT(*)::text                AS total_files
+      FROM (
+        SELECT wa.workflow_id, wa.file_size_bytes AS bytes
+        FROM   workflow_attachments wa
+        WHERE  wa.file_size_bytes IS NOT NULL
+        UNION ALL
+        SELECT wac.workflow_id, waa.file_size_bytes AS bytes
+        FROM   workflow_admin_attachments waa
+        JOIN   workflow_admin_steps was ON was.id = waa.step_id
+        JOIN   workflow_admin_cycles wac ON wac.id = was.cycle_id
+        WHERE  waa.file_size_bytes IS NOT NULL
+      ) sub
+      JOIN workflows w ON w.id = sub.workflow_id
+      GROUP BY w.org_id
+      ORDER BY total_bytes DESC
+    `);
+
+    return rows.map((r) => ({
+      orgId:            r.org_id,
+      storageTotalBytes: parseInt(r.total_bytes, 10),
+      totalAttachments:  parseInt(r.total_files, 10),
+    }));
   }
 
   private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {

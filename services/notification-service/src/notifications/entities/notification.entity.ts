@@ -35,7 +35,7 @@ export class Notification {
   @Column({ name: 'workflow_id', nullable: true, type: 'uuid' })
   workflowId!: string | null;
 
-  @Column({ name: 'workflow_title', nullable: true, length: 500 })
+  @Column({ name: 'workflow_title', type: 'varchar', nullable: true, length: 500 })
   workflowTitle!: string | null;
 
   @Column({ default: false })

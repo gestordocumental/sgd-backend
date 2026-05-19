@@ -28,7 +28,6 @@ import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { NotifyNoFinalUsersDto } from './dto/notify-no-final-users.dto';
 import { ApproveWorkflowDto } from './dto/approve-workflow.dto';
 import { RejectWorkflowDto } from './dto/reject-workflow.dto';
-import { ResubmitWorkflowDto } from './dto/resubmit-workflow.dto';
 import { CreateAdminCycleDto } from './dto/create-admin-cycle.dto';
 import { CompleteAdminStepDto } from './dto/complete-admin-step.dto';
 import { CloseWorkflowDto } from './dto/close-workflow.dto';
@@ -40,7 +39,7 @@ import {
   AdminCycleResponseDto,
 } from './dto/workflow-response.dto';
 
-import { OrgMember } from '../common/decorators/auth.decorator';
+import { OrgMember, SuperAdminOnly } from '../common/decorators/auth.decorator';
 import { JwtPayloadParam, JwtPayload } from '../common/decorators/jwt-payload.decorator';
 
 /**
@@ -59,6 +58,20 @@ export class WorkflowsController {
   ) {}
 
   // ── Rutas estáticas PRIMERO ───────────────────────────────────────────────────
+
+  @Get('stats')
+  @OrgMember()
+  @ApiOperation({ summary: 'Estadísticas de workflows por organización' })
+  getStats(@JwtPayloadParam() user: JwtPayload) {
+    return this.workflowsService.getStats(user.companyId!, user.sub);
+  }
+
+  @Get('admin/storage-per-org')
+  @SuperAdminOnly()
+  @ApiOperation({ summary: 'Storage de adjuntos de workflows agrupado por organización — solo super admin' })
+  getStoragePerOrg() {
+    return this.workflowsService.getStoragePerOrg();
+  }
 
   @Get('my-tasks')
   @OrgMember()
@@ -190,20 +203,6 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
     await this.approvalService.reject(id, user.sub, dto);
-    return this.workflowsService.findOne(id, user);
-  }
-
-  @Post(':id/resubmit')
-  @OrgMember()
-  @ApiOperation({ summary: 'Reenviar al aprobador tras corregir (creador)' })
-  @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, type: WorkflowResponseDto })
-  async resubmit(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ResubmitWorkflowDto,
-    @JwtPayloadParam() user: JwtPayload,
-  ): Promise<WorkflowResponseDto> {
-    await this.approvalService.resubmit(id, user.sub, dto);
     return this.workflowsService.findOne(id, user);
   }
 

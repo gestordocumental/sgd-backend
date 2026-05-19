@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
+import { InternalUsersController } from './internal-users.controller';
 import { AuthClientModule } from '../auth-client/auth-client.module';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role } from '../roles/entities/role.entity';
@@ -16,7 +17,7 @@ import { SuperAdminSeeder } from './super-admin.seeder';
     AuthClientModule,
     KafkaModule,
   ],
-  controllers: [UsersController],
+  controllers: [UsersController, InternalUsersController],
   providers: [UsersService, PermissionsGuard, SuperAdminSeeder],
   exports: [UsersService],
 })

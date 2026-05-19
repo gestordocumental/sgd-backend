@@ -1,4 +1,15 @@
 import 'reflect-metadata';
+
+// Cargar .env antes del check — ConfigModule lo carga después pero aquí aún no está disponible
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('dotenv').config();
+
+// Deshabilita validación de certificados TLS si hay un proxy SSL corporativo local.
+// Solo activar en máquinas de desarrollo con proxy — NUNCA en Railway ni producción.
+if (process.env.DISABLE_TLS_VERIFY === 'true') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';

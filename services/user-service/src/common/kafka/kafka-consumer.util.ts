@@ -27,7 +27,7 @@ export function runWithCorrelation(
         : randomUUID(); // fallback: event arrived without a correlationId
 
   return new Promise((resolve, reject) => {
-    correlationStorage.run({ correlationId }, async () => {
+    correlationStorage.run({ correlationId, clientIp: null }, async () => {
       try {
         await fn();
         resolve();
