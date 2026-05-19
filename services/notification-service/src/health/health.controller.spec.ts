@@ -31,11 +31,11 @@ describe('HealthController', () => {
   it('ready() calls health.check with db.pingCheck', async () => {
     const healthResult = { status: 'ok', info: { postgresql: { status: 'up' } } };
     health.check.mockResolvedValue(healthResult as any);
-    db.pingCheck.mockReturnValue({ postgresql: { status: 'up' } } as any);
+    db.pingCheck.mockResolvedValue({ postgresql: { status: 'up' } } as any);
     await ctrl.ready();
     expect(health.check).toHaveBeenCalledWith([expect.any(Function)]);
     const checkFn = health.check.mock.calls[0][0][0];
-    checkFn();
+    await checkFn();
     expect(db.pingCheck).toHaveBeenCalledWith('postgresql');
   });
 });

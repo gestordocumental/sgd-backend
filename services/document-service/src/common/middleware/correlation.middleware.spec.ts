@@ -91,7 +91,7 @@ describe('CorrelationMiddleware', () => {
     const { req, res } = makeReqRes({ [CORRELATION_ID_HEADER]: 'test-cid' });
     const next = jest.fn();
     const runSpy = jest.spyOn(correlationStorage, 'run').mockImplementation((store, cb) => {
-      expect(store).toEqual(expect.objectContaining({ correlationId: 'test-cid' }));
+      expect(store).toEqual(expect.objectContaining({ correlationId: 'test-cid', clientIp: null }));
       cb();
     });
 

@@ -43,6 +43,7 @@ describe('CorrelationMiddleware', () => {
     const res = makeRes();
     middleware.use(req, res as unknown as Response, next);
     expect(res._headers[CORRELATION_ID_HEADER]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(next).toHaveBeenCalled();
   });
 
   it('uses the first element when header is an array', () => {
@@ -50,6 +51,7 @@ describe('CorrelationMiddleware', () => {
     const res = makeRes();
     middleware.use(req, res as unknown as Response, next);
     expect(res.setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'first-id');
+    expect(next).toHaveBeenCalled();
   });
 
   it('generates a UUID when header is an empty string', () => {
@@ -57,5 +59,6 @@ describe('CorrelationMiddleware', () => {
     const res = makeRes();
     middleware.use(req, res as unknown as Response, next);
     expect(res._headers[CORRELATION_ID_HEADER]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(next).toHaveBeenCalled();
   });
 });

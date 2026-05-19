@@ -1,8 +1,5 @@
 import { ExecutionContext } from '@nestjs/common';
-
-// Import the factory function indirectly by testing through a manual call
-// since createParamDecorator wraps it.
-// We test the underlying factory directly by re-extracting it.
+import { currentUserFactory } from './current-user.decorator';
 
 function makeCtx(user?: Record<string, unknown>): ExecutionContext {
   return {
@@ -12,14 +9,8 @@ function makeCtx(user?: Record<string, unknown>): ExecutionContext {
   } as unknown as ExecutionContext;
 }
 
-// The decorator factory is `(_data, ctx) => ctx.switchToHttp().getRequest().user?.sub`
-// We test it by calling `CurrentUser` as a param decorator in isolation.
 describe('CurrentUser decorator factory', () => {
-  // We import the raw factory by accessing the stored callback via a test helper
-  const factory = (_data: unknown, ctx: ExecutionContext): string | undefined => {
-    const request = ctx.switchToHttp().getRequest<{ user?: Record<string, unknown> }>();
-    return request.user?.['sub'] as string | undefined;
-  };
+  const factory = currentUserFactory;
 
   it('returns sub from request.user when present', () => {
     const ctx = makeCtx({ sub: 'user-1', email: 'test@test.com' });

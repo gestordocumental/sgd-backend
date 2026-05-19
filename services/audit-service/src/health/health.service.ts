@@ -17,7 +17,8 @@ export class HealthService {
         this.pingKafka(),
       ]);
       return true;
-    } catch {
+    } catch (err) {
+      console.error('Health check dependency failed:', err);
       return false;
     }
   }
