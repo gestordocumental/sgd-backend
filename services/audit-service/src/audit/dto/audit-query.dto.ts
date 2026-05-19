@@ -107,6 +107,11 @@ export class AuditExportDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  resourceId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   action?: string;
 
   @ApiPropertyOptional()

@@ -1,11 +1,11 @@
 import {
   Controller, Get, Post, Patch, Delete,
   Param, Body, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
-  InternalServerErrorException,
+  UnauthorizedException,
 } from '@nestjs/common';
 
 function requireActor(actorId: string | undefined): string {
-  if (!actorId) throw new InternalServerErrorException('Could not resolve caller identity');
+  if (!actorId) throw new UnauthorizedException('Missing authenticated user');
   return actorId;
 }
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';

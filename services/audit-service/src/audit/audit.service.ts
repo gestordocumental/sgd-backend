@@ -82,11 +82,17 @@ export class AuditService implements OnModuleInit {
     );
   }
 
-  async query(dto: AuditQueryDto): Promise<PaginatedAuditLogs> {
-    const page  = dto.page  ?? 1;
-    const limit = dto.limit ?? 50;
-    const from  = (page - 1) * limit;
-
+  private buildMustClauses(dto: {
+    orgId?: string;
+    actorId?: string;
+    resourceType?: string;
+    resourceId?: string;
+    action?: string;
+    service?: string;
+    correlationId?: string;
+    from?: string;
+    to?: string;
+  }): object[] {
     const must: object[] = [];
 
     if (dto.orgId)         must.push({ term: { orgId:         dto.orgId } });
@@ -103,6 +109,16 @@ export class AuditService implements OnModuleInit {
       if (dto.to)   range['lte'] = dto.to;
       must.push({ range: { timestamp: range } });
     }
+
+    return must;
+  }
+
+  async query(dto: AuditQueryDto): Promise<PaginatedAuditLogs> {
+    const page  = dto.page  ?? 1;
+    const limit = dto.limit ?? 50;
+    const from  = (page - 1) * limit;
+
+    const must = this.buildMustClauses(dto);
 
     const response = await this.es.search<AuditLogDocument>({
       index: INDEX,
@@ -127,21 +143,7 @@ export class AuditService implements OnModuleInit {
 
   async export(dto: AuditExportDto): Promise<AuditLogDocument[]> {
     const limit = dto.limit ?? 1000;
-    const must: object[] = [];
-
-    if (dto.orgId)         must.push({ term: { orgId:         dto.orgId } });
-    if (dto.actorId)       must.push({ term: { actorId:       dto.actorId } });
-    if (dto.resourceType)  must.push({ term: { resourceType:  dto.resourceType } });
-    if (dto.action)        must.push({ term: { action:        dto.action } });
-    if (dto.service)       must.push({ term: { service:       dto.service } });
-    if (dto.correlationId) must.push({ term: { correlationId: dto.correlationId } });
-
-    if (dto.from || dto.to) {
-      const range: Record<string, string> = {};
-      if (dto.from) range['gte'] = dto.from;
-      if (dto.to)   range['lte'] = dto.to;
-      must.push({ range: { timestamp: range } });
-    }
+    const must  = this.buildMustClauses(dto);
 
     const response = await this.es.search<AuditLogDocument>({
       index: INDEX,

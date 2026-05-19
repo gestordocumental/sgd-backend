@@ -1,4 +1,4 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrgsController } from './orgs.controller';
 import { OrgsService } from './orgs.service';
@@ -61,7 +61,7 @@ describe('OrgsController', () => {
 
   it('throws when user id cannot be extracted from the token', async () => {
     await expect(controller.create(undefined, { name: 'Acme' })).rejects.toThrow(
-      InternalServerErrorException,
+      UnauthorizedException,
     );
   });
 

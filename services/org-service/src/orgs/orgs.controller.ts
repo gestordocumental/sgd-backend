@@ -8,7 +8,7 @@ import {
   Body,
   HttpCode,
   HttpStatus,
-  InternalServerErrorException,
+  UnauthorizedException,
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
@@ -41,7 +41,7 @@ export class OrgsController {
     @Body() dto: CreateOrgDto,
   ): Promise<OrgResponseDto> {
     if (!createdBy) {
-      throw new InternalServerErrorException('Could not extract caller identity from token');
+      throw new UnauthorizedException('Could not extract caller identity from token');
     }
     return OrgResponseDto.from(await this.orgsService.create(dto, createdBy));
   }

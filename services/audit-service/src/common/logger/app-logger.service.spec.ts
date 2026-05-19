@@ -59,11 +59,17 @@ describe('AppLogger', () => {
     );
   });
 
-  it('creates a dev-format logger when NODE_ENV is development', () => {
+  describe('development environment', () => {
     const original = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'development';
-    const devLogger = new AppLogger();
-    expect(devLogger).toBeDefined();
-    process.env.NODE_ENV = original;
+
+    afterEach(() => {
+      process.env.NODE_ENV = original;
+    });
+
+    it('creates a dev-format logger when NODE_ENV is development', () => {
+      process.env.NODE_ENV = 'development';
+      const devLogger = new AppLogger();
+      expect(devLogger).toBeDefined();
+    });
   });
 });

@@ -87,7 +87,7 @@ describe('AuditService', () => {
     it('logs error (does not throw) when Elasticsearch is unavailable', async () => {
       es.indices.exists.mockRejectedValue(new Error('ES connection refused'));
 
-      await expect(service.onModuleInit()).resolves.not.toThrow();
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to initialize'),
         expect.any(String),
@@ -277,6 +277,7 @@ describe('AuditService', () => {
         orgId:         'org-1',
         actorId:       'actor-1',
         resourceType:  'workflow',
+        resourceId:    'res-1',
         action:        'CREATED',
         service:       'workflow-service',
         correlationId: 'corr-1',
@@ -289,7 +290,7 @@ describe('AuditService', () => {
 
       const call = es.search.mock.calls[0][0];
       expect(call.size).toBe(500);
-      expect(call.query.bool.must).toHaveLength(7); // 6 terms + 1 range
+      expect(call.query.bool.must).toHaveLength(8); // 7 terms + 1 range
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('e-1');
     });
