@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1051.0",
-    "@nestjs/axios": "^3.0.0",
+    "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.1.21",
@@ -28,7 +28,7 @@
     "@sentry/node": "^10.53.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
-    "file-type": "^16.5.4",
+    "file-type": "^22.0.1",
     "ioredis": "^5.10.0",
     "kafkajs": "^2.2.4",
     "nest-winston": "^1.9.0",

@@ -16,7 +16,7 @@
     "migration:show": "npm run typeorm -- migration:show -d src/data-source.ts"
   },
   "dependencies": {
-    "@nestjs/axios": "^3.0.0",
+    "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.1.21",

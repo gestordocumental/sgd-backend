@@ -11,7 +11,8 @@ function makeHost(opts: { url?: string; method?: string } = {}): {
   res: { status: jest.Mock; json: jest.Mock; _body?: unknown };
 } {
   const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
-  const req = { url: opts.url ?? '/test', method: opts.method ?? 'GET' };
+  const urlVal = opts.url ?? '/test';
+  const req = { url: urlVal, path: urlVal, method: opts.method ?? 'GET' };
   const host = {
     switchToHttp: () => ({
       getRequest:  () => req,

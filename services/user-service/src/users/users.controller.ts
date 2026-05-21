@@ -23,7 +23,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
 import { randomUUID, timingSafeEqual } from "crypto";
-import { fromBuffer as fileTypeFromBuffer } from "file-type";
+// file-type v17+ is ESM-only — use dynamic import at call site
 import { StorageService } from "../common/storage/storage.service";
 import {
   ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiParam,
@@ -173,6 +173,7 @@ export class UsersController {
     if (!file) throw new BadRequestException("No file uploaded");
 
     // Second-pass: validate actual file content via magic bytes.
+    const { fileTypeFromBuffer } = await import('file-type');
     const type = await fileTypeFromBuffer(file.buffer);
     const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     if (!type || !allowedMimes.includes(type.mime)) {

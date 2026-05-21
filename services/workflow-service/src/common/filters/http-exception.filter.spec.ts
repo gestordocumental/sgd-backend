@@ -10,7 +10,7 @@ function makeRes() {
 }
 
 function makeReq(method = 'GET', url = '/api/test'): Request {
-  return { method, url } as unknown as Request;
+  return { method, url, path: url } as unknown as Request;
 }
 
 function makeHost(req: Request, res: Response): ArgumentsHost {

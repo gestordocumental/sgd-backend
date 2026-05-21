@@ -645,7 +645,7 @@ describe('UsersService', () => {
       const user = makeUser();
 
       usersRepo.findOne.mockResolvedValue(user);
-      uorRepo.update.mockResolvedValue(undefined as any);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
 
       await service.removeFromOrg(user.id, 'org-uuid-1');
 

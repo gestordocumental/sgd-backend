@@ -34,9 +34,11 @@ describe('AuthController', () => {
             getOrThrow: jest.fn().mockReturnValue(INTERNAL_TOKEN),
           },
         },
-        { provide: ThrottlerGuard, useValue: { canActivate: jest.fn().mockReturnValue(true) } },
       ],
-    }).compile();
+    })
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: jest.fn().mockReturnValue(true) })
+      .compile();
 
     controller = module.get(AuthController);
   });
