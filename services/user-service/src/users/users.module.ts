@@ -10,12 +10,14 @@ import { Role } from '../roles/entities/role.entity';
 import { KafkaModule } from '../common/kafka/kafka.module';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { SuperAdminSeeder } from './super-admin.seeder';
+import { StorageModule } from '../common/storage/storage.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, UserOrgRole, Role]),
     AuthClientModule,
     KafkaModule,
+    StorageModule,
   ],
   controllers: [UsersController, InternalUsersController],
   providers: [UsersService, PermissionsGuard, SuperAdminSeeder],

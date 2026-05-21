@@ -57,7 +57,7 @@ export class DepartamentosService {
   }
 
   findAll(orgId: string): Promise<Departamento[]> {
-    return this.repo.find({ where: { orgId }, order: { name: 'ASC' } });
+    return this.repo.find({ where: { orgId }, order: { name: 'ASC' }, take: 500 });
   }
 
   async findOne(orgId: string, id: string): Promise<Departamento> {

@@ -17,7 +17,9 @@ import { WorkflowTimeline } from './workflow-timeline.entity';
 
 @Entity('workflows')
 @Index(['orgId', 'status'])
+@Index(['orgId', 'createdAt'])
 @Index(['createdBy'])
+@Index(['currentAssignedUserId'])
 export class Workflow {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

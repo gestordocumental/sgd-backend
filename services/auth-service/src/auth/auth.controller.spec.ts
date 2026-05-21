@@ -119,7 +119,7 @@ describe('AuthController', () => {
 
   describe('POST /api/auth/refresh', () => {
     it('delegates to authService.refresh and returns new token pair', async () => {
-      const result = await controller.refresh({ refreshToken: 'old.refresh.jwt' });
+      const result = await controller.refresh(undefined, { refreshToken: 'old.refresh.jwt' });
 
       expect(authService.refresh).toHaveBeenCalledWith('old.refresh.jwt');
       expect(result).toHaveProperty('accessToken');

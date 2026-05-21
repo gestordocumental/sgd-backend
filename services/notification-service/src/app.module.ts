@@ -6,6 +6,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
+import { MetricsModule } from './common/metrics/metrics.module';
+
 import { JwtGuard } from './common/guards/jwt.guard';
 import { Notification } from './notifications/entities/notification.entity';
 
@@ -42,6 +44,7 @@ import { Notification } from './notifications/entities/notification.entity';
 
     NotificationsModule,
     HealthModule,
+    MetricsModule,
   ],
   providers: [
     AppLogger,

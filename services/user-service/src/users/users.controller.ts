@@ -6,10 +6,13 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   Headers,
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
+  ParseIntPipe,
+  DefaultValuePipe,
   UnauthorizedException,
   ForbiddenException,
   UseGuards,
@@ -18,15 +21,14 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import multer, { diskStorage } from "multer";
-import type { Request } from "express";
-import { extname } from "path";
-import { existsSync, mkdirSync } from "fs";
+import { memoryStorage } from "multer";
+import { randomUUID, timingSafeEqual } from "crypto";
+import { fromBuffer as fileTypeFromBuffer } from "file-type";
+import { StorageService } from "../common/storage/storage.service";
 import {
   ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiParam,
 } from '@nestjs/swagger';
 import { ConfigService } from "@nestjs/config";
-import { timingSafeEqual } from "crypto";
 import { UsersService } from "./users.service";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
@@ -53,6 +55,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
+    private readonly storageService: StorageService,
   ) {}
 
   @ApiOperation({ summary: 'Create a new user and send invitation email' })
@@ -78,12 +81,16 @@ export class UsersController {
     return { ...UserResponseDto.from(user), invitationToken };
   }
 
-  @ApiOperation({ summary: 'List all users' })
-  @ApiResponse({ status: 200, description: 'Array of users', type: UserResponseDto, isArray: true })
+  @ApiOperation({ summary: 'List all users (paginated)' })
+  @ApiResponse({ status: 200, description: 'Paginated users' })
   @Get()
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
-  async findAll(): Promise<UserResponseDto[]> {
-    return (await this.usersService.findAll()).map(UserResponseDto.from);
+  async findAll(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+  ): Promise<{ data: UserResponseDto[]; total: number }> {
+    const { data, total } = await this.usersService.findAll(page, limit);
+    return { data: data.map(UserResponseDto.from), total };
   }
 
   @ApiOperation({ summary: 'User counts grouped by organization — super admin only' })
@@ -92,12 +99,16 @@ export class UsersController {
     return this.usersService.getCountsByOrg();
   }
 
-  @ApiOperation({ summary: 'List all super admin users' })
-  @ApiResponse({ status: 200, description: 'Array of super admin users', type: UserResponseDto, isArray: true })
+  @ApiOperation({ summary: 'List all super admin users (paginated)' })
+  @ApiResponse({ status: 200, description: 'Paginated super admin users' })
   @Get("super-admins")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
-  async findAllSuperAdmin(): Promise<UserResponseDto[]> {
-    return (await this.usersService.findAllSuperAdmin()).map(UserResponseDto.from);
+  async findAllSuperAdmin(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+  ): Promise<{ data: UserResponseDto[]; total: number }> {
+    const { data, total } = await this.usersService.findAllSuperAdmin(page, limit);
+    return { data: data.map(UserResponseDto.from), total };
   }
 
   @ApiOperation({ summary: 'Find user by email' })
@@ -142,18 +153,11 @@ export class UsersController {
   @Patch("me/avatar")
   @UseInterceptors(
     FileInterceptor("avatar", {
-      storage: diskStorage({
-        destination: (_req: Request, _file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
-          const dir = "uploads/avatars";
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-          cb(null, dir);
-        },
-        filename: (_req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `${unique}${extname(file.originalname)}`);
-        },
-      }),
+      // Use memory storage so we can inspect the buffer before writing to disk.
+      storage: memoryStorage(),
       fileFilter: (_req: any, file: Express.Multer.File, cb: (error: Error | null, acceptFile: boolean) => void) => {
+        // First-pass: reject by declared MIME type (fast, client-side signal).
+        // A deeper magic-byte check runs in the handler after multer buffers the file.
         if (!file.mimetype.match(/^image\/(jpeg|png|webp|gif)$/)) {
           return cb(new BadRequestException("Only image files are allowed"), false);
         }
@@ -167,7 +171,26 @@ export class UsersController {
     @UploadedFile() file: Express.Multer.File,
   ): Promise<UserResponseDto> {
     if (!file) throw new BadRequestException("No file uploaded");
-    const user = await this.usersService.uploadAvatar(userId, file.filename);
+
+    // Second-pass: validate actual file content via magic bytes.
+    const type = await fileTypeFromBuffer(file.buffer);
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!type || !allowedMimes.includes(type.mime)) {
+      throw new BadRequestException("File content does not match an allowed image format");
+    }
+
+    // Delete the previous avatar from storage if one exists.
+    const existing = await this.usersService.findOne(userId);
+    if (existing.avatarUrl) {
+      const oldKey = this.storageService.extractKey(existing.avatarUrl);
+      if (oldKey) await this.storageService.delete(oldKey).catch(() => {});
+    }
+
+    // Upload to object storage and persist the public URL.
+    const key      = `avatars/${randomUUID()}.${type.ext}`;
+    const publicUrl = await this.storageService.upload(key, file.buffer, type.mime);
+
+    const user = await this.usersService.uploadAvatar(userId, publicUrl);
     return UserResponseDto.from(user);
   }
 

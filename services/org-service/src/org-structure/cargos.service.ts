@@ -86,7 +86,7 @@ export class CargosService {
 
   async findAll(orgId: string, departamentoId: string, areaId: string): Promise<Cargo[]> {
     await this.areasService.findOne(orgId, departamentoId, areaId);
-    return this.repo.find({ where: { orgId, departamentoId, areaId }, order: { name: 'ASC' } });
+    return this.repo.find({ where: { orgId, departamentoId, areaId }, order: { name: 'ASC' }, take: 500 });
   }
 
   /** Cargos at the department level (areaId = null). */
@@ -98,7 +98,7 @@ export class CargosService {
   }
 
   findAllByOrg(orgId: string): Promise<Cargo[]> {
-    return this.repo.find({ where: { orgId }, order: { name: 'ASC' } });
+    return this.repo.find({ where: { orgId }, order: { name: 'ASC' }, take: 500 });
   }
 
   async findOne(orgId: string, departamentoId: string, areaId: string, id: string): Promise<Cargo> {

@@ -10,6 +10,8 @@ import { Permission } from './roles/entities/permission.entity';
 import { UserOrgRole } from './roles/entities/user-org-role.entity';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
+import { MetricsModule } from './common/metrics/metrics.module';
+
 import { RedisModule } from './common/redis/redis.module';
 
 @Module({
@@ -42,6 +44,7 @@ import { RedisModule } from './common/redis/redis.module';
     UsersModule,
     RolesModule,
     HealthModule,
+    MetricsModule,
   ],
   providers: [AppLogger],
   exports: [AppLogger],

@@ -8,6 +8,7 @@ import { Observable, tap } from 'rxjs';
 import { Request, Response } from 'express';
 import { AppLogger } from '../logger/app-logger.service';
 import { getCorrelationId } from '../correlation/correlation.context';
+import { getHttpRequestDurationHistogram } from '../metrics/metrics.registry';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
@@ -40,6 +41,10 @@ export class LoggingInterceptor implements NestInterceptor {
             correlationId: getCorrelationId(),
             message: `← ${method} ${path} ${res.statusCode} (${Date.now() - startedAt}ms)`,
           });
+          getHttpRequestDurationHistogram().observe(
+            { method, route: path, status_code: String(res.statusCode) },
+            (Date.now() - startedAt) / 1000,
+          );
         },
         error: (err) => {
           const statusCode =
@@ -56,6 +61,10 @@ export class LoggingInterceptor implements NestInterceptor {
             correlationId: getCorrelationId(),
             message: `← ${method} ${path} ${statusCode} (${Date.now() - startedAt}ms)`,
           });
+          getHttpRequestDurationHistogram().observe(
+            { method, route: path, status_code: String(statusCode) },
+            (Date.now() - startedAt) / 1000,
+          );
         },
       }),
     );

@@ -23,7 +23,12 @@ const REFRESH_TTL_SECONDS = 12 * 60 * 60;
 
 // Dummy hash used when the user is not found — ensures bcrypt.compare always
 // runs so response time doesn't reveal whether an email exists in the system.
-const DUMMY_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lh86';
+// Generated with cost factor 12.
+const DUMMY_HASH = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQyCkByCkYKS5j5XkP1mLM3Ym';
+
+// bcrypt cost factor — read from env so it can be tuned per environment.
+// Default 12 gives ~250ms on modern hardware which is OWASP-recommended.
+const BCRYPT_ROUNDS = parseInt(process.env['BCRYPT_ROUNDS'] ?? '12', 10);
 
 interface TokenOptions {
   companyId?: string;
@@ -60,7 +65,7 @@ export class AuthService {
       }
 
       if (!existing.passwordHash) {
-        existing.passwordHash = await bcrypt.hash(dto.password, 10);
+        existing.passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
         existing.status = CredentialStatus.ACTIVE;
         await this.credentialRepo.save(existing);
       }
@@ -68,7 +73,7 @@ export class AuthService {
       return { ok: true };
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
     const credential = this.credentialRepo.create({
       userId: dto.userId,

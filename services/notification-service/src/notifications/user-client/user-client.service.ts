@@ -47,11 +47,34 @@ export class UserClientService {
   }
 
   async getUsersByIds(userIds: string[]): Promise<Map<string, UserInfo>> {
-    const results = await Promise.all(userIds.map((id) => this.getUserById(id)));
-    const map = new Map<string, UserInfo>();
-    results.forEach((user, idx) => {
-      if (user) map.set(userIds[idx], user);
-    });
-    return map;
+    if (!userIds.length) return new Map();
+    try {
+      const { data } = await firstValueFrom(
+        this.http.post<UserInfo[]>(
+          `${this.baseUrl}/internal/users/batch-by-ids`,
+          { ids: userIds },
+          {
+            timeout: 5000,
+            headers: {
+              'x-internal-token': this.internalToken,
+              'x-correlation-id': getCorrelationId(),
+            },
+          },
+        ),
+      );
+      const map = new Map<string, UserInfo>();
+      data.forEach((u) => map.set(u.id, u));
+      return map;
+    } catch (err) {
+      this.logger.warn(
+        `Batch user fetch failed, falling back to individual calls: ${err instanceof Error ? err.message : String(err)}`,
+        'UserClientService',
+      );
+      // Fallback: parallel individual calls
+      const results = await Promise.all(userIds.map((id) => this.getUserById(id)));
+      const map = new Map<string, UserInfo>();
+      results.forEach((user, idx) => { if (user) map.set(userIds[idx], user); });
+      return map;
+    }
   }
 }

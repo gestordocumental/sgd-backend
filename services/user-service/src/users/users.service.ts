@@ -8,8 +8,8 @@ import {
   Inject,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { IsNull, Not, Repository } from "typeorm";
-import { randomBytes } from "crypto";
+import { In, IsNull, Not, Repository } from "typeorm";
+import { randomBytes, createHash } from "crypto";
 import Redis from "ioredis";
 import { User, RegistrationStatus } from "./entities/user.entity";
 import { CreateUserDto } from "./dto/create-user.dto";
@@ -195,7 +195,10 @@ export class UsersService {
     user: User,
   ): Promise<{ user: User; invitationToken: string }> {
     const token = randomBytes(32).toString("hex");
-    await this.redis.setex(`invitation:${token}`, INVITATION_TTL_SECONDS, user.id);
+    // Store the SHA-256 hash in Redis — defense-in-depth if Redis is compromised.
+    // The plaintext token is only sent to the user, never persisted.
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    await this.redis.setex(`invitation:${tokenHash}`, INVITATION_TTL_SECONDS, user.id);
 
     try {
       const expiresAt = new Date(Date.now() + INVITATION_TTL_SECONDS * 1000).toISOString();
@@ -212,18 +215,38 @@ export class UsersService {
     return { user, invitationToken: token };
   }
 
-  findAll(): Promise<User[]> {
-    return this.usersRepository.find();
+  async findAll(page = 1, limit = 100): Promise<{ data: User[]; total: number }> {
+    const take = Math.min(limit, 500);
+    const skip = (page - 1) * take;
+    const [data, total] = await this.usersRepository.findAndCount({
+      take,
+      skip,
+      order: { createdAt: 'DESC' },
+    });
+    return { data, total };
   }
 
-  findAllSuperAdmin(): Promise<User[]> {
-    return this.usersRepository.find({ where: { isSuperAdmin: true } });
+  async findAllSuperAdmin(page = 1, limit = 100): Promise<{ data: User[]; total: number }> {
+    const take = Math.min(limit, 500);
+    const skip = (page - 1) * take;
+    const [data, total] = await this.usersRepository.findAndCount({
+      where: { isSuperAdmin: true },
+      take,
+      skip,
+      order: { createdAt: 'DESC' },
+    });
+    return { data, total };
   }
 
   async findOne(id: string): Promise<User> {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException(`User ${id} not found`);
     return user;
+  }
+
+  async findManyByIds(ids: string[]): Promise<User[]> {
+    if (!ids.length) return [];
+    return this.usersRepository.findBy({ id: In(ids) });
   }
 
   async findByEmail(email: string): Promise<User> {
@@ -259,9 +282,9 @@ export class UsersService {
     return saved;
   }
 
-  async uploadAvatar(userId: string, filename: string): Promise<User> {
+  async uploadAvatar(userId: string, avatarUrl: string): Promise<User> {
     const user = await this.findOne(userId);
-    user.avatarUrl = `/uploads/avatars/${filename}`;
+    user.avatarUrl = avatarUrl;
     return this.usersRepository.save(user);
   }
 
@@ -456,9 +479,9 @@ export class UsersService {
 
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
     const targetUser = await this.findOne(userId);
-    await this.userOrgRoleRepository.query(
-      `UPDATE user_org_roles SET role_id = NULL, assigned_by = NULL WHERE user_id = $1 AND org_id = $2`,
-      [userId, orgId],
+    await this.userOrgRoleRepository.update(
+      { userId, orgId },
+      { roleId: null, assignedBy: null },
     );
     if (actorId) {
       this.emitAuditLog({
@@ -480,9 +503,11 @@ export class UsersService {
   async completeRegistration(
     dto: CompleteRegistrationDto,
   ): Promise<UserResponseDto> {
+    // Hash the incoming token to match what was stored — plaintext never persisted.
     // GETDEL is atomic: retrieves and deletes in one operation, preventing
     // TOCTOU race conditions where two concurrent requests consume the same token.
-    const userId = await this.redis.getdel(`invitation:${dto.token}`);
+    const tokenHash = createHash("sha256").update(dto.token).digest("hex");
+    const userId = await this.redis.getdel(`invitation:${tokenHash}`);
     if (!userId) {
       throw new NotFoundException("Invitation token invalid or expired");
     }

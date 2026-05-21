@@ -93,18 +93,21 @@ export class NotificationsService {
       qb.andWhere('n.read = false');
     }
 
-    const [items, total] = await qb.getManyAndCount();
-
-    const unreadCount = await this.repo.count({
-      where: { userId, read: false },
-    });
+    // Run paginated fetch and unread count in parallel.
+    // When unreadOnly=true, getManyAndCount() total IS the unread count — skip the extra query.
+    const [[items, total], unreadCount] = await Promise.all([
+      qb.getManyAndCount(),
+      unreadOnly
+        ? Promise.resolve(0)
+        : this.repo.count({ where: { userId, read: false } }),
+    ]);
 
     const result = new PaginatedNotificationsDto();
     result.data        = items.map(NotificationResponseDto.from);
     result.total       = total;
     result.page        = page;
     result.limit       = limit;
-    result.unreadCount = unreadCount;
+    result.unreadCount = unreadOnly ? total : unreadCount;
     return result;
   }
 

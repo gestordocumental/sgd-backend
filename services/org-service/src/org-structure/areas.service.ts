@@ -64,7 +64,7 @@ export class AreasService {
 
   async findAll(orgId: string, departamentoId: string): Promise<Area[]> {
     await this.departamentosService.findOne(orgId, departamentoId);
-    return this.repo.find({ where: { orgId, departamentoId }, order: { name: 'ASC' } });
+    return this.repo.find({ where: { orgId, departamentoId }, order: { name: 'ASC' }, take: 500 });
   }
 
   async findOne(orgId: string, departamentoId: string, id: string): Promise<Area> {

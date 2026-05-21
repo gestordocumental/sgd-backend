@@ -131,12 +131,42 @@ export class BulkStructureService {
       );
     }
 
+    // Pre-load entire org structure in 3 queries instead of N×3
+    const [allDepts, allAreas, allCargos] = await Promise.all([
+      this.deptRepo.find({ where: { orgId: dto.orgId } }),
+      this.areaRepo.find({ where: { orgId: dto.orgId } }),
+      this.cargoRepo.find({ where: { orgId: dto.orgId } }),
+    ]);
+
+    // Build in-memory lookup maps
+    const deptByName = new Map(allDepts.map((d) => [d.name, d]));
+    const areaByDeptAndName = new Map(
+      allAreas.map((a) => [`${a.departamentoId}:${a.name}`, a]),
+    );
+    const cargoByAreaAndName = new Map(
+      allCargos
+        .filter((c) => c.areaId !== null)
+        .map((c) => [`${c.areaId}:${c.name}`, c]),
+    );
+    const cargoByDeptAndName = new Map(
+      allCargos
+        .filter((c) => c.areaId === null)
+        .map((c) => [`${c.departamentoId}:${c.name}`, c]),
+    );
+
     const resolved: ResolvedStructureItem[] = [];
     const unresolved: UnresolvedStructureItem[] = [];
 
     for (let i = 0; i < dto.items.length; i++) {
       const item = dto.items[i];
-      const result = await this.resolveItem(dto.orgId, item, i);
+      const result = this.resolveItemFromMaps(
+        item,
+        i,
+        deptByName,
+        areaByDeptAndName,
+        cargoByAreaAndName,
+        cargoByDeptAndName,
+      );
 
       if ("reason" in result) {
         unresolved.push(result);
@@ -148,14 +178,15 @@ export class BulkStructureService {
     return { resolved, unresolved };
   }
 
-  private async resolveItem(
-    orgId: string,
+  private resolveItemFromMaps(
     item: ResolveStructureItemDto,
     index: number,
-  ): Promise<ResolvedStructureItem | UnresolvedStructureItem> {
-    const dept = await this.deptRepo.findOne({
-      where: { orgId, name: item.department },
-    });
+    deptByName: Map<string, Departamento>,
+    areaByDeptAndName: Map<string, Area>,
+    cargoByAreaAndName: Map<string, Cargo>,
+    cargoByDeptAndName: Map<string, Cargo>,
+  ): ResolvedStructureItem | UnresolvedStructureItem {
+    const dept = deptByName.get(item.department);
     if (!dept) {
       return {
         index,
@@ -164,10 +195,7 @@ export class BulkStructureService {
     }
 
     if (item.position && !item.area) {
-      // dept-level cargo (no area)
-      const cargo = await this.cargoRepo.findOne({
-        where: { orgId, departamentoId: dept.id, areaId: IsNull(), name: item.position },
-      });
+      const cargo = cargoByDeptAndName.get(`${dept.id}:${item.position}`);
       if (!cargo) {
         return {
           index,
@@ -179,9 +207,7 @@ export class BulkStructureService {
 
     let areaId: string | null = null;
     if (item.area) {
-      const area = await this.areaRepo.findOne({
-        where: { orgId, departamentoId: dept.id, name: item.area },
-      });
+      const area = areaByDeptAndName.get(`${dept.id}:${item.area}`);
       if (!area) {
         return {
           index,
@@ -191,21 +217,14 @@ export class BulkStructureService {
       areaId = area.id;
 
       if (item.position) {
-        const cargo = await this.cargoRepo.findOne({
-          where: { orgId, areaId: area.id, name: item.position },
-        });
+        const cargo = cargoByAreaAndName.get(`${area.id}:${item.position}`);
         if (!cargo) {
           return {
             index,
             reason: `Cargo '${item.position}' no encontrado en área '${item.area}'. Ejecute primero la carga de estructura organizacional.`,
           };
         }
-        return {
-          index,
-          departamentoId: dept.id,
-          areaId: area.id,
-          cargoId: cargo.id,
-        };
+        return { index, departamentoId: dept.id, areaId: area.id, cargoId: cargo.id };
       }
     }
 

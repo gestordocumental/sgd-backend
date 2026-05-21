@@ -4,6 +4,7 @@ import {
   Body,
   Headers,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -33,6 +34,25 @@ export class InternalUsersController {
     const valid =
       provided.length === expected.length && timingSafeEqual(expected, provided);
     if (!valid) throw new UnauthorizedException();
+  }
+
+  @ApiOperation({ summary: 'Fetch multiple users by IDs in a single call (internal only)' })
+  @ApiSecurity('internal-token')
+  @Post('batch-by-ids')
+  async batchByIds(
+    @Headers('x-internal-token') token: string | undefined,
+    @Body() body: { ids: string[] },
+  ) {
+    this.verifyToken(token);
+    if (!Array.isArray(body.ids) || body.ids.length > 500) {
+      throw new BadRequestException('ids must be an array of at most 500 entries');
+    }
+    const users = await this.usersService.findManyByIds(body.ids);
+    return users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      fullName: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
+    }));
   }
 
   @ApiOperation({ summary: 'Find users by org position (internal only)' })

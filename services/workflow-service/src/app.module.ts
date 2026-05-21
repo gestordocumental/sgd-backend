@@ -7,6 +7,8 @@ import { WorkflowsModule } from './workflows/workflows.module';
 import { HealthModule } from './health/health.module';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
+import { MetricsModule } from './common/metrics/metrics.module';
+
 import { JwtGuard } from './common/guards/jwt.guard';
 
 // Entities — registradas en TypeOrmModule para que el guard y los repositorios las encuentren
@@ -62,6 +64,7 @@ import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity'
 
     WorkflowsModule,
     HealthModule,
+    MetricsModule,
   ],
   providers: [
     AppLogger,

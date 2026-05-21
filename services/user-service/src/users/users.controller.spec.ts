@@ -151,20 +151,23 @@ describe('UsersController', () => {
   // ─── GET / ────────────────────────────────────────────────────────────────
 
   describe('findAll', () => {
-    it('returns an array of UserResponseDto', async () => {
+    it('returns a paginated response with UserResponseDto items', async () => {
       const users = [makeUser(), makeUser({ id: 'user-uuid-2', email: 'other@example.com' })];
-      usersService.findAll.mockResolvedValue(users);
+      usersService.findAll.mockResolvedValue({ data: users, total: users.length });
 
-      const result = await controller.findAll();
+      const result = await controller.findAll(1, 100);
 
-      expect(result).toHaveLength(2);
-      result.forEach((r) => expect(r).toBeInstanceOf(UserResponseDto));
+      expect(result.data).toHaveLength(2);
+      expect(result.total).toBe(2);
+      result.data.forEach((r) => expect(r).toBeInstanceOf(UserResponseDto));
     });
 
-    it('returns an empty array when there are no users', async () => {
-      usersService.findAll.mockResolvedValue([]);
+    it('returns an empty data array when there are no users', async () => {
+      usersService.findAll.mockResolvedValue({ data: [], total: 0 });
 
-      expect(await controller.findAll()).toEqual([]);
+      const result = await controller.findAll(1, 100);
+      expect(result.data).toEqual([]);
+      expect(result.total).toBe(0);
     });
   });
 

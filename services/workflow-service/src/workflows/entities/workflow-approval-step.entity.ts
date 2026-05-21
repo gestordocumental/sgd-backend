@@ -16,6 +16,7 @@ import { WorkflowApprovalAction } from './workflow-approval-action.entity';
 
 @Entity('workflow_approval_steps')
 @Unique(['workflowId', 'stepOrder'])
+@Index(['userId', 'status'])
 export class WorkflowApprovalStep {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

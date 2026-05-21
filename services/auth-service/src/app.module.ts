@@ -1,16 +1,26 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { Credential } from './auth/entities/credential.entity';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
+import { MetricsModule } from './common/metrics/metrics.module';
+
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+
+    // Rate limiting: máx 10 intentos por IP en una ventana de 60 segundos.
+    // Aplicado selectivamente en los endpoints de autenticación.
+    ThrottlerModule.forRoot([{
+      ttl: 60_000,
+      limit: 10,
+    }]),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -32,6 +42,7 @@ import { AppLogger } from './common/logger/app-logger.service';
     RedisModule,
     AuthModule,
     HealthModule,
+    MetricsModule,
   ],
   providers: [AppLogger],
   exports: [AppLogger],

@@ -207,6 +207,7 @@ export class WorkflowsService {
       })
       .andWhere('w.deleted_at IS NULL')
       .orderBy('w.updatedAt', 'DESC')
+      .take(100)
       .getMany();
 
     return workflows.map((w) => WorkflowResponseDto.from(w));
@@ -229,6 +230,7 @@ export class WorkflowsService {
       })
       .andWhere('w.deleted_at IS NULL')
       .orderBy('w.updatedAt', 'DESC')
+      .take(100)
       .getMany();
 
     return workflows.map((w) => WorkflowResponseDto.from(w));
@@ -447,27 +449,44 @@ export class WorkflowsService {
       statusCounts[row.status] = parseInt(row.count, 10);
     }
 
-    // 8 weeks trend (week start date label MM/DD)
-    const weeks: { week: string; count: number }[] = [];
+    // 8 weeks trend (week start date label MM/DD) — single GROUP BY query
     const now = new Date();
+    const weekStarts: Date[] = [];
     for (let i = 7; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i * 7);
-      const weekStart = new Date(d);
-      weekStart.setDate(d.getDate() - d.getDay());
-      weekStart.setHours(0, 0, 0, 0);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 7);
-      const count = await this.workflowRepo
-        .createQueryBuilder('w')
-        .where('w.org_id = :orgId', { orgId })
-        .andWhere('w.createdAt >= :start', { start: weekStart })
-        .andWhere('w.createdAt < :end', { end: weekEnd })
-        .getCount();
-      const mm = String(weekStart.getMonth() + 1).padStart(2, '0');
-      const dd = String(weekStart.getDate()).padStart(2, '0');
-      weeks.push({ week: `${mm}/${dd}`, count });
+      const ws = new Date(d);
+      ws.setDate(d.getDate() - d.getDay());
+      ws.setHours(0, 0, 0, 0);
+      weekStarts.push(ws);
     }
+    const earliest = weekStarts[0];
+    const latest = new Date(weekStarts[weekStarts.length - 1]);
+    latest.setDate(latest.getDate() + 7);
+
+    const trendRows = await this.dataSource.query<{ week_start: string; count: string }[]>(`
+      SELECT
+        to_char(
+          date_trunc('week', created_at + interval '1 day') - interval '1 day',
+          'YYYY-MM-DD'
+        ) AS week_start,
+        COUNT(*)::text AS count
+      FROM workflows
+      WHERE org_id = $1
+        AND created_at >= $2
+        AND created_at < $3
+        AND deleted_at IS NULL
+      GROUP BY 1
+      ORDER BY 1
+    `, [orgId, earliest, latest]);
+
+    const countByWeek = new Map(trendRows.map((r) => [r.week_start, parseInt(r.count, 10)]));
+    const weeks = weekStarts.map((ws) => {
+      const key = ws.toISOString().slice(0, 10);
+      const mm = String(ws.getMonth() + 1).padStart(2, '0');
+      const dd = String(ws.getDate()).padStart(2, '0');
+      return { week: `${mm}/${dd}`, count: countByWeek.get(key) ?? 0 };
+    });
 
     // Storage: workflow_attachments + workflow_admin_attachments joined via org
     const storageRow = await this.dataSource.query<{ total_bytes: string; total_files: string }[]>(`

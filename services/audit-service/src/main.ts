@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import './instrument';
 
 // Cargar .env antes del check — ConfigModule lo carga después pero aquí aún no está disponible
 // eslint-disable-next-line @typescript-eslint/no-require-imports

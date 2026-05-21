@@ -5,6 +5,8 @@ import { Request, Response } from 'express';
 import { AppLogger } from '../logger/app-logger.service';
 import { getCorrelationId } from '../correlation/correlation.context';
 
+import * as Sentry from '@sentry/node';
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   constructor(private readonly logger: AppLogger) {}
@@ -31,6 +33,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
 
     if (status >= 500) {
+      Sentry.captureException(exception);
       this.logger.error(
         `Unhandled exception on ${req.method} ${path}`,
         exception instanceof Error ? exception.stack : String(exception),
