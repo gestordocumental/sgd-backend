@@ -50,9 +50,9 @@ describe('AreasController', () => {
     const area = makeArea();
     service.create.mockResolvedValue(area);
 
-    const result = await controller.create(area.orgId, area.departamentoId, { name: area.name });
+    const result = await controller.create('actor-1', area.orgId, area.departamentoId, { name: area.name });
 
-    expect(service.create).toHaveBeenCalledWith(area.orgId, area.departamentoId, { name: area.name });
+    expect(service.create).toHaveBeenCalledWith(area.orgId, area.departamentoId, { name: area.name }, 'actor-1');
     expect(result).toMatchObject({ id: area.id, departamentoId: area.departamentoId, name: area.name });
   });
 
@@ -80,27 +80,27 @@ describe('AreasController', () => {
     const area = makeArea({ name: 'Cobranza' });
     service.update.mockResolvedValue(area);
 
-    const result = await controller.update(area.orgId, area.departamentoId, area.id, { name: 'Cobranza' });
+    const result = await controller.update('actor-1', area.orgId, area.departamentoId, area.id, { name: 'Cobranza' });
 
-    expect(service.update).toHaveBeenCalledWith(area.orgId, area.departamentoId, area.id, { name: 'Cobranza' });
+    expect(service.update).toHaveBeenCalledWith(area.orgId, area.departamentoId, area.id, { name: 'Cobranza' }, 'actor-1');
     expect(result).toMatchObject({ name: 'Cobranza' });
   });
 
   it('delegates remove to the service', async () => {
     service.remove.mockResolvedValue(undefined);
 
-    await controller.remove('org-1', 'dep-1', 'area-1');
+    await controller.remove('actor-1', 'org-1', 'dep-1', 'area-1');
 
-    expect(service.remove).toHaveBeenCalledWith('org-1', 'dep-1', 'area-1');
+    expect(service.remove).toHaveBeenCalledWith('org-1', 'dep-1', 'area-1', 'actor-1');
   });
 
   it('restores and maps an area', async () => {
     const area = makeArea();
     service.restore.mockResolvedValue(area);
 
-    const result = await controller.restore(area.orgId, area.departamentoId, area.id);
+    const result = await controller.restore('actor-1', area.orgId, area.departamentoId, area.id);
 
-    expect(service.restore).toHaveBeenCalledWith(area.orgId, area.departamentoId, area.id);
+    expect(service.restore).toHaveBeenCalledWith(area.orgId, area.departamentoId, area.id, 'actor-1');
     expect(result).toMatchObject({ id: area.id });
   });
 });

@@ -314,7 +314,7 @@ describe('WorkflowApprovalService', () => {
       await expect(service.reject('wf-1', 'not-approver', { observations: 'bad' })).rejects.toThrow(ForbiddenException);
     });
 
-    it('transitions workflow to RETURNED_TO_CREATOR', async () => {
+    it('transitions workflow to REJECTED', async () => {
       const { service, workflowRepo, dataSource } = buildService();
       const wf = pendingWorkflow();
       workflowRepo.findOne.mockResolvedValue(wf);
@@ -325,11 +325,11 @@ describe('WorkflowApprovalService', () => {
       expect(dataSource._manager.update).toHaveBeenCalledWith(
         Workflow,
         'wf-1',
-        expect.objectContaining({ status: WorkflowStatus.RETURNED_TO_CREATOR }),
+        expect.objectContaining({ status: WorkflowStatus.REJECTED }),
       );
     });
 
-    it('records STEP_REJECTED and WORKFLOW_RETURNED_TO_CREATOR timeline events', async () => {
+    it('records STEP_REJECTED timeline event', async () => {
       const { service, workflowRepo, timelineService } = buildService();
       const wf = pendingWorkflow();
       workflowRepo.findOne.mockResolvedValue(wf);
@@ -341,7 +341,6 @@ describe('WorkflowApprovalService', () => {
         (c: [{ eventType: TimelineEventType }]) => c[0].eventType,
       );
       expect(eventTypes).toContain(TimelineEventType.STEP_REJECTED);
-      expect(eventTypes).toContain(TimelineEventType.WORKFLOW_RETURNED_TO_CREATOR);
     });
   });
 

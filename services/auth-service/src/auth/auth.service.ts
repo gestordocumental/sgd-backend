@@ -21,9 +21,22 @@ import { UserClientService } from "../user-client/user-client.service";
 // Refresh token TTL in Redis (must match JWT_REFRESH_EXPIRATION: 12h)
 const REFRESH_TTL_SECONDS = 12 * 60 * 60;
 
+// bcrypt cost factor — read from env so it can be tuned per environment.
+// Default 12 gives ~250ms on modern hardware which is OWASP-recommended.
+const DEFAULT_BCRYPT_ROUNDS = 12;
+const parsedRounds = Number.parseInt(
+  process.env['BCRYPT_ROUNDS'] ?? String(DEFAULT_BCRYPT_ROUNDS),
+  10,
+);
+const BCRYPT_ROUNDS =
+  Number.isInteger(parsedRounds) && parsedRounds >= 10 && parsedRounds <= 14
+    ? parsedRounds
+    : DEFAULT_BCRYPT_ROUNDS;
+
 // Dummy hash used when the user is not found — ensures bcrypt.compare always
 // runs so response time doesn't reveal whether an email exists in the system.
-const DUMMY_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lh86';
+// Generated at startup with the same cost factor as real hashes to keep timings comparable.
+const DUMMY_HASH = bcrypt.hashSync('__invalid_password__', BCRYPT_ROUNDS);
 
 interface TokenOptions {
   companyId?: string;
@@ -60,7 +73,7 @@ export class AuthService {
       }
 
       if (!existing.passwordHash) {
-        existing.passwordHash = await bcrypt.hash(dto.password, 10);
+        existing.passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
         existing.status = CredentialStatus.ACTIVE;
         await this.credentialRepo.save(existing);
       }
@@ -68,7 +81,7 @@ export class AuthService {
       return { ok: true };
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
     const credential = this.credentialRepo.create({
       userId: dto.userId,
@@ -272,14 +285,16 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(basePayload, {
       secret: this.configService.get<string>("JWT_SECRET"),
-      expiresIn: this.configService.get<string>("JWT_EXPIRATION"),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expiresIn: this.configService.get("JWT_EXPIRATION") as any,
     });
 
     const refreshToken = this.jwtService.sign(
       { ...basePayload, jti },
       {
         secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
-        expiresIn: this.configService.get<string>("JWT_REFRESH_EXPIRATION"),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expiresIn: this.configService.get("JWT_REFRESH_EXPIRATION") as any,
       },
     );
 

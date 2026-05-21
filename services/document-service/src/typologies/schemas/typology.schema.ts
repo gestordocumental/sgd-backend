@@ -83,6 +83,9 @@ class DocumentoInfo {
 
   @Prop({ type: String, enum: ExtractionStatus, default: ExtractionStatus.NOT_UPLOADED })
   extractionStatus!: ExtractionStatus;
+
+  @Prop({ type: Number, default: null })
+  sizeBytes!: number | null;
 }
 
 @Schema({ _id: false })

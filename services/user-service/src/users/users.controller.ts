@@ -6,19 +6,29 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   Headers,
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
+  ParseIntPipe,
+  DefaultValuePipe,
   UnauthorizedException,
   ForbiddenException,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
+import { randomUUID, timingSafeEqual } from "crypto";
+// file-type v17+ is ESM-only — use dynamic import at call site
+import { StorageService } from "../common/storage/storage.service";
 import {
   ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiParam,
 } from '@nestjs/swagger';
 import { ConfigService } from "@nestjs/config";
-import { timingSafeEqual } from "crypto";
 import { UsersService } from "./users.service";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
@@ -45,6 +55,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
+    private readonly storageService: StorageService,
   ) {}
 
   @ApiOperation({ summary: 'Create a new user and send invitation email' })
@@ -66,24 +77,38 @@ export class UsersController {
       throw new ForbiddenException('You can only assign users to your own organization');
     }
 
-    const { user, invitationToken } = await this.usersService.create(dto);
+    const { user, invitationToken } = await this.usersService.create(dto, caller.sub, caller.companyId);
     return { ...UserResponseDto.from(user), invitationToken };
   }
 
-  @ApiOperation({ summary: 'List all users' })
-  @ApiResponse({ status: 200, description: 'Array of users', type: UserResponseDto, isArray: true })
+  @ApiOperation({ summary: 'List all users (paginated)' })
+  @ApiResponse({ status: 200, description: 'Paginated users' })
   @Get()
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
-  async findAll(): Promise<UserResponseDto[]> {
-    return (await this.usersService.findAll()).map(UserResponseDto.from);
+  async findAll(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+  ): Promise<{ data: UserResponseDto[]; total: number }> {
+    const { data, total } = await this.usersService.findAll(page, limit);
+    return { data: data.map(UserResponseDto.from), total };
   }
 
-  @ApiOperation({ summary: 'List all super admin users' })
-  @ApiResponse({ status: 200, description: 'Array of super admin users', type: UserResponseDto, isArray: true })
+  @ApiOperation({ summary: 'User counts grouped by organization — super admin only' })
+  @Get('admin/counts-by-org')
+  countsByOrg(@RequireSuperAdmin() _caller: void) {
+    return this.usersService.getCountsByOrg();
+  }
+
+  @ApiOperation({ summary: 'List all super admin users (paginated)' })
+  @ApiResponse({ status: 200, description: 'Paginated super admin users' })
   @Get("super-admins")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
-  async findAllSuperAdmin(): Promise<UserResponseDto[]> {
-    return (await this.usersService.findAllSuperAdmin()).map(UserResponseDto.from);
+  async findAllSuperAdmin(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+  ): Promise<{ data: UserResponseDto[]; total: number }> {
+    const { data, total } = await this.usersService.findAllSuperAdmin(page, limit);
+    return { data: data.map(UserResponseDto.from), total };
   }
 
   @ApiOperation({ summary: 'Find user by email' })
@@ -123,6 +148,53 @@ export class UsersController {
     );
   }
 
+  @ApiOperation({ summary: "Upload avatar for the logged-in user" })
+  @ApiResponse({ status: 200, description: 'Avatar uploaded', type: UserResponseDto })
+  @Patch("me/avatar")
+  @UseInterceptors(
+    FileInterceptor("avatar", {
+      // Use memory storage so we can inspect the buffer before writing to disk.
+      storage: memoryStorage(),
+      fileFilter: (_req: any, file: Express.Multer.File, cb: (error: Error | null, acceptFile: boolean) => void) => {
+        // First-pass: reject by declared MIME type (fast, client-side signal).
+        // A deeper magic-byte check runs in the handler after multer buffers the file.
+        if (!file.mimetype.match(/^image\/(jpeg|png|webp|gif)$/)) {
+          return cb(new BadRequestException("Only image files are allowed"), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+    }),
+  )
+  async uploadAvatar(
+    @CurrentUserId() userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<UserResponseDto> {
+    if (!file) throw new BadRequestException("No file uploaded");
+
+    // Second-pass: validate actual file content via magic bytes.
+    const { fileTypeFromBuffer } = await import('file-type');
+    const type = await fileTypeFromBuffer(file.buffer);
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!type || !allowedMimes.includes(type.mime)) {
+      throw new BadRequestException("File content does not match an allowed image format");
+    }
+
+    // Keep previous key — delete old object only after new avatar is persisted.
+    const existing = await this.usersService.findOne(userId);
+    const oldKey = existing.avatarUrl
+      ? this.storageService.extractKey(existing.avatarUrl)
+      : null;
+
+    // Upload to object storage and persist the public URL.
+    const key      = `avatars/${randomUUID()}.${type.ext}`;
+    const publicUrl = await this.storageService.upload(key, file.buffer, type.mime);
+
+    const user = await this.usersService.uploadAvatar(userId, publicUrl);
+    if (oldKey) void this.storageService.delete(oldKey).catch(() => {});
+    return UserResponseDto.from(user);
+  }
+
   @ApiOperation({ summary: "Get companies a user belongs to (internal only)" })
   @ApiSecurity('internal-token')
   @ApiParam({ name: 'id', format: 'uuid' })
@@ -157,10 +229,11 @@ export class UsersController {
   @Patch(":id")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async update(
+    @JwtPayloadParam() caller: JwtPayload,
     @Param("id") id: string,
     @Body() dto: UpdateUserDto,
   ): Promise<UserResponseDto> {
-    return UserResponseDto.from(await this.usersService.update(id, dto));
+    return UserResponseDto.from(await this.usersService.update(id, dto, caller.sub, caller.companyId));
   }
 
   @ApiOperation({ summary: 'Soft delete a user' })
@@ -173,7 +246,7 @@ export class UsersController {
     @JwtPayloadParam() caller: JwtPayload,
     @Param("id", ParseUUIDPipe) id: string,
   ) {
-    return this.usersService.remove(id, caller.companyId);
+    return this.usersService.remove(id, caller.companyId, caller.sub);
   }
 
   @ApiOperation({ summary: 'Restore a previously deleted user' })
@@ -181,8 +254,27 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User restored', type: UserResponseDto })
   @Post(":id/restore")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
-  async restore(@Param("id") id: string): Promise<UserResponseDto> {
-    return UserResponseDto.from(await this.usersService.restore(id));
+  async restore(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id") id: string,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.from(await this.usersService.restore(id, caller.sub));
+  }
+
+  @ApiOperation({ summary: 'Resend invitation email to a PENDING user' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'New invitation token generated and email sent', type: CreateUserResponseDto })
+  @ApiResponse({ status: 409, description: 'User has already completed registration' })
+  @Post(":id/resend-invitation")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  async resendInvitation(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    const callerOrgId = caller.isSuperAdmin ? undefined : caller.companyId;
+    const { user, invitationToken } = await this.usersService.resendInvitation(id, callerOrgId);
+    return { ...UserResponseDto.from(user), invitationToken };
   }
 
   @ApiOperation({ summary: 'Complete registration using invitation token (public endpoint)' })
@@ -206,10 +298,11 @@ export class UsersController {
   @Patch(":id/super-admin")
   async setSuperAdmin(
     @RequireSuperAdmin() _caller: void,
+    @JwtPayloadParam() caller: JwtPayload,
     @Param("id") id: string,
     @Body() dto: SetSuperAdminDto,
   ): Promise<UserResponseDto> {
-    return UserResponseDto.from(await this.usersService.setSuperAdmin(id, dto.enabled));
+    return UserResponseDto.from(await this.usersService.setSuperAdmin(id, dto.enabled, caller.sub));
   }
 
   @ApiOperation({ summary: 'Assign a user to an organization with a role' })
@@ -247,9 +340,10 @@ export class UsersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   removeFromOrg(
+    @JwtPayloadParam() caller: JwtPayload,
     @Param("id") id: string,
     @Param("orgId") orgId: string,
   ): Promise<void> {
-    return this.usersService.removeFromOrg(id, orgId);
+    return this.usersService.removeFromOrg(id, orgId, caller.sub);
   }
 }

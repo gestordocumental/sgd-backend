@@ -10,6 +10,8 @@ import { Area } from './org-structure/entities/area.entity';
 import { Cargo } from './org-structure/entities/cargo.entity';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
+import { MetricsModule } from './common/metrics/metrics.module';
+
 
 @Module({
   imports: [
@@ -40,6 +42,7 @@ import { AppLogger } from './common/logger/app-logger.service';
     OrgsModule,
     OrgStructureModule,
     HealthModule,
+    MetricsModule,
   ],
   providers: [AppLogger],
   exports: [AppLogger],

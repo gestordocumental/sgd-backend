@@ -8,8 +8,8 @@ export class CargoResponseDto {
   @ApiProperty({ format: 'uuid' })
   orgId!: string;
 
-  @ApiProperty({ format: 'uuid' })
-  areaId!: string;
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  areaId!: string | null;
 
   @ApiProperty({ format: 'uuid' })
   departamentoId!: string;

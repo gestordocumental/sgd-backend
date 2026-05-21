@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { IsNull, Repository } from 'typeorm';
+import { createHash } from 'crypto';
 import { UsersService } from './users.service';
 import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
@@ -37,6 +38,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   isActive: true,
   registrationStatus:
     overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
+  avatarUrl: null,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],
@@ -67,11 +69,14 @@ describe('UsersService', () => {
   let roleRepo: jest.Mocked<Repository<Role>>;
   let authClient: jest.Mocked<AuthClientService>;
   let redis: { getdel: jest.Mock; setex: jest.Mock };
-  let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit'>>;
+  let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit' | 'emitSafe'>>;
 
   beforeEach(async () => {
     redis = { getdel: jest.fn(), setex: jest.fn() };
-    kafkaProducer = { emit: jest.fn().mockResolvedValue(undefined) };
+    kafkaProducer = {
+      emit: jest.fn().mockResolvedValue(undefined),
+      emitSafe: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -81,6 +86,7 @@ describe('UsersService', () => {
           useValue: {
             findOne: jest.fn(),
             find: jest.fn(),
+            findAndCount: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
             softRemove: jest.fn(),
@@ -214,7 +220,10 @@ describe('UsersService', () => {
 
     it('throws ConflictException with userId when an active user already exists', async () => {
       const dto = { email: 'existing@example.com', position: 'Dev' };
-      const existingUser = makeUser({ email: dto.email });
+      const existingUser = makeUser({
+        email: dto.email,
+        registrationStatus: RegistrationStatus.ACTIVE,
+      });
 
       usersRepo.findOne.mockResolvedValue(existingUser);
 
@@ -297,18 +306,22 @@ describe('UsersService', () => {
   describe('findAll', () => {
     it('returns all active users from the repository', async () => {
       const users = [makeUser(), makeUser({ id: 'user-uuid-2', email: 'other@example.com' })];
-      usersRepo.find.mockResolvedValue(users);
+      usersRepo.findAndCount.mockResolvedValue([users, users.length]);
 
       const result = await service.findAll();
 
-      expect(usersRepo.find).toHaveBeenCalled();
-      expect(result).toEqual(users);
+      expect(usersRepo.findAndCount).toHaveBeenCalledWith({
+        take: 100,
+        skip: 0,
+        order: { createdAt: 'DESC' },
+      });
+      expect(result).toEqual({ data: users, total: users.length });
     });
 
     it('returns an empty array when there are no users', async () => {
-      usersRepo.find.mockResolvedValue([]);
+      usersRepo.findAndCount.mockResolvedValue([[], 0]);
 
-      expect(await service.findAll()).toEqual([]);
+      expect(await service.findAll()).toEqual({ data: [], total: 0 });
     });
   });
 
@@ -632,13 +645,13 @@ describe('UsersService', () => {
       const user = makeUser();
 
       usersRepo.findOne.mockResolvedValue(user);
-      uorRepo.query.mockResolvedValue(undefined as any);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
 
       await service.removeFromOrg(user.id, 'org-uuid-1');
 
-      expect(uorRepo.query).toHaveBeenCalledWith(
-        `UPDATE user_org_roles SET role_id = NULL, assigned_by = NULL WHERE user_id = $1 AND org_id = $2`,
-        [user.id, 'org-uuid-1'],
+      expect(uorRepo.update).toHaveBeenCalledWith(
+        { userId: user.id, orgId: 'org-uuid-1' },
+        { roleId: null, assignedBy: null },
       );
     });
 
@@ -728,7 +741,8 @@ describe('UsersService', () => {
 
       const result = await service.completeRegistration(dto);
 
-      expect(redis.getdel).toHaveBeenCalledWith(`invitation:${validToken}`);
+      const tokenHash = createHash('sha256').update(validToken).digest('hex');
+      expect(redis.getdel).toHaveBeenCalledWith(`invitation:${tokenHash}`);
       expect(authClient.provisionCredentials).toHaveBeenCalledWith({
         userId: user.id,
         email: user.email,

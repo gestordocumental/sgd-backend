@@ -11,6 +11,8 @@ import { KafkaConsumerService } from './common/kafka/kafka-consumer.service';
 import { TypologiesService } from './typologies/typologies.service';
 import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
 import { AppLogger } from './common/logger/app-logger.service';
+import { MetricsModule } from './common/metrics/metrics.module';
+
 import { StorageService } from './common/storage/storage.service';
 import { KAFKA_CLIENT } from './common/kafka/kafka.constants';
 import { ConfigService as CS } from '@nestjs/config';
@@ -33,6 +35,7 @@ import { Kafka } from 'kafkajs';
     BulkImportModule,
     DocumentUploadModule,
     WorkflowFilesModule,
+    MetricsModule,
   ],
   providers: [
     AppLogger,

@@ -8,18 +8,24 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Res,
   UnauthorizedException,
+  UseGuards,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { ConfigService } from "@nestjs/config";
 import { timingSafeEqual } from "crypto";
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
-import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { SwitchCompanyDto } from "./dto/switch-company.dto";
 import {
   ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiParam,
 } from '@nestjs/swagger';
+
+const REFRESH_COOKIE_NAME = 'sgd_refresh_token';
+const REFRESH_COOKIE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 @ApiTags('Auth')
 @Controller("api/auth")
@@ -36,6 +42,44 @@ export class AuthController {
       provided.length === expected.length &&
       timingSafeEqual(expected, provided);
     if (!isValid) throw new UnauthorizedException();
+  }
+
+  private setRefreshCookie(res: Response | undefined, refreshToken: string): void {
+    if (!res) return;
+    res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/api/auth',
+      maxAge: REFRESH_COOKIE_MAX_AGE_MS,
+    });
+    res.setHeader('Cache-Control', 'no-store');
+  }
+
+  private getRefreshTokenFromCookie(cookieHeader: string | undefined): string {
+    const cookie = cookieHeader
+      ?.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${REFRESH_COOKIE_NAME}=`));
+
+    if (!cookie) throw new UnauthorizedException('Missing refresh cookie');
+
+    const raw = cookie.slice(REFRESH_COOKIE_NAME.length + 1);
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      throw new UnauthorizedException('Malformed refresh cookie');
+    }
+  }
+
+  private toAccessTokenResponse(
+    tokenPair: { accessToken: string; refreshToken: string },
+    res: Response | undefined,
+  ): { accessToken: string; refreshToken: string } {
+    this.setRefreshCookie(res, tokenPair.refreshToken);
+    // Return the refresh token in the body so cross-origin clients (no withCredentials)
+    // can store it themselves. The httpOnly cookie remains as defense-in-depth.
+    return { accessToken: tokenPair.accessToken, refreshToken: tokenPair.refreshToken };
   }
 
   @ApiOperation({ summary: 'Provision credentials for a new user (internal only)' })
@@ -82,19 +126,47 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Login with email and password' })
-  @ApiResponse({ status: 200, description: 'Returns accessToken and refreshToken' })
+  @ApiResponse({ status: 200, description: 'Returns accessToken and sets refresh token as HttpOnly cookie' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
+  @UseGuards(ThrottlerGuard)
   @Post("login")
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    return this.toAccessTokenResponse(await this.authService.login(dto), res);
   }
 
   @ApiOperation({ summary: 'Refresh access token using refresh token' })
-  @ApiResponse({ status: 200, description: 'Returns new accessToken and refreshToken' })
+  @ApiResponse({ status: 200, description: 'Returns new accessToken + refreshToken and rotates refresh HttpOnly cookie' })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
+  @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
+  @UseGuards(ThrottlerGuard)
   @Post("refresh")
-  refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refresh(dto.refreshToken);
+  async refresh(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Body() body: { refreshToken?: string },
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    // Prefer the httpOnly cookie (more secure); fall back to the body token for
+    // cross-origin clients that cannot send cookies without withCredentials.
+    let refreshToken: string;
+    try {
+      refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
+    } catch (err) {
+      // Only fall back to body token when cookie is simply absent.
+      // A malformed cookie likely indicates tampering — reject immediately.
+      if (err instanceof UnauthorizedException && err.message === 'Missing refresh cookie') {
+        if (!body?.refreshToken) {
+          throw new UnauthorizedException('Missing refresh token');
+        }
+        refreshToken = body.refreshToken;
+      } else {
+        throw err;
+      }
+    }
+    return this.toAccessTokenResponse(await this.authService.refresh(refreshToken), res);
   }
 
   // ── PROTECTED routes (Kong validates JWT before arriving here) ───────────────
@@ -129,14 +201,16 @@ export class AuthController {
 
   @ApiOperation({ summary: 'Switch active company context (generates a new token with selected companyId)' })
   @ApiBearerAuth('JWT')
-  @ApiResponse({ status: 200, description: 'Returns new accessToken with updated companyId' })
+  @ApiResponse({ status: 200, description: 'Returns new accessToken with updated companyId and rotates refresh cookie' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
   @Post("switch-company")
-  switchCompany(
+  async switchCompany(
     @Headers("authorization") auth: string,
     @Body() dto: SwitchCompanyDto,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const payload = this.authService.verifyAccessToken(auth);
-    return this.authService.switchCompany(payload.sub, dto.companyId);
+    const tokenPair = await this.authService.switchCompany(payload.sub, dto.companyId);
+    return this.toAccessTokenResponse(tokenPair, res);
   }
 }

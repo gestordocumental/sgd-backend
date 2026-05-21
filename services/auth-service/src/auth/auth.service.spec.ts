@@ -15,6 +15,7 @@ import { Credential, CredentialStatus } from './entities/credential.entity';
 import { UserClientService } from '../user-client/user-client.service';
 
 jest.mock('bcryptjs', () => ({
+  hashSync: jest.fn().mockReturnValue('$2a$10$hashed'),
   hash: jest.fn().mockResolvedValue('$2a$10$hashed'),
   compare: jest.fn(),
 }));

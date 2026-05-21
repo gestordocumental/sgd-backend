@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { IsNull, Repository } from "typeorm";
 import * as ExcelJS from "exceljs";
 import { Departamento } from "./entities/departamento.entity";
 import { Area } from "./entities/area.entity";
@@ -94,15 +94,10 @@ export class BulkStructureService {
             else result.positionsExisting++;
           }
         } else if (position) {
-          // position without area → invalid
-          result.failed++;
-          result.errors.push({
-            row: rowNum,
-            department,
-            area,
-            position,
-            reason: "El cargo requiere que se especifique un área",
-          });
+          // position without area → department-level cargo
+          const posResult = await this.upsertDeptPosition(orgId, dept.id, position, descriptionPosition);
+          if (posResult.wasCreated) result.positionsCreated++;
+          else result.positionsExisting++;
         }
       } catch (err: unknown) {
         const safeReason =
@@ -136,12 +131,42 @@ export class BulkStructureService {
       );
     }
 
+    // Pre-load entire org structure in 3 queries instead of N×3
+    const [allDepts, allAreas, allCargos] = await Promise.all([
+      this.deptRepo.find({ where: { orgId: dto.orgId } }),
+      this.areaRepo.find({ where: { orgId: dto.orgId } }),
+      this.cargoRepo.find({ where: { orgId: dto.orgId } }),
+    ]);
+
+    // Build in-memory lookup maps
+    const deptByName = new Map(allDepts.map((d) => [d.name, d]));
+    const areaByDeptAndName = new Map(
+      allAreas.map((a) => [`${a.departamentoId}:${a.name}`, a]),
+    );
+    const cargoByAreaAndName = new Map(
+      allCargos
+        .filter((c) => c.areaId !== null)
+        .map((c) => [`${c.areaId}:${c.name}`, c]),
+    );
+    const cargoByDeptAndName = new Map(
+      allCargos
+        .filter((c) => c.areaId === null)
+        .map((c) => [`${c.departamentoId}:${c.name}`, c]),
+    );
+
     const resolved: ResolvedStructureItem[] = [];
     const unresolved: UnresolvedStructureItem[] = [];
 
     for (let i = 0; i < dto.items.length; i++) {
       const item = dto.items[i];
-      const result = await this.resolveItem(dto.orgId, item, i);
+      const result = this.resolveItemFromMaps(
+        item,
+        i,
+        deptByName,
+        areaByDeptAndName,
+        cargoByAreaAndName,
+        cargoByDeptAndName,
+      );
 
       if ("reason" in result) {
         unresolved.push(result);
@@ -153,14 +178,15 @@ export class BulkStructureService {
     return { resolved, unresolved };
   }
 
-  private async resolveItem(
-    orgId: string,
+  private resolveItemFromMaps(
     item: ResolveStructureItemDto,
     index: number,
-  ): Promise<ResolvedStructureItem | UnresolvedStructureItem> {
-    const dept = await this.deptRepo.findOne({
-      where: { orgId, name: item.department },
-    });
+    deptByName: Map<string, Departamento>,
+    areaByDeptAndName: Map<string, Area>,
+    cargoByAreaAndName: Map<string, Cargo>,
+    cargoByDeptAndName: Map<string, Cargo>,
+  ): ResolvedStructureItem | UnresolvedStructureItem {
+    const dept = deptByName.get(item.department);
     if (!dept) {
       return {
         index,
@@ -169,17 +195,19 @@ export class BulkStructureService {
     }
 
     if (item.position && !item.area) {
-      return {
-        index,
-        reason: `Cargo '${item.position}' requiere un área para poder resolverse.`,
-      };
+      const cargo = cargoByDeptAndName.get(`${dept.id}:${item.position}`);
+      if (!cargo) {
+        return {
+          index,
+          reason: `Cargo '${item.position}' no encontrado a nivel de departamento '${item.department}'. Ejecute primero la carga de estructura organizacional.`,
+        };
+      }
+      return { index, departamentoId: dept.id, areaId: null, cargoId: cargo.id };
     }
 
     let areaId: string | null = null;
     if (item.area) {
-      const area = await this.areaRepo.findOne({
-        where: { orgId, departamentoId: dept.id, name: item.area },
-      });
+      const area = areaByDeptAndName.get(`${dept.id}:${item.area}`);
       if (!area) {
         return {
           index,
@@ -189,21 +217,14 @@ export class BulkStructureService {
       areaId = area.id;
 
       if (item.position) {
-        const cargo = await this.cargoRepo.findOne({
-          where: { orgId, areaId: area.id, name: item.position },
-        });
+        const cargo = cargoByAreaAndName.get(`${area.id}:${item.position}`);
         if (!cargo) {
           return {
             index,
             reason: `Cargo '${item.position}' no encontrado en área '${item.area}'. Ejecute primero la carga de estructura organizacional.`,
           };
         }
-        return {
-          index,
-          departamentoId: dept.id,
-          areaId: area.id,
-          cargoId: cargo.id,
-        };
+        return { index, departamentoId: dept.id, areaId: area.id, cargoId: cargo.id };
       }
     }
 
@@ -228,7 +249,23 @@ export class BulkStructureService {
     let cargoNombre: string | null = null;
 
     if (dto.cargoId && !dto.areaId) {
-      throw new BadRequestException('cargoId requiere areaId');
+      // dept-level cargo (no area)
+      const cargo = await this.cargoRepo.findOne({
+        where: { orgId: dto.orgId, departamentoId: dept.id, areaId: IsNull(), id: dto.cargoId },
+      });
+      if (!cargo) {
+        throw new BadRequestException(
+          `Cargo '${dto.cargoId}' no encontrado a nivel de departamento '${dept.name}'`,
+        );
+      }
+      return {
+        departamentoId: dept.id,
+        departamentoNombre: dept.name,
+        areaId: null,
+        areaNombre: null,
+        cargoId: cargo.id,
+        cargoNombre: cargo.name,
+      };
     }
 
     if (dto.areaId) {
@@ -326,6 +363,30 @@ export class BulkStructureService {
       this.cargoRepo.create({
         orgId,
         areaId,
+        departamentoId,
+        name: normalizedName,
+        description: description ?? null,
+      }),
+    );
+    return Object.assign(created, { wasCreated: true });
+  }
+
+  private async upsertDeptPosition(
+    orgId: string,
+    departamentoId: string,
+    name: string,
+    description?: string,
+  ): Promise<Cargo & { wasCreated: boolean }> {
+    const normalizedName = name.trim();
+    const existing = await this.cargoRepo.findOne({
+      where: { orgId, departamentoId, areaId: IsNull(), name: normalizedName },
+    });
+    if (existing) return Object.assign(existing, { wasCreated: false });
+
+    const created = await this.cargoRepo.save(
+      this.cargoRepo.create({
+        orgId,
+        areaId: null,
         departamentoId,
         name: normalizedName,
         description: description ?? null,

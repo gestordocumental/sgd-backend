@@ -10,7 +10,7 @@ name: sgd-infra
 services:
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # PostgreSQL — Auth, Org, User, Workflow services
+  # PostgreSQL — Auth, Org, User, Workflow, Notification services
   # ─────────────────────────────────────────────────────────────────────────────
   postgresql:
     image: postgres:15-alpine
@@ -211,7 +211,9 @@ services:
       - sgd-local
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # MinIO Init — Crea el bucket 'documentos' al arrancar (se ejecuta una vez)
+  # MinIO Init — Crea los buckets al arrancar (se ejecuta una vez)
+  #   · documentos  → privado  (documentos de empresa, acceso por URL firmada)
+  #   · avatares    → público  (fotos de perfil, acceso directo sin firma)
   # ─────────────────────────────────────────────────────────────────────────────
   minio-init:
     image: minio/mc:latest
@@ -224,7 +226,9 @@ services:
         mc alias set local http://minio:9000 minio_admin minio_secret_local &&
         mc mb local/documentos --ignore-existing &&
         mc anonymous set none local/documentos &&
-        echo '>>> Bucket documentos creado correctamente.'
+        mc mb local/avatares --ignore-existing &&
+        mc anonymous set download local/avatares &&
+        echo '>>> Buckets documentos (privado) y avatares (público) listos.'
       "
     restart: "no"
     networks:

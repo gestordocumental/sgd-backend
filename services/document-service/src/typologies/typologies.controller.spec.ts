@@ -91,7 +91,7 @@ describe('TypologiesController', () => {
       const { service, orgClient, extractorClient } = makeDeps();
       const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
 
-      const result = await ctrl.create('org-1', {
+      const result = await ctrl.create(undefined, 'org-1', {
         departamentoId: 'dept-1',
         nombre: 'Policy', codigo: 'POL-001', version: '01',
       });
@@ -102,6 +102,7 @@ describe('TypologiesController', () => {
         expect.any(Object),
         expect.objectContaining({ departamentoId: 'dept-1' }),
         CreationSource.MANUAL,
+        undefined,
       );
       expect(result).toBeInstanceOf(TypologyResponseDto);
     });
@@ -158,9 +159,9 @@ describe('TypologiesController', () => {
       const { service, orgClient, extractorClient } = makeDeps();
       const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
 
-      const result = await ctrl.update('org-1', 'typo-id-1', { nombre: 'Updated' });
+      const result = await ctrl.update(undefined, 'org-1', 'typo-id-1', { nombre: 'Updated' });
 
-      expect(service.update).toHaveBeenCalledWith('org-1', 'typo-id-1', { nombre: 'Updated' }, undefined);
+      expect(service.update).toHaveBeenCalledWith('org-1', 'typo-id-1', { nombre: 'Updated' }, undefined, undefined);
       expect(result).toBeInstanceOf(TypologyResponseDto);
     });
   });
@@ -170,9 +171,9 @@ describe('TypologiesController', () => {
       const { service, orgClient, extractorClient } = makeDeps();
       const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
 
-      await ctrl.remove('org-1', 'typo-id-1');
+      await ctrl.remove(undefined, 'org-1', 'typo-id-1');
 
-      expect(service.remove).toHaveBeenCalledWith('org-1', 'typo-id-1');
+      expect(service.remove).toHaveBeenCalledWith('org-1', 'typo-id-1', undefined);
     });
   });
 
@@ -181,9 +182,9 @@ describe('TypologiesController', () => {
       const { service, orgClient, extractorClient } = makeDeps();
       const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
 
-      const result = await ctrl.resolveDiscrepancy('org-1', 'typo-id-1', { action: ResolveAction.KEEP_DECLARED });
+      const result = await ctrl.resolveDiscrepancy(undefined, 'org-1', 'typo-id-1', { action: ResolveAction.KEEP_DECLARED });
 
-      expect(service.resolveDiscrepancy).toHaveBeenCalledWith('org-1', 'typo-id-1', { action: ResolveAction.KEEP_DECLARED });
+      expect(service.resolveDiscrepancy).toHaveBeenCalledWith('org-1', 'typo-id-1', { action: ResolveAction.KEEP_DECLARED }, undefined);
       expect(result).toBeInstanceOf(TypologyResponseDto);
     });
   });

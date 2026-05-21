@@ -6,7 +6,8 @@
 export enum WorkflowStatus {
   DRAFT                      = 'DRAFT',
   PENDING_APPROVAL           = 'PENDING_APPROVAL',
-  RETURNED_TO_CREATOR        = 'RETURNED_TO_CREATOR',
+  RETURNED_TO_CREATOR        = 'RETURNED_TO_CREATOR', // legacy — kept for existing DB rows
+  REJECTED                   = 'REJECTED',             // terminal: flujo rechazado, no se puede reabrir
   PENDING_REVIEW_CYCLE       = 'PENDING_REVIEW_CYCLE',
   AVAILABLE_FOR_FINAL_USERS  = 'AVAILABLE_FOR_FINAL_USERS',
   ADMIN_CYCLE_IN_PROGRESS    = 'ADMIN_CYCLE_IN_PROGRESS',
@@ -44,6 +45,7 @@ export enum AttachmentType {
 
 export enum TimelineEventType {
   WORKFLOW_CREATED            = 'WORKFLOW_CREATED',
+  WORKFLOW_UPDATED            = 'WORKFLOW_UPDATED',
   APPROVAL_STARTED            = 'APPROVAL_STARTED',
   STEP_APPROVED               = 'STEP_APPROVED',
   STEP_REJECTED               = 'STEP_REJECTED',

@@ -34,11 +34,12 @@ function makeContext(opts: {
   };
 
   const reflector = {
-    get: jest.fn().mockReturnValue(opts.meta),
+    getAllAndOverride: jest.fn().mockReturnValue(opts.meta),
   };
 
   const ctx = {
     getHandler: jest.fn(),
+    getClass: jest.fn(),
     switchToHttp: jest.fn().mockReturnValue({
       getRequest: jest.fn().mockReturnValue(request),
     }),
@@ -54,7 +55,7 @@ const SECRET = 'test-secret-key';
 const INTERNAL = 'internal-secret';
 
 function buildGuard(meta?: AuthMeta, internalToken = INTERNAL) {
-  const reflector = { get: jest.fn().mockReturnValue(meta) } as unknown as Reflector;
+  const reflector = { getAllAndOverride: jest.fn().mockReturnValue(meta) } as unknown as Reflector;
   const config = {
     getOrThrow: jest.fn((key: string) => {
       if (key === 'JWT_SECRET') return SECRET;
@@ -75,9 +76,10 @@ function makeCtx(
   request: ReturnType<typeof makeRequest>,
   meta?: AuthMeta,
 ): ExecutionContext {
-  const reflector = { get: jest.fn().mockReturnValue(meta) };
+  const reflector = { getAllAndOverride: jest.fn().mockReturnValue(meta) };
   return {
     getHandler: jest.fn(),
+    getClass: jest.fn(),
     switchToHttp: () => ({ getRequest: () => request }),
     _reflector: reflector,
   } as unknown as ExecutionContext;
@@ -91,11 +93,12 @@ function guardWithMeta(meta?: AuthMeta) {
 
 // Simulate canActivate using the shared reflector mock
 function activate(guard: JwtGuard, request: ReturnType<typeof makeRequest>, meta?: AuthMeta): boolean {
-  const reflector = { get: jest.fn().mockReturnValue(meta) } as unknown as Reflector;
+  const reflector = { getAllAndOverride: jest.fn().mockReturnValue(meta) } as unknown as Reflector;
   // Replace the guard's reflector at runtime via casting
   (guard as unknown as { reflector: Reflector }).reflector = reflector;
   const ctx = {
     getHandler: jest.fn(),
+    getClass: jest.fn(),
     switchToHttp: () => ({ getRequest: () => request }),
   } as unknown as ExecutionContext;
   return guard.canActivate(ctx);

@@ -9,6 +9,9 @@ import {
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { ResolveDiscrepancyDto, ResolveAction } from './dto/resolve-discrepancy.dto';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { TOPICS } from '../common/kafka/kafka.constants';
+import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
 
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const parse = (v: string) =>
@@ -44,13 +47,38 @@ export class TypologiesService {
   constructor(
     @InjectModel(Typology.name)
     private readonly model: Model<TypologyDocument>,
+    private readonly kafkaProducer: KafkaProducerService,
   ) {}
+
+  private emitAuditLog(params: {
+    actorId: string;
+    orgId: string;
+    action: string;
+    resourceId: string;
+    resourceName?: string;
+    metadata?: Record<string, unknown>;
+  }): void {
+    this.kafkaProducer.emitSafe(TOPICS.AUDIT_LOG, {
+      service:       'document-service',
+      actorId:       params.actorId,
+      orgId:         params.orgId,
+      action:        params.action,
+      resourceType:  'typology',
+      resourceId:    params.resourceId,
+      resourceName:  params.resourceName ?? null,
+      correlationId: getCorrelationId(),
+      ip:            getClientIp(),
+      metadata:      params.metadata,
+      timestamp:     new Date().toISOString(),
+    });
+  }
 
   async create(
     orgId: string,
     dto: CreateTypologyDto,
     structureNames: OrgStructureNames,
     source: CreationSource = CreationSource.MANUAL,
+    actorId?: string,
   ): Promise<TypologyDocument> {
     // Explicit pre-check: reject if an ACTIVE typology with the same codigo already exists
     if (dto.codigo) {
@@ -89,7 +117,18 @@ export class TypologiesService {
     });
 
     try {
-      return await doc.save();
+      const saved = await doc.save();
+      if (actorId) {
+        this.emitAuditLog({
+          actorId,
+          orgId,
+          action:       'TYPOLOGY_CREATED',
+          resourceId:   (saved._id as Types.ObjectId).toString(),
+          resourceName: dto.nombre ?? dto.codigo ?? undefined,
+          metadata:     { source },
+        });
+      }
+      return saved;
     } catch (err: any) {
       if (err.code === 11000) {
         throw new ConflictException(`An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`);
@@ -120,6 +159,7 @@ export class TypologiesService {
     id: string,
     dto: UpdateTypologyDto,
     structureNames?: OrgStructureNames,
+    actorId?: string,
   ): Promise<TypologyDocument> {
     const doc = await this.findOne(orgId, id);
 
@@ -150,7 +190,18 @@ export class TypologiesService {
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
 
     try {
-      return await doc.save();
+      const saved = await doc.save();
+      if (actorId) {
+        this.emitAuditLog({
+          actorId,
+          orgId,
+          action:       'TYPOLOGY_UPDATED',
+          resourceId:   id,
+          resourceName: saved.datosDeclarados.nombre ?? saved.datosDeclarados.codigo ?? undefined,
+          metadata:     { fields: Object.keys(dto), structureChanged: !!structureNames },
+        });
+      }
+      return saved;
     } catch (err: any) {
       if (err.code === 11000) {
         throw new ConflictException(`An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`);
@@ -159,11 +210,14 @@ export class TypologiesService {
     }
   }
 
-  async remove(orgId: string, id: string): Promise<void> {
+  async remove(orgId: string, id: string, actorId?: string): Promise<void> {
     const doc = await this.findOne(orgId, id);
     doc.deletedAt = new Date();
     doc.typologyStatus = TypologyStatus.DELETED;
     await doc.save();
+    if (actorId) {
+      this.emitAuditLog({ actorId, orgId, action: 'TYPOLOGY_DELETED', resourceId: id, resourceName: doc.datosDeclarados.nombre ?? doc.datosDeclarados.codigo ?? undefined });
+    }
   }
 
   /** Returns all typologies (including soft-deleted) that share the same codigo within the org */
@@ -229,7 +283,7 @@ export class TypologiesService {
   }
 
   /** Called when user resolves discrepancy or confirms extracted values */
-  async resolveDiscrepancy(orgId: string, id: string, dto: ResolveDiscrepancyDto): Promise<TypologyDocument> {
+  async resolveDiscrepancy(orgId: string, id: string, dto: ResolveDiscrepancyDto, actorId?: string): Promise<TypologyDocument> {
     const doc = await this.findOne(orgId, id);
 
     const status = doc.documento.extractionStatus;
@@ -257,7 +311,18 @@ export class TypologiesService {
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
 
     try {
-      return await doc.save();
+      const saved = await doc.save();
+      if (actorId) {
+        this.emitAuditLog({
+          actorId,
+          orgId,
+          action:       'TYPOLOGY_DISCREPANCY_RESOLVED',
+          resourceId:   id,
+          resourceName: saved.datosDeclarados.nombre ?? saved.datosDeclarados.codigo ?? undefined,
+          metadata:     { action: dto.action },
+        });
+      }
+      return saved;
     } catch (err: any) {
       if (err?.code === 11000) {
         throw new ConflictException(
@@ -266,5 +331,71 @@ export class TypologiesService {
       }
       throw err;
     }
+  }
+
+  async getStats(orgId: string): Promise<{
+    totalTypologies: number;
+    activeTypologies: number;
+    uploadedDocuments: number;
+    storageTotalBytes: number;
+    extractionStatusCounts: Record<string, number>;
+  }> {
+    const [totalTypologies, activeTypologies] = await Promise.all([
+      this.model.countDocuments({ orgId }),
+      this.model.countDocuments({ orgId, typologyStatus: TypologyStatus.ACTIVE }),
+    ]);
+
+    const storageAgg = await this.model.aggregate([
+      { $match: { orgId, 'documento.r2Key': { $ne: null } } },
+      {
+        $group: {
+          _id: null,
+          uploadedDocuments: { $sum: 1 },
+          storageTotalBytes: { $sum: { $ifNull: ['$documento.sizeBytes', 0] } },
+        },
+      },
+    ]);
+
+    const extractionAgg = await this.model.aggregate([
+      { $match: { orgId, 'documento.r2Key': { $ne: null } } },
+      { $group: { _id: '$documento.extractionStatus', count: { $sum: 1 } } },
+    ]);
+
+    const extractionStatusCounts: Record<string, number> = {};
+    for (const item of extractionAgg) {
+      extractionStatusCounts[item._id as string] = item.count as number;
+    }
+
+    return {
+      totalTypologies,
+      activeTypologies,
+      uploadedDocuments: storageAgg[0]?.uploadedDocuments ?? 0,
+      storageTotalBytes: storageAgg[0]?.storageTotalBytes ?? 0,
+      extractionStatusCounts,
+    };
+  }
+
+  async getStoragePerOrg(): Promise<{ orgId: string; storageTotalBytes: number; uploadedDocuments: number }[]> {
+    const rows = await this.model.aggregate<{
+      _id: string;
+      storageTotalBytes: number;
+      uploadedDocuments: number;
+    }>([
+      { $match: { 'documento.r2Key': { $ne: null } } },
+      {
+        $group: {
+          _id: '$orgId',
+          storageTotalBytes: { $sum: { $ifNull: ['$documento.sizeBytes', 0] } },
+          uploadedDocuments: { $sum: 1 },
+        },
+      },
+      { $sort: { storageTotalBytes: -1 } },
+    ]);
+
+    return rows.map((r: { _id: string; storageTotalBytes: number; uploadedDocuments: number }) => ({
+      orgId: r._id,
+      storageTotalBytes: r.storageTotalBytes,
+      uploadedDocuments: r.uploadedDocuments,
+    }));
   }
 }

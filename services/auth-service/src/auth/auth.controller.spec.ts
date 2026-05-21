@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
@@ -34,7 +35,10 @@ describe('AuthController', () => {
           },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: jest.fn().mockReturnValue(true) })
+      .compile();
 
     controller = module.get(AuthController);
   });
@@ -119,7 +123,7 @@ describe('AuthController', () => {
 
   describe('POST /api/auth/refresh', () => {
     it('delegates to authService.refresh and returns new token pair', async () => {
-      const result = await controller.refresh({ refreshToken: 'old.refresh.jwt' });
+      const result = await controller.refresh(undefined, { refreshToken: 'old.refresh.jwt' });
 
       expect(authService.refresh).toHaveBeenCalledWith('old.refresh.jwt');
       expect(result).toHaveProperty('accessToken');

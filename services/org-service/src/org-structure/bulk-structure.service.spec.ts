@@ -83,6 +83,7 @@ const makeWorksheet = (
 });
 
 type MockRepo<T extends object> = {
+  find: jest.Mock;
   findOne: jest.Mock;
   create: jest.Mock;
   save: jest.Mock;
@@ -96,9 +97,9 @@ describe('BulkStructureService', () => {
   let mockLogger: jest.Mocked<AppLogger>;
 
   beforeEach(async () => {
-    deptRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
-    areaRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
-    cargoRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+    deptRepo = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+    areaRepo = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+    cargoRepo = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
     mockLogger = {
       log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn(), http: jest.fn(),
     } as any;
@@ -250,18 +251,21 @@ describe('BulkStructureService', () => {
       expect(result.positionsCreated).toBe(0);
     });
 
-    it('records an error when position is given without an area', async () => {
+    it('creates a dept-level position when no area is provided', async () => {
       const dept = makeDept();
+      const cargo = makeCargo({ areaId: null });
       mockGetWorksheet.mockReturnValue(
         makeWorksheet([{ cells: ['Engineering', '', '', '', 'Senior Dev', ''] }]),
       );
       deptRepo.findOne.mockResolvedValue(dept);
+      cargoRepo.findOne.mockResolvedValue(null);
+      cargoRepo.create.mockReturnValue(cargo);
+      cargoRepo.save.mockResolvedValue(cargo);
 
       const result = await service.importFromExcel(ORG_ID, Buffer.from(''));
 
-      expect(result.failed).toBe(1);
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].reason).toContain('área');
+      expect(result.failed).toBe(0);
+      expect(result.positionsCreated).toBe(1);
     });
 
     it('records a generic error and logs a warning when an unexpected exception is thrown', async () => {
@@ -323,7 +327,9 @@ describe('BulkStructureService', () => {
 
     it('resolves a department-only item', async () => {
       const dept = makeDept();
-      deptRepo.findOne.mockResolvedValue(dept);
+      deptRepo.find.mockResolvedValue([dept]);
+      areaRepo.find.mockResolvedValue([]);
+      cargoRepo.find.mockResolvedValue([]);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,
@@ -341,7 +347,9 @@ describe('BulkStructureService', () => {
     });
 
     it('returns an unresolved item when the department is not found', async () => {
-      deptRepo.findOne.mockResolvedValue(null);
+      deptRepo.find.mockResolvedValue([]);
+      areaRepo.find.mockResolvedValue([]);
+      cargoRepo.find.mockResolvedValue([]);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,
@@ -352,23 +360,27 @@ describe('BulkStructureService', () => {
       expect(result.unresolved[0].reason).toContain('Missing');
     });
 
-    it('returns unresolved when position is given without area', async () => {
+    it('returns unresolved when dept-level position is not found', async () => {
       const dept = makeDept();
-      deptRepo.findOne.mockResolvedValue(dept);
+      deptRepo.find.mockResolvedValue([dept]);
+      areaRepo.find.mockResolvedValue([]);
+      cargoRepo.find.mockResolvedValue([]);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,
         items: [{ department: 'Engineering', position: 'Dev' }],
       });
 
-      expect(result.unresolved[0].reason).toContain('área');
+      expect(result.unresolved).toHaveLength(1);
+      expect(result.unresolved[0].reason).toContain('Dev');
     });
 
     it('resolves department + area', async () => {
       const dept = makeDept();
       const area = makeArea();
-      deptRepo.findOne.mockResolvedValue(dept);
-      areaRepo.findOne.mockResolvedValue(area);
+      deptRepo.find.mockResolvedValue([dept]);
+      areaRepo.find.mockResolvedValue([area]);
+      cargoRepo.find.mockResolvedValue([]);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,
@@ -384,8 +396,9 @@ describe('BulkStructureService', () => {
 
     it('returns unresolved when area is not found', async () => {
       const dept = makeDept();
-      deptRepo.findOne.mockResolvedValue(dept);
-      areaRepo.findOne.mockResolvedValue(null);
+      deptRepo.find.mockResolvedValue([dept]);
+      areaRepo.find.mockResolvedValue([]);
+      cargoRepo.find.mockResolvedValue([]);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,
@@ -399,9 +412,9 @@ describe('BulkStructureService', () => {
       const dept = makeDept();
       const area = makeArea();
       const cargo = makeCargo();
-      deptRepo.findOne.mockResolvedValue(dept);
-      areaRepo.findOne.mockResolvedValue(area);
-      cargoRepo.findOne.mockResolvedValue(cargo);
+      deptRepo.find.mockResolvedValue([dept]);
+      areaRepo.find.mockResolvedValue([area]);
+      cargoRepo.find.mockResolvedValue([cargo]);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,
@@ -418,9 +431,9 @@ describe('BulkStructureService', () => {
     it('returns unresolved when position (cargo) is not found', async () => {
       const dept = makeDept();
       const area = makeArea();
-      deptRepo.findOne.mockResolvedValue(dept);
-      areaRepo.findOne.mockResolvedValue(area);
-      cargoRepo.findOne.mockResolvedValue(null);
+      deptRepo.find.mockResolvedValue([dept]);
+      areaRepo.find.mockResolvedValue([area]);
+      cargoRepo.find.mockResolvedValue([]);
 
       const result = await service.resolveStructure({
         orgId: ORG_ID,

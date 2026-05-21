@@ -58,7 +58,6 @@ function makeApprovalService(): jest.Mocked<WorkflowApprovalService> {
     startApproval: jest.fn().mockResolvedValue(undefined),
     approve: jest.fn().mockResolvedValue(undefined),
     reject: jest.fn().mockResolvedValue(undefined),
-    resubmit: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<WorkflowApprovalService>;
 }
 
@@ -214,19 +213,6 @@ describe('WorkflowsController', () => {
       await controller.reject('wf-1', dto, user);
 
       expect(approvalService.reject).toHaveBeenCalledWith('wf-1', user.sub, dto);
-      expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
-    });
-  });
-
-  describe('resubmit()', () => {
-    it('calls approvalService.resubmit then workflowsService.findOne', async () => {
-      const { controller, approvalService, workflowsService } = buildController();
-      const user = makeUser();
-      const dto = { observations: 'Fixed' };
-
-      await controller.resubmit('wf-1', dto, user);
-
-      expect(approvalService.resubmit).toHaveBeenCalledWith('wf-1', user.sub, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
     });
   });

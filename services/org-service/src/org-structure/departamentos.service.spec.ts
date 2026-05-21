@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DepartamentosService } from './departamentos.service';
 import { Departamento } from './entities/departamento.entity';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -37,6 +38,7 @@ describe('DepartamentosService', () => {
       providers: [
         DepartamentosService,
         { provide: getRepositoryToken(Departamento), useValue: repo },
+        { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
     }).compile();
 
@@ -69,7 +71,11 @@ describe('DepartamentosService', () => {
     repo.find!.mockResolvedValue(departamentos);
 
     await expect(service.findAll('org-1')).resolves.toEqual(departamentos);
-    expect(repo.find).toHaveBeenCalledWith({ where: { orgId: 'org-1' }, order: { name: 'ASC' } });
+    expect(repo.find).toHaveBeenCalledWith({
+      where: { orgId: 'org-1' },
+      order: { name: 'ASC' },
+      take: 500,
+    });
   });
 
   it('returns one departamento by org and id', async () => {

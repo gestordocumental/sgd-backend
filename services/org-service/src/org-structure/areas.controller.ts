@@ -1,7 +1,13 @@
 import {
   Controller, Get, Post, Patch, Delete,
   Param, Body, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe,
+  UnauthorizedException,
 } from '@nestjs/common';
+
+function requireActor(actorId: string | undefined): string {
+  if (!actorId) throw new UnauthorizedException('Missing authenticated user');
+  return actorId;
+}
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { AreasService } from './areas.service';
 import { CreateAreaDto } from './dto/create-area.dto';
@@ -11,6 +17,7 @@ import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
 import { OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
 import { RequireOrgPermission } from '../common/decorators/require-org-permission.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Org Structure — Areas')
 @ApiBearerAuth('JWT')
@@ -27,11 +34,12 @@ export class AreasController {
   @Post()
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async create(
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Body() dto: CreateAreaDto,
   ): Promise<AreaResponseDto> {
-    return AreaResponseDto.from(await this.service.create(orgId, departamentoId, dto));
+    return AreaResponseDto.from(await this.service.create(orgId, departamentoId, dto, requireActor(actorId)));
   }
 
   @ApiOperation({ summary: 'List all areas of a department' })
@@ -64,12 +72,13 @@ export class AreasController {
   @Patch(':id')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async update(
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAreaDto,
   ): Promise<AreaResponseDto> {
-    return AreaResponseDto.from(await this.service.update(orgId, departamentoId, id, dto));
+    return AreaResponseDto.from(await this.service.update(orgId, departamentoId, id, dto, requireActor(actorId)));
   }
 
   @ApiOperation({ summary: 'Soft delete area' })
@@ -79,11 +88,12 @@ export class AreasController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireOrgPermission('ORG_STRUCTURE', 'DELETE')
   async remove(
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
-    return this.service.remove(orgId, departamentoId, id);
+    return this.service.remove(orgId, departamentoId, id, requireActor(actorId));
   }
 
   @ApiOperation({ summary: 'Restore a deleted area' })
@@ -92,10 +102,11 @@ export class AreasController {
   @Post(':id/restore')
   @RequireOrgPermission('ORG_STRUCTURE', 'WRITE')
   async restore(
+    @CurrentUser() actorId: string | undefined,
     @Param('orgId', ParseUUIDPipe) orgId: string,
     @Param('departamentoId', ParseUUIDPipe) departamentoId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<AreaResponseDto> {
-    return AreaResponseDto.from(await this.service.restore(orgId, departamentoId, id));
+    return AreaResponseDto.from(await this.service.restore(orgId, departamentoId, id, requireActor(actorId)));
   }
 }

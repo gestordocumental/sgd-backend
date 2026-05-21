@@ -11,7 +11,7 @@ const makeHost = (method = 'GET', url = '/test') => {
   const mockJson = jest.fn();
   const mockStatus = jest.fn().mockReturnValue({ json: mockJson });
   const mockRes = { status: mockStatus, json: mockJson };
-  const mockReq = { method, url };
+  const mockReq = { method, url, path: url };
 
   return {
     host: {

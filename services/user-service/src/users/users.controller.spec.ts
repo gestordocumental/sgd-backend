@@ -9,6 +9,7 @@ import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserOrgRoleResponseDto } from './dto/user-org-role-response.dto';
 import { UserWithOrgRolesDto } from './dto/user-with-org-roles.dto';
+import { StorageService } from '../common/storage/storage.service';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   cargoId: null,
   isActive: true,
   registrationStatus: overrides.registrationStatus ?? RegistrationStatus.ACTIVE,
+  avatarUrl: null,
   isSuperAdmin: false,
   twoFactorEnabled: false,
   orgRoles: [],
@@ -62,9 +64,13 @@ describe('UsersController', () => {
           useValue: {
             create: jest.fn(),
             findAll: jest.fn(),
+            findAllSuperAdmin: jest.fn(),
             findOne: jest.fn(),
             findByEmail: jest.fn(),
             findByOrg: jest.fn(),
+            getCountsByOrg: jest.fn(),
+            getMyOrgRoles: jest.fn(),
+            uploadAvatar: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
             restore: jest.fn(),
@@ -75,6 +81,7 @@ describe('UsersController', () => {
             getOrgRoles: jest.fn(),
             removeFromOrg: jest.fn(),
             completeRegistration: jest.fn(),
+            resendInvitation: jest.fn(),
           },
         },
         {
@@ -86,6 +93,14 @@ describe('UsersController', () => {
         {
           provide: getRepositoryToken(UserOrgRole),
           useValue: { find: jest.fn() },
+        },
+        {
+          provide: StorageService,
+          useValue: {
+            extractKey: jest.fn(),
+            delete: jest.fn(),
+            upload: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -107,7 +122,7 @@ describe('UsersController', () => {
 
       const result = await controller.create(caller, dto as any);
 
-      expect(usersService.create).toHaveBeenCalledWith(dto);
+      expect(usersService.create).toHaveBeenCalledWith(dto, caller.sub, caller.companyId);
       expect(result.email).toBe(user.email);
       expect(result.invitationToken).toBe(invitationToken);
     });
@@ -150,20 +165,23 @@ describe('UsersController', () => {
   // ─── GET / ────────────────────────────────────────────────────────────────
 
   describe('findAll', () => {
-    it('returns an array of UserResponseDto', async () => {
+    it('returns a paginated response with UserResponseDto items', async () => {
       const users = [makeUser(), makeUser({ id: 'user-uuid-2', email: 'other@example.com' })];
-      usersService.findAll.mockResolvedValue(users);
+      usersService.findAll.mockResolvedValue({ data: users, total: users.length });
 
-      const result = await controller.findAll();
+      const result = await controller.findAll(1, 100);
 
-      expect(result).toHaveLength(2);
-      result.forEach((r) => expect(r).toBeInstanceOf(UserResponseDto));
+      expect(result.data).toHaveLength(2);
+      expect(result.total).toBe(2);
+      result.data.forEach((r) => expect(r).toBeInstanceOf(UserResponseDto));
     });
 
-    it('returns an empty array when there are no users', async () => {
-      usersService.findAll.mockResolvedValue([]);
+    it('returns an empty data array when there are no users', async () => {
+      usersService.findAll.mockResolvedValue({ data: [], total: 0 });
 
-      expect(await controller.findAll()).toEqual([]);
+      const result = await controller.findAll(1, 100);
+      expect(result.data).toEqual([]);
+      expect(result.total).toBe(0);
     });
   });
 
@@ -267,9 +285,10 @@ describe('UsersController', () => {
 
       usersService.update.mockResolvedValue(updated);
 
-      const result = await controller.update(user.id, dto as any);
+      const caller = { sub: 'caller-id', companyId: 'org-uuid-1' };
+      const result = await controller.update(caller as any, user.id, dto as any);
 
-      expect(usersService.update).toHaveBeenCalledWith(user.id, dto);
+      expect(usersService.update).toHaveBeenCalledWith(user.id, dto, caller.sub, caller.companyId);
       expect(result).toBeInstanceOf(UserResponseDto);
       expect(result.firstName).toBe('Jane');
     });
@@ -283,7 +302,7 @@ describe('UsersController', () => {
 
       await controller.remove({ sub: 'caller-id', companyId: 'org-uuid' } as any, 'user-uuid-1');
 
-      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', 'org-uuid');
+      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', 'org-uuid', 'caller-id');
     });
 
     it('passes undefined companyId when caller is super admin (global delete)', async () => {
@@ -291,7 +310,7 @@ describe('UsersController', () => {
 
       await controller.remove({ sub: 'caller-id', isSuperAdmin: true } as any, 'user-uuid-1');
 
-      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', undefined);
+      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', undefined, 'caller-id');
     });
   });
 
@@ -302,9 +321,9 @@ describe('UsersController', () => {
       const user = makeUser();
       usersService.restore.mockResolvedValue(user);
 
-      const result = await controller.restore(user.id);
+      const result = await controller.restore({ sub: 'caller-id' } as any, user.id);
 
-      expect(usersService.restore).toHaveBeenCalledWith(user.id);
+      expect(usersService.restore).toHaveBeenCalledWith(user.id, 'caller-id');
       expect(result).toBeInstanceOf(UserResponseDto);
     });
   });
@@ -333,9 +352,14 @@ describe('UsersController', () => {
       usersService.setSuperAdmin.mockResolvedValue(user);
 
       // _caller (from @RequireSuperAdmin()) is passed as undefined in unit tests
-      const result = await controller.setSuperAdmin(undefined as any, user.id, dto);
+      const result = await controller.setSuperAdmin(
+        undefined as any,
+        { sub: 'caller-id' } as any,
+        user.id,
+        dto,
+      );
 
-      expect(usersService.setSuperAdmin).toHaveBeenCalledWith(user.id, dto.enabled);
+      expect(usersService.setSuperAdmin).toHaveBeenCalledWith(user.id, dto.enabled, 'caller-id');
       expect(result).toBeInstanceOf(UserResponseDto);
       expect(result.isSuperAdmin).toBe(true);
     });
@@ -377,9 +401,9 @@ describe('UsersController', () => {
     it('delegates to service.removeFromOrg', async () => {
       usersService.removeFromOrg.mockResolvedValue(undefined);
 
-      await controller.removeFromOrg('user-uuid-1', 'org-uuid-1');
+      await controller.removeFromOrg({ sub: 'caller-id' } as any, 'user-uuid-1', 'org-uuid-1');
 
-      expect(usersService.removeFromOrg).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1');
+      expect(usersService.removeFromOrg).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1', 'caller-id');
     });
   });
 });

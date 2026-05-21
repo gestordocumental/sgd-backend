@@ -1,4 +1,4 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrgsController } from './orgs.controller';
 import { OrgsService } from './orgs.service';
@@ -53,15 +53,15 @@ describe('OrgsController', () => {
     const org = makeOrg();
     service.create.mockResolvedValue(org);
 
-    const result = await controller.create(`Bearer ${buildJwt({ sub: 'user-1' })}`, { name: 'Acme' });
+    const result = await controller.create('user-1', { name: 'Acme' });
 
     expect(service.create).toHaveBeenCalledWith({ name: 'Acme' }, 'user-1');
     expect(result).toMatchObject({ id: org.id, name: org.name });
   });
 
   it('throws when user id cannot be extracted from the token', async () => {
-    await expect(controller.create('Bearer invalid', { name: 'Acme' })).rejects.toThrow(
-      InternalServerErrorException,
+    await expect(controller.create(undefined, { name: 'Acme' })).rejects.toThrow(
+      UnauthorizedException,
     );
   });
 

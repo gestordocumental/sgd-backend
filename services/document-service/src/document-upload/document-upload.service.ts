@@ -7,6 +7,7 @@ import { StorageService } from '../common/storage/storage.service';
 import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 import { TOPICS } from '../common/kafka/kafka.constants';
 import { AppLogger } from '../common/logger/app-logger.service';
+import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
 import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
 
@@ -55,11 +56,36 @@ export class DocumentUploadService {
     private readonly logger: AppLogger,
   ) {}
 
+  private emitAuditLog(params: {
+    actorId: string;
+    orgId: string;
+    action: string;
+    resourceId: string;
+    resourceName?: string;
+    metadata?: Record<string, unknown>;
+  }): void {
+    this.kafka.emitSafe(TOPICS.AUDIT_LOG, {
+      service:       'document-service',
+      actorId:       params.actorId,
+      orgId:         params.orgId,
+      action:        params.action,
+      resourceType:  'typology',
+      resourceId:    params.resourceId,
+      resourceName:  params.resourceName ?? null,
+      correlationId:         getCorrelationId(),
+      businessCorrelationId: params.resourceId,
+      ip:            getClientIp(),
+      metadata:      params.metadata,
+      timestamp:     new Date().toISOString(),
+    });
+  }
+
   async upload(
     orgId: string,
     typologyId: string,
     file: Express.Multer.File,
     orgName?: string,
+    actorId?: string,
   ): Promise<{ message: string; extractionStatus: string }> {
     if (!Types.ObjectId.isValid(typologyId)) throw new BadRequestException('Invalid typology ID');
 
@@ -84,6 +110,7 @@ export class DocumentUploadService {
       mimeType:          file.mimetype,
       uploadedAt:        new Date(),
       extractionStatus:  ExtractionStatus.PROCESSING,
+      sizeBytes:         file.size ?? null,
     };
 
     try {
@@ -105,7 +132,7 @@ export class DocumentUploadService {
     } catch (err) {
       typology.documento = previousDoc ?? {
         r2Key: null, originalName: null, mimeType: null, uploadedAt: null,
-        extractionStatus: ExtractionStatus.NOT_UPLOADED,
+        extractionStatus: ExtractionStatus.NOT_UPLOADED, sizeBytes: null,
       };
       const rollbackPersisted = await typology.save().then(() => true).catch(() => false);
       if (rollbackPersisted) {
@@ -125,6 +152,10 @@ export class DocumentUploadService {
       await this.storage.delete(previousDoc.r2Key).catch(() => {});
     }
 
+    if (actorId) {
+      this.emitAuditLog({ actorId, orgId, action: 'TYPOLOGY_DOCUMENT_UPLOADED', resourceId: typologyId, resourceName: typology.datosDeclarados.nombre ?? typology.datosDeclarados.codigo ?? undefined, metadata: { mimeType: file.mimetype, originalName: file.originalname } });
+    }
+
     this.logger.log(`Document uploaded for typology ${typologyId}, extraction started`, 'DocumentUploadService');
 
     return { message: 'Document uploaded. Metadata extraction in progress.', extractionStatus: ExtractionStatus.PROCESSING };
@@ -139,7 +170,7 @@ export class DocumentUploadService {
     orgId: string,
     typologyId: string,
     file: Express.Multer.File,
-    dto: { nombre?: string; version?: string; orgName?: string },
+    dto: { nombre?: string; version?: string; orgName?: string; actorId?: string },
   ): Promise<TypologyResponseDto> {
     if (!Types.ObjectId.isValid(typologyId)) throw new BadRequestException('Invalid typology ID');
 
@@ -200,6 +231,7 @@ export class DocumentUploadService {
       mimeType:         file.mimetype,
       uploadedAt:       new Date(),
       extractionStatus: ExtractionStatus.PROCESSING,
+      sizeBytes:        file.size ?? null,
     };
 
     try {
@@ -238,6 +270,17 @@ export class DocumentUploadService {
       throw new InternalServerErrorException('Failed to trigger metadata extraction. New version rolled back.');
     }
 
+    if (dto.actorId) {
+      this.emitAuditLog({
+        actorId:      dto.actorId,
+        orgId,
+        action:       'TYPOLOGY_VERSION_CREATED',
+        resourceId:   newTypologyId,
+        resourceName: nombre ?? codigo ?? undefined,
+        metadata:     { previousTypologyId: typologyId, oldVersion: oldVersion ?? null, newVersion: version ?? null },
+      });
+    }
+
     this.logger.log(
       `New version created: ${typologyId} (${oldVersion ?? '—'}) → ${newTypologyId} (${version ?? '—'})`,
       'DocumentUploadService',
@@ -268,6 +311,7 @@ export class DocumentUploadService {
     orgId: string,
     typologyId: string,
     orgName?: string,
+    actorId?: string,
   ): Promise<{ message: string; extractionStatus: string }> {
     if (!Types.ObjectId.isValid(typologyId)) throw new BadRequestException('Invalid typology ID');
 
@@ -296,6 +340,10 @@ export class DocumentUploadService {
       typology.documento.extractionStatus = ExtractionStatus.FAILED;
       await typology.save().catch(() => {});
       throw new InternalServerErrorException('No se pudo reencolar la extracción. Intenta de nuevo.');
+    }
+
+    if (actorId) {
+      this.emitAuditLog({ actorId, orgId, action: 'TYPOLOGY_EXTRACTION_RETRIED', resourceId: typologyId, resourceName: typology.datosDeclarados.nombre ?? typology.datosDeclarados.codigo ?? undefined });
     }
 
     this.logger.log(`Extraction retried for typology ${typologyId}`, 'DocumentUploadService');

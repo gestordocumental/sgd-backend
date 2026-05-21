@@ -21,18 +21,19 @@ const makeContext = (
 ): ExecutionContext =>
   ({
     getHandler: () => 'handler',
+    getClass:   () => 'class',
     switchToHttp: () => ({
       getRequest: () => ({ headers, params }),
     }),
   }) as unknown as ExecutionContext;
 
 describe('OrgGuard', () => {
-  let reflector: { get: jest.Mock };
+  let reflector: { getAllAndOverride: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let guard: OrgGuard;
 
   beforeEach(() => {
-    reflector = { get: jest.fn() };
+    reflector = { getAllAndOverride: jest.fn() };
     configService = {
       getOrThrow: jest.fn((key: string) => {
         if (key === 'INTERNAL_TOKEN') return 'internal-secret';
@@ -44,25 +45,25 @@ describe('OrgGuard', () => {
   });
 
   it('allows routes without auth metadata', () => {
-    reflector.get.mockReturnValue(undefined);
+    reflector.getAllAndOverride.mockReturnValue(undefined);
 
     expect(guard.canActivate(makeContext())).toBe(true);
   });
 
   it('allows valid internal calls on non-super-admin endpoints', () => {
-    reflector.get.mockReturnValue({ orgMember: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ orgMember: true } satisfies AuthMeta);
 
     expect(guard.canActivate(makeContext({ 'x-internal-token': 'internal-secret' }))).toBe(true);
   });
 
   it('rejects missing bearer token when no internal token is present', () => {
-    reflector.get.mockReturnValue({ orgMember: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ orgMember: true } satisfies AuthMeta);
 
     expect(() => guard.canActivate(makeContext())).toThrow(UnauthorizedException);
   });
 
   it('rejects malformed bearer tokens', () => {
-    reflector.get.mockReturnValue({ orgMember: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ orgMember: true } satisfies AuthMeta);
 
     expect(() => guard.canActivate(makeContext({ authorization: 'Bearer bad.token' }))).toThrow(
       UnauthorizedException,
@@ -70,7 +71,7 @@ describe('OrgGuard', () => {
   });
 
   it('allows super admin access to everything', () => {
-    reflector.get.mockReturnValue({ superAdminOnly: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ superAdminOnly: true } satisfies AuthMeta);
 
     expect(
       guard.canActivate(
@@ -80,7 +81,7 @@ describe('OrgGuard', () => {
   });
 
   it('rejects non-super-admin access on super-admin-only endpoints', () => {
-    reflector.get.mockReturnValue({ superAdminOnly: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ superAdminOnly: true } satisfies AuthMeta);
 
     expect(() =>
       guard.canActivate(makeContext({ authorization: `Bearer ${buildJwt({ sub: 'user-1' })}` })),
@@ -88,7 +89,7 @@ describe('OrgGuard', () => {
   });
 
   it('allows org members when companyId matches route :id', () => {
-    reflector.get.mockReturnValue({ orgMember: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ orgMember: true } satisfies AuthMeta);
 
     expect(
       guard.canActivate(
@@ -101,7 +102,7 @@ describe('OrgGuard', () => {
   });
 
   it('allows org members when companyId matches nested route :orgId', () => {
-    reflector.get.mockReturnValue({ orgMember: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ orgMember: true } satisfies AuthMeta);
 
     expect(
       guard.canActivate(
@@ -114,7 +115,7 @@ describe('OrgGuard', () => {
   });
 
   it('rejects org-member routes when token has no companyId', () => {
-    reflector.get.mockReturnValue({ orgMember: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ orgMember: true } satisfies AuthMeta);
 
     expect(() =>
       guard.canActivate(
@@ -124,7 +125,7 @@ describe('OrgGuard', () => {
   });
 
   it('rejects access to a different organization', () => {
-    reflector.get.mockReturnValue({ orgMember: true } satisfies AuthMeta);
+    reflector.getAllAndOverride.mockReturnValue({ orgMember: true } satisfies AuthMeta);
 
     expect(() =>
       guard.canActivate(

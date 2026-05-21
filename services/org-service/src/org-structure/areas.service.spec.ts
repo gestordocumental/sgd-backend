@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { AreasService } from './areas.service';
 import { Area } from './entities/area.entity';
 import { DepartamentosService } from './departamentos.service';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -43,6 +44,7 @@ describe('AreasService', () => {
         AreasService,
         { provide: getRepositoryToken(Area), useValue: repo },
         { provide: DepartamentosService, useValue: departamentosService },
+        { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
     }).compile();
 
@@ -80,6 +82,7 @@ describe('AreasService', () => {
     expect(repo.find).toHaveBeenCalledWith({
       where: { orgId: 'org-1', departamentoId: 'dep-1' },
       order: { name: 'ASC' },
+      take: 500,
     });
   });
 

@@ -6,10 +6,9 @@ import {
   Delete,
   Param,
   Body,
-  Headers,
   HttpCode,
   HttpStatus,
-  InternalServerErrorException,
+  UnauthorizedException,
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
@@ -20,19 +19,7 @@ import { UpdateOrgDto } from './dto/update-org.dto';
 import { OrgResponseDto } from './dto/org-response.dto';
 import { OrgGuard } from '../common/guards/org.guard';
 import { SuperAdminOnly, OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
-
-/** Extracts the userId from the JWT without verifying the signature (Kong already verified it). */
-function extractUserId(authHeader: string | undefined): string | null {
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  try {
-    const payload = JSON.parse(
-      Buffer.from(authHeader.split(' ')[1].split('.')[1], 'base64url').toString('utf8'),
-    );
-    return (payload.sub as string) ?? null;
-  } catch {
-    return null;
-  }
-}
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Organizations')
 @ApiBearerAuth('JWT')
@@ -50,12 +37,11 @@ export class OrgsController {
   @Post()
   @SuperAdminOnly()
   async create(
-    @Headers('authorization') auth: string,
+    @CurrentUser() createdBy: string | undefined,
     @Body() dto: CreateOrgDto,
   ): Promise<OrgResponseDto> {
-    const createdBy = extractUserId(auth);
     if (!createdBy) {
-      throw new InternalServerErrorException('Could not extract caller identity from token');
+      throw new UnauthorizedException('Could not extract caller identity from token');
     }
     return OrgResponseDto.from(await this.orgsService.create(dto, createdBy));
   }

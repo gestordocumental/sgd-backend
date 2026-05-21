@@ -50,11 +50,11 @@ describe('CargosController', () => {
     const cargo = makeCargo();
     service.create.mockResolvedValue(cargo);
 
-    const result = await controller.create(cargo.orgId, cargo.departamentoId, cargo.areaId, { name: cargo.name });
+    const result = await controller.create('actor-1', cargo.orgId, cargo.departamentoId, cargo.areaId!, { name: cargo.name });
 
-    expect(service.create).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId, {
+    expect(service.create).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId!, {
       name: cargo.name,
-    });
+    }, 'actor-1');
     expect(result).toMatchObject({ id: cargo.id, areaId: cargo.areaId, name: cargo.name });
   });
 
@@ -72,9 +72,9 @@ describe('CargosController', () => {
     const cargo = makeCargo();
     service.findOne.mockResolvedValue(cargo);
 
-    const result = await controller.findOne(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id);
+    const result = await controller.findOne(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id);
 
-    expect(service.findOne).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id);
+    expect(service.findOne).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id);
     expect(result).toMatchObject({ id: cargo.id });
   });
 
@@ -82,31 +82,31 @@ describe('CargosController', () => {
     const cargo = makeCargo({ name: 'Coordinador' });
     service.update.mockResolvedValue(cargo);
 
-    const result = await controller.update(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id, {
+    const result = await controller.update('actor-1', cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id, {
       name: 'Coordinador',
     });
 
-    expect(service.update).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id, {
+    expect(service.update).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id, {
       name: 'Coordinador',
-    });
+    }, 'actor-1');
     expect(result).toMatchObject({ name: 'Coordinador' });
   });
 
   it('delegates remove to the service', async () => {
     service.remove.mockResolvedValue(undefined);
 
-    await controller.remove('org-1', 'dep-1', 'area-1', 'cargo-1');
+    await controller.remove('actor-1', 'org-1', 'dep-1', 'area-1', 'cargo-1');
 
-    expect(service.remove).toHaveBeenCalledWith('org-1', 'dep-1', 'area-1', 'cargo-1');
+    expect(service.remove).toHaveBeenCalledWith('org-1', 'dep-1', 'area-1', 'cargo-1', 'actor-1');
   });
 
   it('restores and maps a cargo', async () => {
     const cargo = makeCargo();
     service.restore.mockResolvedValue(cargo);
 
-    const result = await controller.restore(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id);
+    const result = await controller.restore('actor-1', cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id);
 
-    expect(service.restore).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId, cargo.id);
+    expect(service.restore).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id, 'actor-1');
     expect(result).toMatchObject({ id: cargo.id });
   });
 });

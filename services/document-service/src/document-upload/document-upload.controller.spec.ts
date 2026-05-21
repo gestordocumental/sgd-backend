@@ -60,9 +60,9 @@ describe('DocumentUploadController', () => {
       const ctrl    = new DocumentUploadController(service as any);
       const file    = makeFile();
 
-      const result = await ctrl.upload('org-1', 'typo-id-1', file, 'Helisa SAS');
+      const result = await ctrl.upload(undefined as any, 'org-1', 'typo-id-1', file, 'Helisa SAS');
 
-      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', file, 'Helisa SAS');
+      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', file, 'Helisa SAS', undefined);
       expect(result).toMatchObject({ extractionStatus: ExtractionStatus.PROCESSING });
     });
 
@@ -70,9 +70,9 @@ describe('DocumentUploadController', () => {
       const service = makeService();
       const ctrl    = new DocumentUploadController(service as any);
 
-      await ctrl.upload('org-1', 'typo-id-1', makeFile());
+      await ctrl.upload(undefined as any, 'org-1', 'typo-id-1', makeFile());
 
-      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', expect.any(Object), undefined);
+      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', expect.any(Object), undefined, undefined);
     });
 
     it('throws BadRequestException when no file is provided', async () => {
@@ -80,7 +80,7 @@ describe('DocumentUploadController', () => {
       const ctrl    = new DocumentUploadController(service as any);
 
       await expect(
-        ctrl.upload('org-1', 'typo-id-1', undefined as any),
+        ctrl.upload(undefined as any, 'org-1', 'typo-id-1', undefined as any),
       ).rejects.toThrow(BadRequestException);
 
       expect(service.upload).not.toHaveBeenCalled();
@@ -92,9 +92,9 @@ describe('DocumentUploadController', () => {
       const service = makeService();
       const ctrl    = new DocumentUploadController(service as any);
 
-      const result = await ctrl.retryExtraction('org-1', 'typo-id-1', 'Helisa SAS');
+      const result = await ctrl.retryExtraction(undefined as any, 'org-1', 'typo-id-1', 'Helisa SAS');
 
-      expect(service.retryExtraction).toHaveBeenCalledWith('org-1', 'typo-id-1', 'Helisa SAS');
+      expect(service.retryExtraction).toHaveBeenCalledWith('org-1', 'typo-id-1', 'Helisa SAS', undefined);
       expect(result).toEqual({ message: 'Extracción reencolada.', extractionStatus: 'PROCESSING' });
     });
 
@@ -102,9 +102,9 @@ describe('DocumentUploadController', () => {
       const service = makeService();
       const ctrl    = new DocumentUploadController(service as any);
 
-      await ctrl.retryExtraction('org-1', 'typo-id-1');
+      await ctrl.retryExtraction(undefined as any, 'org-1', 'typo-id-1');
 
-      expect(service.retryExtraction).toHaveBeenCalledWith('org-1', 'typo-id-1', undefined);
+      expect(service.retryExtraction).toHaveBeenCalledWith('org-1', 'typo-id-1', undefined, undefined);
     });
   });
 
@@ -134,13 +134,13 @@ describe('DocumentUploadController', () => {
       const ctrl    = new DocumentUploadController(service as any);
       const file    = makeFile();
 
-      await ctrl.createNewVersion('org-1', 'typo-id-1', file, 'New Name', '02', 'Helisa SAS');
+      await ctrl.createNewVersion(undefined as any, 'org-1', 'typo-id-1', file, 'New Name', '02', 'Helisa SAS');
 
       expect(service.createNewVersion).toHaveBeenCalledWith(
         'org-1',
         'typo-id-1',
         file,
-        { nombre: 'New Name', version: '02', orgName: 'Helisa SAS' },
+        { nombre: 'New Name', version: '02', orgName: 'Helisa SAS', actorId: undefined },
       );
     });
 
@@ -149,7 +149,7 @@ describe('DocumentUploadController', () => {
       const ctrl    = new DocumentUploadController(service as any);
 
       await expect(
-        ctrl.createNewVersion('org-1', 'typo-id-1', undefined as any),
+        ctrl.createNewVersion(undefined as any, 'org-1', 'typo-id-1', undefined as any),
       ).rejects.toThrow(BadRequestException);
 
       expect(service.createNewVersion).not.toHaveBeenCalled();
@@ -159,13 +159,13 @@ describe('DocumentUploadController', () => {
       const service = makeService();
       const ctrl    = new DocumentUploadController(service as any);
 
-      await ctrl.createNewVersion('org-1', 'typo-id-1', makeFile());
+      await ctrl.createNewVersion(undefined as any, 'org-1', 'typo-id-1', makeFile());
 
       expect(service.createNewVersion).toHaveBeenCalledWith(
         'org-1',
         'typo-id-1',
         expect.any(Object),
-        { nombre: undefined, version: undefined, orgName: undefined },
+        { nombre: undefined, version: undefined, orgName: undefined, actorId: undefined },
       );
     });
   });
