@@ -71,7 +71,11 @@ describe('DepartamentosService', () => {
     repo.find!.mockResolvedValue(departamentos);
 
     await expect(service.findAll('org-1')).resolves.toEqual(departamentos);
-    expect(repo.find).toHaveBeenCalledWith({ where: { orgId: 'org-1' }, order: { name: 'ASC' } });
+    expect(repo.find).toHaveBeenCalledWith({
+      where: { orgId: 'org-1' },
+      order: { name: 'ASC' },
+      take: 500,
+    });
   });
 
   it('returns one departamento by org and id', async () => {

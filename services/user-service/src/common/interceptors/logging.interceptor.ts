@@ -8,6 +8,7 @@ import { Observable, tap } from "rxjs";
 import { Request, Response } from "express";
 import { AppLogger } from "../logger/app-logger.service";
 import { getCorrelationId } from "../correlation/correlation.context";
+import { getHttpRequestDurationHistogram } from "../metrics/metrics.registry";
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {

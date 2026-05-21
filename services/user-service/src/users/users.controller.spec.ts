@@ -9,6 +9,7 @@ import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserOrgRoleResponseDto } from './dto/user-org-role-response.dto';
 import { UserWithOrgRolesDto } from './dto/user-with-org-roles.dto';
+import { StorageService } from '../common/storage/storage.service';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -63,9 +64,13 @@ describe('UsersController', () => {
           useValue: {
             create: jest.fn(),
             findAll: jest.fn(),
+            findAllSuperAdmin: jest.fn(),
             findOne: jest.fn(),
             findByEmail: jest.fn(),
             findByOrg: jest.fn(),
+            getCountsByOrg: jest.fn(),
+            getMyOrgRoles: jest.fn(),
+            uploadAvatar: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
             restore: jest.fn(),
@@ -76,6 +81,7 @@ describe('UsersController', () => {
             getOrgRoles: jest.fn(),
             removeFromOrg: jest.fn(),
             completeRegistration: jest.fn(),
+            resendInvitation: jest.fn(),
           },
         },
         {
@@ -87,6 +93,14 @@ describe('UsersController', () => {
         {
           provide: getRepositoryToken(UserOrgRole),
           useValue: { find: jest.fn() },
+        },
+        {
+          provide: StorageService,
+          useValue: {
+            extractKey: jest.fn(),
+            delete: jest.fn(),
+            upload: jest.fn(),
+          },
         },
       ],
     }).compile();

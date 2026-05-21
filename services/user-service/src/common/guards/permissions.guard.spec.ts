@@ -16,8 +16,12 @@ const JWT_SECRET = 'test-secret-key';
 const INTERNAL_TOKEN = 'super-secret-internal-token';
 
 function buildJwt(payload: Record<string, unknown>, secret = JWT_SECRET): string {
+  const payloadWithDefaults = {
+    exp: Math.floor(Date.now() / 1000) + 60 * 60,
+    ...payload,
+  };
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const body = Buffer.from(JSON.stringify(payloadWithDefaults)).toString('base64url');
   const sig = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${sig}`;
 }

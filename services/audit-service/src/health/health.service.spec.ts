@@ -7,8 +7,10 @@ describe('HealthService', () => {
   let es:      jest.Mocked<Pick<ElasticsearchService, 'ping'>>;
   let admin:   { connect: jest.Mock; disconnect: jest.Mock };
   let kafka:   jest.Mocked<Pick<Kafka, 'admin'>>;
+  let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
     admin = {
       connect:    jest.fn().mockResolvedValue(undefined),
       disconnect: jest.fn().mockResolvedValue(undefined),
@@ -19,6 +21,10 @@ describe('HealthService', () => {
       es    as unknown as ElasticsearchService,
       kafka as unknown as Kafka,
     );
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
   });
 
   it('returns true when both ES and Kafka are reachable', async () => {

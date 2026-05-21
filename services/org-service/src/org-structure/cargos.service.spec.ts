@@ -84,6 +84,7 @@ describe('CargosService', () => {
     expect(repo.find).toHaveBeenCalledWith({
       where: { orgId: 'org-1', departamentoId: 'dep-1', areaId: 'area-1' },
       order: { name: 'ASC' },
+      take: 500,
     });
   });
 
@@ -92,7 +93,11 @@ describe('CargosService', () => {
     repo.find!.mockResolvedValue(cargos);
 
     await expect(service.findAllByOrg('org-1')).resolves.toEqual(cargos);
-    expect(repo.find).toHaveBeenCalledWith({ where: { orgId: 'org-1' }, order: { name: 'ASC' } });
+    expect(repo.find).toHaveBeenCalledWith({
+      where: { orgId: 'org-1' },
+      order: { name: 'ASC' },
+      take: 500,
+    });
   });
 
   it('returns one cargo by composite scope', async () => {

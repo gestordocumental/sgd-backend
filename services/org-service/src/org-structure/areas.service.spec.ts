@@ -82,6 +82,7 @@ describe('AreasService', () => {
     expect(repo.find).toHaveBeenCalledWith({
       where: { orgId: 'org-1', departamentoId: 'dep-1' },
       order: { name: 'ASC' },
+      take: 500,
     });
   });
 

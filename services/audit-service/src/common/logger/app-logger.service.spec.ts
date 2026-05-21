@@ -9,6 +9,9 @@ describe('AppLogger', () => {
 
   beforeEach(() => {
     logger = new AppLogger();
+    (logger as any).winston.transports.forEach((transport: { silent: boolean }) => {
+      transport.silent = true;
+    });
   });
 
   it('log calls winston.info with message and context', () => {
@@ -69,6 +72,9 @@ describe('AppLogger', () => {
     it('creates a dev-format logger when NODE_ENV is development', () => {
       process.env.NODE_ENV = 'development';
       const devLogger = new AppLogger();
+      (devLogger as any).winston.transports.forEach((transport: { silent: boolean }) => {
+        transport.silent = true;
+      });
       expect(devLogger).toBeDefined();
     });
   });
