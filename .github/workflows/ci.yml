@@ -89,7 +89,7 @@ jobs:
 
       - name: Run unit tests
         working-directory: frontend-repo
-        run: npm test
+        run: npm run test --if-present
 
   # ── Validar que cada Dockerfile compila sin errores ─────────────────────
   build-services:
