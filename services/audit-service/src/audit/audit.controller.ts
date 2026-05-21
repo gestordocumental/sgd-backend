@@ -38,19 +38,22 @@ export class AuditController {
     @Query() dto: AuditQueryDto,
     @JwtPayloadParam() me: JwtPayload,
   ) {
-    if (!me.isSuperAdmin) {
-      // Usuarios normales solo pueden ver su propia organización
-      if (!me.companyId) {
-        throw new ForbiddenException('No organization context found in token');
-      }
-      // Si el usuario pasa un orgId distinto al suyo, rechazar
-      if (dto.orgId && dto.orgId !== me.companyId) {
-        throw new ForbiddenException('Access to this organization is not allowed');
-      }
-      dto.orgId = me.companyId;
+    if (me.isSuperAdmin) {
+      // Super admin: solo eventos sin orgId (acciones propias de super admin).
+      // Cualquier orgId que venga del cliente se ignora.
+      dto.orgId = undefined;
+      return this.auditService.query(dto, true);
     }
 
-    return this.auditService.query(dto);
+    // Usuarios de org: solo su organización, nunca eventos de super admin.
+    if (!me.companyId) {
+      throw new ForbiddenException('No organization context found in token');
+    }
+    if (dto.orgId && dto.orgId !== me.companyId) {
+      throw new ForbiddenException('Access to this organization is not allowed');
+    }
+    dto.orgId = me.companyId;
+    return this.auditService.query(dto, false);
   }
 
   @Auth()
@@ -61,17 +64,20 @@ export class AuditController {
     @Query() dto: AuditExportDto,
     @JwtPayloadParam() me: JwtPayload,
   ) {
-    if (!me.isSuperAdmin) {
-      if (!me.companyId) throw new ForbiddenException('No organization context found in token');
-      if (dto.orgId && dto.orgId !== me.companyId) throw new ForbiddenException('Access to this organization is not allowed');
-      dto.orgId = me.companyId;
+    if (me.isSuperAdmin) {
+      dto.orgId = undefined;
+      return this.auditService.export(dto, true);
     }
-    return this.auditService.export(dto);
+
+    if (!me.companyId) throw new ForbiddenException('No organization context found in token');
+    if (dto.orgId && dto.orgId !== me.companyId) throw new ForbiddenException('Access to this organization is not allowed');
+    dto.orgId = me.companyId;
+    return this.auditService.export(dto, false);
   }
 
   /**
    * Obtiene un evento de auditoría por su ID de Elasticsearch.
-   * Super admins pueden ver cualquier evento; usuarios normales solo de su org.
+   * Super admin: solo eventos sin orgId. Org user: solo eventos de su org.
    */
   @Auth()
   @Get('logs/:id')
@@ -85,8 +91,12 @@ export class AuditController {
     const doc = await this.auditService.findById(id);
     if (!doc) throw new NotFoundException('Audit log not found');
 
-    if (!me.isSuperAdmin && doc.orgId !== me.companyId) {
-      throw new ForbiddenException('Access to this organization is not allowed');
+    if (me.isSuperAdmin) {
+      // Super admin solo puede acceder a eventos sin org (sus propias acciones)
+      if (doc.orgId) throw new ForbiddenException('Access to this event is not allowed');
+    } else {
+      // Org user solo puede acceder a eventos de su org
+      if (doc.orgId !== me.companyId) throw new ForbiddenException('Access to this organization is not allowed');
     }
 
     return doc;

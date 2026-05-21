@@ -81,10 +81,11 @@ export class OrgsController {
   @Patch(':id')
   @OrgMemberOrSuperAdmin()
   async update(
+    @CurrentUser() actorId: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateOrgDto,
   ): Promise<OrgResponseDto> {
-    return OrgResponseDto.from(await this.orgsService.update(id, dto));
+    return OrgResponseDto.from(await this.orgsService.update(id, dto, actorId));
   }
 
   @ApiOperation({ summary: 'Soft delete an organization (super admin only)' })
@@ -97,8 +98,11 @@ export class OrgsController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @SuperAdminOnly()
-  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.orgsService.remove(id);
+  async remove(
+    @CurrentUser() actorId: string | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    return this.orgsService.remove(id, actorId);
   }
 
   @ApiOperation({ summary: 'Restore a deleted organization (super admin only)' })
@@ -110,7 +114,10 @@ export class OrgsController {
    */
   @Post(':id/restore')
   @SuperAdminOnly()
-  async restore(@Param('id', ParseUUIDPipe) id: string): Promise<OrgResponseDto> {
-    return OrgResponseDto.from(await this.orgsService.restore(id));
+  async restore(
+    @CurrentUser() actorId: string | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<OrgResponseDto> {
+    return OrgResponseDto.from(await this.orgsService.restore(id, actorId));
   }
 }

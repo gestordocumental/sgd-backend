@@ -221,6 +221,7 @@ export class UsersService {
     const take = Math.min(safeLimit, 500);
     const skip = (safePage - 1) * take;
     const [data, total] = await this.usersRepository.findAndCount({
+      withDeleted: true,
       take,
       skip,
       order: { createdAt: 'DESC' },
@@ -234,6 +235,7 @@ export class UsersService {
     const take = Math.min(safeLimit, 500);
     const skip = (safePage - 1) * take;
     const [data, total] = await this.usersRepository.findAndCount({
+      withDeleted: true,
       where: { isSuperAdmin: true },
       take,
       skip,
@@ -395,12 +397,13 @@ export class UsersService {
     });
 
     if (existing) {
-      if (existing.roleId === roleId) {
+      if (existing.roleId === roleId && existing.removedAt === null) {
         throw new ConflictException("User already has this role in this org");
       }
       await this.userOrgRoleRepository.update(existing.id, {
         roleId,
         assignedBy,
+        removedAt: null,
       });
       this.emitAuditLog({
         actorId:      assignedBy,
@@ -436,21 +439,29 @@ export class UsersService {
 
   async findByOrg(
     orgId: string,
-  ): Promise<{ user: User; roles: { roleId: string; roleName: string }[] }[]> {
-    // All membership records for this org (including those with role_id = NULL)
-    const orgRoles = await this.userOrgRoleRepository.find({
-      where: { orgId },
-      relations: ['user', 'role'],
-    });
+  ): Promise<{ user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null }[]> {
+    // Use QueryBuilder with withDeleted() so soft-deleted users are loaded
+    // through the relation — find() + withDeleted:true only affects the main
+    // entity, not its joined relations.
+    const orgRoles = await this.userOrgRoleRepository
+      .createQueryBuilder('uor')
+      .leftJoinAndSelect('uor.user', 'user')
+      .leftJoinAndSelect('uor.role', 'role')
+      .where('uor.orgId = :orgId', { orgId })
+      .withDeleted()
+      .getMany();
 
     if (orgRoles.length === 0) return [];
 
-    // Group by userId, collecting only records that have a role assigned
-    const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[] }>();
+    // Group by userId. Users with removedAt set were explicitly removed from
+    // the org via the delete button. Users with roleId=null but removedAt=null
+    // simply have no role assigned. Globally soft-deleted users carry a non-null
+    // deletedAt on the user entity.
+    const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null }>();
     for (const r of orgRoles) {
-      if (!r.user) continue; // user was soft-deleted; relation resolves to null
+      if (!r.user) continue;
       if (!byUser.has(r.userId)) {
-        byUser.set(r.userId, { user: r.user, roles: [] });
+        byUser.set(r.userId, { user: r.user, roles: [], orgRemovedAt: r.removedAt });
       }
       if (r.roleId !== null && r.role !== null) {
         byUser.get(r.userId)!.roles.push({ roleId: r.roleId, roleName: r.role.name });
@@ -481,11 +492,18 @@ export class UsersService {
     });
   }
 
+  async removeAllFromOrg(orgId: string): Promise<void> {
+    await this.userOrgRoleRepository.update(
+      { orgId },
+      { roleId: null, assignedBy: null, removedAt: new Date() },
+    );
+  }
+
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
     const targetUser = await this.findOne(userId);
     const result = await this.userOrgRoleRepository.update(
       { userId, orgId },
-      { roleId: null, assignedBy: null },
+      { roleId: null, assignedBy: null, removedAt: new Date() },
     );
     if ((result.affected ?? 0) === 0) {
       throw new NotFoundException(`User ${userId} is not assigned to org ${orgId}`);

@@ -16,6 +16,8 @@ import { NotificationType } from './entities/notification.entity';
 interface NotificationPayload {
   type: NotificationType;
   recipientUserIds: string[];
+  orgId?: string;
+  orgName?: string;
   workflowId?: string;
   workflowTitle?: string;
   message: string;
@@ -146,6 +148,8 @@ export class NotificationsConsumer
       type:             raw.type,
       recipientUserIds: raw.recipientUserIds,
       message:          raw.message,
+      orgId:            raw.orgId ?? null,
+      orgName:          raw.orgName ?? null,
       workflowId:       raw.workflowId ?? null,
       workflowTitle:    raw.workflowTitle ?? null,
       metadata:         raw.metadata,

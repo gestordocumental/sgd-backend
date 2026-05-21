@@ -54,11 +54,13 @@ describe('NotificationsService', () => {
     emailService = { sendNotification: jest.fn().mockResolvedValue(undefined), sendInvitation: jest.fn() };
     userClient   = { getUsersByIds: jest.fn().mockResolvedValue(new Map()) };
     logger       = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const orgClient = { getOrgName: jest.fn().mockResolvedValue(null) };
 
     service = new NotificationsService(
       repo,
       emailService as any,
       userClient as any,
+      orgClient as any,
       logger as any,
     );
   });

@@ -47,6 +47,9 @@ export class UserResponseDto {
   @ApiProperty({ type: String, format: 'date-time' })
   updatedAt!: Date;
 
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  deletedAt!: Date | null;
+
   static from(user: User): UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = user.id;
@@ -64,6 +67,7 @@ export class UserResponseDto {
     dto.avatarUrl = user.avatarUrl ?? null;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;
+    dto.deletedAt = user.deletedAt ?? null;
     return dto;
   }
 }

@@ -29,6 +29,9 @@ export class OrgResponseDto {
   @ApiProperty({ type: String, format: 'date-time' })
   updatedAt!: Date;
 
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  deletedAt!: Date | null;
+
   static from(org: Org): OrgResponseDto {
     const dto = new OrgResponseDto();
     dto.id = org.id;
@@ -40,6 +43,7 @@ export class OrgResponseDto {
     dto.createdBy = org.createdBy;
     dto.createdAt = org.createdAt;
     dto.updatedAt = org.updatedAt;
+    dto.deletedAt = org.deletedAt ?? null;
     return dto;
   }
 }

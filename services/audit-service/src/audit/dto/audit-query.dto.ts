@@ -69,7 +69,7 @@ export interface AuditLogDocument {
   id:              string;
   service:         string;
   actorId:         string;
-  orgId:           string;
+  orgId:           string | null;
   action:          string;
   resourceType:    string;
   resourceId:      string;

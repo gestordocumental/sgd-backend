@@ -82,20 +82,35 @@ export class AuditService implements OnModuleInit {
     );
   }
 
-  private buildMustClauses(dto: {
-    orgId?: string;
-    actorId?: string;
-    resourceType?: string;
-    resourceId?: string;
-    action?: string;
-    service?: string;
-    correlationId?: string;
-    from?: string;
-    to?: string;
-  }): object[] {
+  /**
+   * Construye las cláusulas must de Elasticsearch.
+   *
+   * superAdminScope=true → restringe a eventos SIN orgId (acciones de super admin puras).
+   * superAdminScope=false + dto.orgId → restringe a esa organización concreta.
+   */
+  private buildMustClauses(
+    dto: {
+      orgId?: string;
+      actorId?: string;
+      resourceType?: string;
+      resourceId?: string;
+      action?: string;
+      service?: string;
+      correlationId?: string;
+      from?: string;
+      to?: string;
+    },
+    superAdminScope = false,
+  ): object[] {
     const must: object[] = [];
 
-    if (dto.orgId)         must.push({ term: { orgId:         dto.orgId } });
+    if (superAdminScope) {
+      // Eventos de super admin: documentos donde orgId no existe o es null
+      must.push({ bool: { must_not: { exists: { field: 'orgId' } } } });
+    } else if (dto.orgId) {
+      must.push({ term: { orgId: dto.orgId } });
+    }
+
     if (dto.actorId)       must.push({ term: { actorId:       dto.actorId } });
     if (dto.resourceType)  must.push({ term: { resourceType:  dto.resourceType } });
     if (dto.resourceId)    must.push({ term: { resourceId:    dto.resourceId } });
@@ -113,12 +128,12 @@ export class AuditService implements OnModuleInit {
     return must;
   }
 
-  async query(dto: AuditQueryDto): Promise<PaginatedAuditLogs> {
+  async query(dto: AuditQueryDto, superAdminScope = false): Promise<PaginatedAuditLogs> {
     const page  = dto.page  ?? 1;
     const limit = dto.limit ?? 50;
     const from  = (page - 1) * limit;
 
-    const must = this.buildMustClauses(dto);
+    const must = this.buildMustClauses(dto, superAdminScope);
 
     const response = await this.es.search<AuditLogDocument>({
       index: INDEX,
@@ -141,9 +156,9 @@ export class AuditService implements OnModuleInit {
     return { data, total, page, limit };
   }
 
-  async export(dto: AuditExportDto): Promise<AuditLogDocument[]> {
+  async export(dto: AuditExportDto, superAdminScope = false): Promise<AuditLogDocument[]> {
     const limit = dto.limit ?? 1000;
-    const must  = this.buildMustClauses(dto);
+    const must  = this.buildMustClauses(dto, superAdminScope);
 
     const response = await this.es.search<AuditLogDocument>({
       index: INDEX,

@@ -116,6 +116,7 @@ export class WorkflowApprovalService {
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'WORKFLOW_TASK_ASSIGNED',
       recipientUserIds: [firstStep.userId],
+      orgId:            workflow.orgId,
       workflowId,
       workflowTitle:    workflow.title,
       message:          `Tienes una solicitud de aprobación pendiente: "${workflow.title}"`,
@@ -267,6 +268,7 @@ export class WorkflowApprovalService {
         this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
           type:             'WORKFLOW_APPROVED',
           recipientUserIds: finalUserIds,
+          orgId:            workflow.orgId,
           workflowId,
           workflowTitle:    workflow.title,
           message:          `El workflow "${workflow.title}" ha sido aprobado y está disponible para ti.`,
@@ -286,6 +288,7 @@ export class WorkflowApprovalService {
       this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
         type:             'WORKFLOW_TASK_ASSIGNED',
         recipientUserIds: [nextStep!.userId],
+        orgId:            workflow.orgId,
         workflowId,
         workflowTitle:    workflow.title,
         message:          `Tienes una solicitud de aprobación pendiente: "${workflow.title}"`,
@@ -386,6 +389,7 @@ export class WorkflowApprovalService {
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'WORKFLOW_REJECTED',
       recipientUserIds: [workflow.createdBy],
+      orgId:            workflow.orgId,
       workflowId,
       workflowTitle:    workflow.title,
       message:          `Tu workflow "${workflow.title}" fue rechazado: ${dto.observations}`,
@@ -487,6 +491,7 @@ export class WorkflowApprovalService {
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'WORKFLOW_TASK_ASSIGNED',
       recipientUserIds: [rejectedStep.userId],
+      orgId:            workflow.orgId,
       workflowId,
       workflowTitle:    workflow.title,
       message:          `El workflow "${workflow.title}" ha sido corregido y requiere tu revisión nuevamente.`,

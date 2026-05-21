@@ -15,6 +15,12 @@ export class NotificationResponseDto {
   message!: string;
 
   @ApiProperty({ nullable: true })
+  orgId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  orgName!: string | null;
+
+  @ApiProperty({ nullable: true })
   workflowId!: string | null;
 
   @ApiProperty({ nullable: true })
@@ -35,6 +41,8 @@ export class NotificationResponseDto {
     dto.type          = n.type;
     dto.title         = n.title;
     dto.message       = n.message;
+    dto.orgId         = n.orgId;
+    dto.orgName       = n.orgName;
     dto.workflowId    = n.workflowId;
     dto.workflowTitle = n.workflowTitle;
     dto.read          = n.read;

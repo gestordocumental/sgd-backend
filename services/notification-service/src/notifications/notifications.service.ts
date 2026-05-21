@@ -6,6 +6,7 @@ import { NotificationResponseDto, PaginatedNotificationsDto } from './dto/notifi
 import { ListNotificationsDto } from './dto/list-notifications.dto';
 import { EmailService, getNotificationTitle } from './email/email.service';
 import { UserClientService } from './user-client/user-client.service';
+import { OrgClientService } from './org-client/org-client.service';
 import { AppLogger } from '../common/logger/app-logger.service';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class NotificationsService {
     private readonly repo: Repository<Notification>,
     private readonly emailService: EmailService,
     private readonly userClient: UserClientService,
+    private readonly orgClient: OrgClientService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -25,12 +27,17 @@ export class NotificationsService {
     type: NotificationType;
     recipientUserIds: string[];
     message: string;
+    orgId?: string | null;
+    orgName?: string | null;
     workflowId?: string | null;
     workflowTitle?: string | null;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
-    const { type, recipientUserIds, message, workflowId, workflowTitle, metadata } = opts;
+    const { type, recipientUserIds, message, orgId, workflowId, workflowTitle, metadata } = opts;
     const title = getNotificationTitle(type);
+
+    // Resolver nombre de la organización si llega orgId pero no orgName
+    const orgName = opts.orgName ?? (orgId ? await this.orgClient.getOrgName(orgId) : null);
 
     // Guardar notificaciones internas en bulk
     const entities = recipientUserIds.map((userId) => {
@@ -39,6 +46,8 @@ export class NotificationsService {
         type,
         title,
         message,
+        orgId:         orgId ?? null,
+        orgName:       orgName ?? null,
         workflowId:    workflowId ?? null,
         workflowTitle: workflowTitle ?? null,
         metadata:      metadata ?? null,
