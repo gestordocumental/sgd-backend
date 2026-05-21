@@ -179,18 +179,18 @@ export class UsersController {
       throw new BadRequestException("File content does not match an allowed image format");
     }
 
-    // Delete the previous avatar from storage if one exists.
+    // Keep previous key — delete old object only after new avatar is persisted.
     const existing = await this.usersService.findOne(userId);
-    if (existing.avatarUrl) {
-      const oldKey = this.storageService.extractKey(existing.avatarUrl);
-      if (oldKey) await this.storageService.delete(oldKey).catch(() => {});
-    }
+    const oldKey = existing.avatarUrl
+      ? this.storageService.extractKey(existing.avatarUrl)
+      : null;
 
     // Upload to object storage and persist the public URL.
     const key      = `avatars/${randomUUID()}.${type.ext}`;
     const publicUrl = await this.storageService.upload(key, file.buffer, type.mime);
 
     const user = await this.usersService.uploadAvatar(userId, publicUrl);
+    if (oldKey) void this.storageService.delete(oldKey).catch(() => {});
     return UserResponseDto.from(user);
   }
 

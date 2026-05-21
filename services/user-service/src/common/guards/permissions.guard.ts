@@ -59,6 +59,14 @@ export class PermissionsGuard implements CanActivate {
     this.permissionsCache.delete(`${userId}:${companyId}`);
   }
 
+  /** Remove all expired entries to prevent unbounded memory growth in long-running services. */
+  private evictExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.permissionsCache) {
+      if (entry.expiresAt <= now) this.permissionsCache.delete(key);
+    }
+  }
+
   private async resolvePermissions(
     userId: string,
     companyId: string,
@@ -83,6 +91,7 @@ export class PermissionsGuard implements CanActivate {
         uor.role?.permissions?.map((p) => ({ module: p.module as string, action: p.action as string })) ?? [],
     );
 
+    this.evictExpired();
     this.permissionsCache.set(key, { permissions, expiresAt: Date.now() + this.CACHE_TTL_MS });
     return permissions;
   }

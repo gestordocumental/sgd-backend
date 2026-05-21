@@ -63,30 +63,32 @@ jobs:
   test-frontend:
     name: Test Frontend
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: document-management-system-web/sgd-frontend
     steps:
       - name: Checkout backend repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Checkout frontend repo
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/document-management-system-web
-          path: document-management-system-web
+          path: frontend-repo
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: document-management-system-web/sgd-frontend/package-lock.json
+          cache-dependency-path: frontend-repo/sgd-frontend/package-lock.json
 
       - name: Install dependencies
+        working-directory: frontend-repo/sgd-frontend
         run: npm ci
 
       - name: Run unit tests
+        working-directory: frontend-repo/sgd-frontend
         run: npm test
 
   # ── Validar que cada Dockerfile compila sin errores ─────────────────────
@@ -154,9 +156,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0       # Necesario para escanear todo el historial
+          persist-credentials: false
 
       - name: Detect exposed secrets (TruffleHog)
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@v3.95.3
         with:
           path: ./
           base: ${{ github.event.repository.default_branch }}

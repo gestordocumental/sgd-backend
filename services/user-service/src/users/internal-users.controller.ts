@@ -44,8 +44,11 @@ export class InternalUsersController {
     @Body() body: { ids: string[] },
   ) {
     this.verifyToken(token);
-    if (!Array.isArray(body.ids) || body.ids.length > 500) {
-      throw new BadRequestException('ids must be an array of at most 500 entries');
+    if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
+      throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
+    }
+    if (!body.ids.every((id) => typeof id === 'string' && id.length > 0)) {
+      throw new BadRequestException('Each id must be a non-empty string');
     }
     const users = await this.usersService.findManyByIds(body.ids);
     return users.map((u) => ({

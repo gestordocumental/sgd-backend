@@ -154,11 +154,17 @@ export class AuthController {
     let refreshToken: string;
     try {
       refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
-    } catch {
-      if (!body?.refreshToken) {
-        throw new UnauthorizedException('Missing refresh token');
+    } catch (err) {
+      // Only fall back to body token when cookie is simply absent.
+      // A malformed cookie likely indicates tampering — reject immediately.
+      if (err instanceof UnauthorizedException && err.message === 'Missing refresh cookie') {
+        if (!body?.refreshToken) {
+          throw new UnauthorizedException('Missing refresh token');
+        }
+        refreshToken = body.refreshToken;
+      } else {
+        throw err;
       }
-      refreshToken = body.refreshToken;
     }
     return this.toAccessTokenResponse(await this.authService.refresh(refreshToken), res);
   }
@@ -198,14 +204,13 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Returns new accessToken with updated companyId and rotates refresh cookie' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
   @Post("switch-company")
-  switchCompany(
+  async switchCompany(
     @Headers("authorization") auth: string,
     @Body() dto: SwitchCompanyDto,
     @Res({ passthrough: true }) res?: Response,
   ) {
     const payload = this.authService.verifyAccessToken(auth);
-    return this.authService
-      .switchCompany(payload.sub, dto.companyId)
-      .then((tokenPair) => this.toAccessTokenResponse(tokenPair, res));
+    const tokenPair = await this.authService.switchCompany(payload.sub, dto.companyId);
+    return this.toAccessTokenResponse(tokenPair, res);
   }
 }

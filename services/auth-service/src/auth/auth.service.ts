@@ -21,14 +21,22 @@ import { UserClientService } from "../user-client/user-client.service";
 // Refresh token TTL in Redis (must match JWT_REFRESH_EXPIRATION: 12h)
 const REFRESH_TTL_SECONDS = 12 * 60 * 60;
 
-// Dummy hash used when the user is not found — ensures bcrypt.compare always
-// runs so response time doesn't reveal whether an email exists in the system.
-// Generated with cost factor 12.
-const DUMMY_HASH = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQyCkByCkYKS5j5XkP1mLM3Ym';
-
 // bcrypt cost factor — read from env so it can be tuned per environment.
 // Default 12 gives ~250ms on modern hardware which is OWASP-recommended.
-const BCRYPT_ROUNDS = parseInt(process.env['BCRYPT_ROUNDS'] ?? '12', 10);
+const DEFAULT_BCRYPT_ROUNDS = 12;
+const parsedRounds = Number.parseInt(
+  process.env['BCRYPT_ROUNDS'] ?? String(DEFAULT_BCRYPT_ROUNDS),
+  10,
+);
+const BCRYPT_ROUNDS =
+  Number.isInteger(parsedRounds) && parsedRounds >= 10 && parsedRounds <= 14
+    ? parsedRounds
+    : DEFAULT_BCRYPT_ROUNDS;
+
+// Dummy hash used when the user is not found — ensures bcrypt.compare always
+// runs so response time doesn't reveal whether an email exists in the system.
+// Generated at startup with the same cost factor as real hashes to keep timings comparable.
+const DUMMY_HASH = bcrypt.hashSync('__invalid_password__', BCRYPT_ROUNDS);
 
 interface TokenOptions {
   companyId?: string;

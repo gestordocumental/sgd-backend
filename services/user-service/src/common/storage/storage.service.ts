@@ -47,17 +47,29 @@ export class StorageService {
 
   /** Uploads a buffer to the bucket and returns the public URL. */
   async upload(key: string, buffer: Buffer, contentType: string): Promise<string> {
-    await this.client.send(new PutObjectCommand({
-      Bucket:      this.bucket,
-      Key:         key,
-      Body:        buffer,
-      ContentType: contentType,
-    }));
-    return `${this.publicUrl}/${key}`;
+    try {
+      await this.client.send(new PutObjectCommand({
+        Bucket:      this.bucket,
+        Key:         key,
+        Body:        buffer,
+        ContentType: contentType,
+      }));
+      return `${this.publicUrl}/${key}`;
+    } catch (err) {
+      throw new InternalServerErrorException(
+        `Failed to upload file to storage: ${err instanceof Error ? err.message : 'unknown error'}`,
+      );
+    }
   }
 
   async delete(key: string): Promise<void> {
-    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    } catch (err) {
+      throw new InternalServerErrorException(
+        `Failed to delete file from storage: ${err instanceof Error ? err.message : 'unknown error'}`,
+      );
+    }
   }
 
   /**

@@ -216,8 +216,10 @@ export class UsersService {
   }
 
   async findAll(page = 1, limit = 100): Promise<{ data: User[]; total: number }> {
-    const take = Math.min(limit, 500);
-    const skip = (page - 1) * take;
+    const safePage  = Math.max(1, page);
+    const safeLimit = Math.max(1, limit);
+    const take = Math.min(safeLimit, 500);
+    const skip = (safePage - 1) * take;
     const [data, total] = await this.usersRepository.findAndCount({
       take,
       skip,
@@ -227,8 +229,10 @@ export class UsersService {
   }
 
   async findAllSuperAdmin(page = 1, limit = 100): Promise<{ data: User[]; total: number }> {
-    const take = Math.min(limit, 500);
-    const skip = (page - 1) * take;
+    const safePage  = Math.max(1, page);
+    const safeLimit = Math.max(1, limit);
+    const take = Math.min(safeLimit, 500);
+    const skip = (safePage - 1) * take;
     const [data, total] = await this.usersRepository.findAndCount({
       where: { isSuperAdmin: true },
       take,
@@ -479,10 +483,13 @@ export class UsersService {
 
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
     const targetUser = await this.findOne(userId);
-    await this.userOrgRoleRepository.update(
+    const result = await this.userOrgRoleRepository.update(
       { userId, orgId },
       { roleId: null, assignedBy: null },
     );
+    if ((result.affected ?? 0) === 0) {
+      throw new NotFoundException(`User ${userId} is not assigned to org ${orgId}`);
+    }
     if (actorId) {
       this.emitAuditLog({
         actorId,
@@ -507,7 +514,11 @@ export class UsersService {
     // GETDEL is atomic: retrieves and deletes in one operation, preventing
     // TOCTOU race conditions where two concurrent requests consume the same token.
     const tokenHash = createHash("sha256").update(dto.token).digest("hex");
-    const userId = await this.redis.getdel(`invitation:${tokenHash}`);
+    let userId = await this.redis.getdel(`invitation:${tokenHash}`);
+    if (!userId) {
+      // Fallback: invitations issued before hashing was introduced stored the plaintext token.
+      userId = await this.redis.getdel(`invitation:${dto.token}`);
+    }
     if (!userId) {
       throw new NotFoundException("Invitation token invalid or expired");
     }

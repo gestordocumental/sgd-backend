@@ -13,6 +13,7 @@ export class LoggingInterceptor implements NestInterceptor {
     const req = ctx.switchToHttp().getRequest<Request>();
     const res = ctx.switchToHttp().getResponse<Response>();
     const { method, path, ip } = req;
+    const routeLabel = req.route?.path ?? path;
     const startedAt = Date.now();
 
     this.logger.http({ type: 'request', method, path, ip, correlationId: getCorrelationId(), message: `→ ${method} ${path}` });
@@ -22,7 +23,7 @@ export class LoggingInterceptor implements NestInterceptor {
         next: () => {
           this.logger.http({ type: 'response', method, path, statusCode: res.statusCode, duration: Date.now() - startedAt, correlationId: getCorrelationId(), message: `← ${method} ${path} ${res.statusCode} (${Date.now() - startedAt}ms)` });
           getHttpRequestDurationHistogram().observe(
-            { method, route: path, status_code: String(res.statusCode) },
+            { method, route: routeLabel, status_code: String(res.statusCode) },
             (Date.now() - startedAt) / 1000,
           );
         },
@@ -30,7 +31,7 @@ export class LoggingInterceptor implements NestInterceptor {
           const statusCode = typeof err?.getStatus === 'function' ? err.getStatus() : (err?.status ?? 500);
           this.logger.http({ type: 'response', method, path, statusCode, duration: Date.now() - startedAt, correlationId: getCorrelationId(), message: `← ${method} ${path} ${statusCode} (${Date.now() - startedAt}ms)` });
           getHttpRequestDurationHistogram().observe(
-            { method, route: path, status_code: String(statusCode) },
+            { method, route: routeLabel, status_code: String(statusCode) },
             (Date.now() - startedAt) / 1000,
           );
         },
