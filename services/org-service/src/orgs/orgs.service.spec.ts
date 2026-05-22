@@ -26,9 +26,14 @@ const makeOrg = (overrides: Partial<Org> = {}): Org => ({
 describe('OrgsService', () => {
   let service: OrgsService;
   let repo: MockRepo<Org>;
+  const originalFetch = global.fetch;
 
   beforeAll(() => {
     global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as jest.Mock;
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
   });
 
   beforeEach(async () => {
@@ -49,7 +54,8 @@ describe('OrgsService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn().mockImplementation((key: string) =>
-              ({ USER_SERVICE_URL: 'http://localhost:3001', INTERNAL_TOKEN: 'test-token' }[key] ?? ''),
+              ({ USER_SERVICE_URL: 'http://localhost:3001', INTERNAL_TOKEN: 'test-token' }[key] ??
+                (() => { throw new Error(`Missing config key: ${key}`); })()),
             ),
           },
         },

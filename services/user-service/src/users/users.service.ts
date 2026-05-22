@@ -502,6 +502,7 @@ export class UsersService {
         removedAt:  () => 'COALESCE(removed_at, NOW())',
       })
       .where('org_id = :orgId', { orgId })
+      .andWhere('removed_at IS NULL')
       .execute();
   }
 

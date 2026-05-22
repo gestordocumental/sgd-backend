@@ -16,8 +16,8 @@ import { NotificationType } from './entities/notification.entity';
 interface NotificationPayload {
   type: NotificationType;
   recipientUserIds: string[];
-  orgId?: string;
-  orgName?: string;
+  orgId?: string | null;
+  orgName?: string | null;
   workflowId?: string;
   workflowTitle?: string;
   message: string;

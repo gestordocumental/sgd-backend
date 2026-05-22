@@ -99,8 +99,24 @@ export class OrgsService {
 
   async remove(id: string, actorId?: string): Promise<void> {
     const org = await this.findOne(id);
-    await this.revokeOrgAccess(id);
+
+    // Soft-delete first so the org is already marked deleted before cross-service calls.
+    // If revokeOrgAccess fails we compensate by restoring the record — the worst-case
+    // inconsistency is a briefly soft-deleted org that gets rolled back, which is
+    // recoverable. The inverse order risks an active org with no memberships, which is not.
     await this.orgRepo.softRemove(org);
+
+    try {
+      await this.revokeOrgAccess(id);
+    } catch (err) {
+      this.logger.error(
+        `revokeOrgAccess failed for org ${id} — compensating by restoring the record`,
+        (err as Error).stack,
+      );
+      await this.orgRepo.restore(id);
+      throw err;
+    }
+
     if (actorId) this.emitAuditLog('COMPANY_DELETED', org, actorId);
   }
 

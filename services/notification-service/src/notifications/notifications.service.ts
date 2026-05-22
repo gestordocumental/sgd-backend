@@ -38,7 +38,17 @@ export class NotificationsService {
     const title = getNotificationTitle(type);
 
     // Resolver nombre de la organización si llega orgId pero no orgName
-    const orgName = opts.orgName ?? (orgId ? await this.orgClient.getOrgName(orgId) : null);
+    let orgName = opts.orgName ?? null;
+    if (!orgName && orgId) {
+      try {
+        orgName = await this.orgClient.getOrgName(orgId);
+      } catch {
+        this.logger.warn(
+          `Could not resolve org name for ${orgId}; continuing without orgName`,
+          'NotificationsService',
+        );
+      }
+    }
 
     // Guardar notificaciones internas en bulk
     const entities = uniqueRecipientUserIds.map((userId) => {
