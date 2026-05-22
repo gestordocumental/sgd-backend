@@ -116,13 +116,23 @@ export class AuthService {
     }
 
     let userInfo: { isSuperAdmin: boolean };
+    let companies: string[];
     try {
-      userInfo = await this.userClientService.getUserInfo(credential.userId);
+      [userInfo, companies] = await Promise.all([
+        this.userClientService.getUserInfo(credential.userId),
+        this.userClientService.getUserCompanies(credential.userId),
+      ]);
     } catch (err) {
       if (err instanceof NotFoundException) {
         throw new UnauthorizedException("Invalid credentials");
       }
       throw err;
+    }
+
+    // Block login for non-super-admin users with no active company memberships.
+    // This covers the case where a user's only company was deleted.
+    if (!userInfo.isSuperAdmin && companies.length === 0) {
+      throw new UnauthorizedException("Invalid credentials");
     }
 
     return this.generateTokenPair(credential, {
@@ -162,13 +172,11 @@ export class AuthService {
     // Recalculate scope from user-service instead of trusting the old token.
     // This ensures revoked company access or super admin status is enforced
     // on the next refresh rather than persisting for the full 7-day TTL.
-    let companies: string[] | null;
+    let companies: string[];
     let userInfo: { isSuperAdmin: boolean };
     try {
       [companies, userInfo] = await Promise.all([
-        payload.companyId
-          ? this.userClientService.getUserCompanies(payload.sub)
-          : Promise.resolve<string[] | null>(null),
+        this.userClientService.getUserCompanies(payload.sub),
         this.userClientService.getUserInfo(payload.sub),
       ]);
     } catch (err) {
@@ -178,7 +186,12 @@ export class AuthService {
       throw err;
     }
 
-    if (payload.companyId && !companies?.includes(payload.companyId)) {
+    // Block non-super-admin users with no active company memberships.
+    if (!userInfo.isSuperAdmin && companies.length === 0) {
+      throw new UnauthorizedException("Scope revoked");
+    }
+
+    if (payload.companyId && !companies.includes(payload.companyId)) {
       throw new UnauthorizedException("Scope revoked");
     }
 

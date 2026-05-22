@@ -127,8 +127,8 @@ export class UsersController {
   async findByOrg(
     @Param('orgId', ParseUUIDPipe) orgId: string,
   ): Promise<UserWithOrgRolesDto[]> {
-    return (await this.usersService.findByOrg(orgId)).map(({ user, roles }) =>
-      UserWithOrgRolesDto.fromUserAndRoles(user, roles),
+    return (await this.usersService.findByOrg(orgId)).map(({ user, roles, orgRemovedAt }) =>
+      UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt),
     );
   }
 
@@ -193,6 +193,26 @@ export class UsersController {
     const user = await this.usersService.uploadAvatar(userId, publicUrl);
     if (oldKey) void this.storageService.delete(oldKey).catch(() => {});
     return UserResponseDto.from(user);
+  }
+
+  @ApiOperation({ summary: 'Revoke all user access for an org — internal only, called on org deletion' })
+  @ApiSecurity('internal-token')
+  @ApiParam({ name: 'orgId', format: 'uuid' })
+  @Delete("internal/orgs/:orgId/users")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeAllFromOrg(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("orgId", ParseUUIDPipe) orgId: string,
+  ): Promise<void> {
+    const expected = Buffer.from(
+      this.configService.getOrThrow<string>("INTERNAL_TOKEN"),
+    );
+    const provided = Buffer.from(internalToken ?? "");
+    const isValid =
+      provided.length === expected.length &&
+      timingSafeEqual(expected, provided);
+    if (!isValid) throw new UnauthorizedException();
+    await this.usersService.removeAllFromOrg(orgId);
   }
 
   @ApiOperation({ summary: "Get companies a user belongs to (internal only)" })

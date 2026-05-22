@@ -54,11 +54,13 @@ describe('NotificationsService', () => {
     emailService = { sendNotification: jest.fn().mockResolvedValue(undefined), sendInvitation: jest.fn() };
     userClient   = { getUsersByIds: jest.fn().mockResolvedValue(new Map()) };
     logger       = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const orgClient = { getOrgName: jest.fn().mockResolvedValue(null) };
 
     service = new NotificationsService(
       repo,
       emailService as any,
       userClient as any,
+      orgClient as any,
       logger as any,
     );
   });
@@ -137,6 +139,42 @@ describe('NotificationsService', () => {
 
       expect(repo.create).toHaveBeenCalledWith(
         expect.objectContaining({ workflowId: 'wf-1', workflowTitle: 'WF Title' }),
+      );
+    });
+
+    it('uses provided orgName without calling orgClient', async () => {
+      const orgClient = (service as any).orgClient;
+      userClient.getUsersByIds.mockResolvedValue(new Map());
+
+      await service.dispatch({
+        type: 'WORKFLOW_APPROVED',
+        recipientUserIds: ['user-1'],
+        message: 'Aprobado',
+        orgId: 'org-uuid',
+        orgName: 'Proasistemas',
+      });
+
+      expect(orgClient.getOrgName).not.toHaveBeenCalled();
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ orgName: 'Proasistemas' }),
+      );
+    });
+
+    it('calls orgClient.getOrgName when orgId present but orgName is absent', async () => {
+      const orgClient = (service as any).orgClient;
+      orgClient.getOrgName.mockResolvedValue('Proasistemas');
+      userClient.getUsersByIds.mockResolvedValue(new Map());
+
+      await service.dispatch({
+        type: 'WORKFLOW_APPROVED',
+        recipientUserIds: ['user-1'],
+        message: 'Aprobado',
+        orgId: 'org-uuid',
+      });
+
+      expect(orgClient.getOrgName).toHaveBeenCalledWith('org-uuid');
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ orgName: 'Proasistemas' }),
       );
     });
 

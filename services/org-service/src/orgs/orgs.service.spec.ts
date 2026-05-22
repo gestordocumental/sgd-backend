@@ -1,9 +1,11 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { OrgsService } from './orgs.service';
 import { Org, OrgStatus } from './entities/org.entity';
+import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -24,6 +26,15 @@ const makeOrg = (overrides: Partial<Org> = {}): Org => ({
 describe('OrgsService', () => {
   let service: OrgsService;
   let repo: MockRepo<Org>;
+  const originalFetch = global.fetch;
+
+  beforeAll(() => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as jest.Mock;
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
 
   beforeEach(async () => {
     repo = {
@@ -39,6 +50,19 @@ describe('OrgsService', () => {
       providers: [
         OrgsService,
         { provide: getRepositoryToken(Org), useValue: repo },
+        {
+          provide: ConfigService,
+          useValue: {
+            getOrThrow: jest.fn().mockImplementation((key: string) =>
+              ({ USER_SERVICE_URL: 'http://localhost:3001', INTERNAL_TOKEN: 'test-token' }[key] ??
+                (() => { throw new Error(`Missing config key: ${key}`); })()),
+            ),
+          },
+        },
+        {
+          provide: KafkaProducerService,
+          useValue: { emitSafe: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -79,7 +103,7 @@ describe('OrgsService', () => {
     repo.find!.mockResolvedValue(orgs);
 
     await expect(service.findAll()).resolves.toEqual(orgs);
-    expect(repo.find).toHaveBeenCalledWith({ order: { createdAt: 'ASC' } });
+    expect(repo.find).toHaveBeenCalledWith({ order: { createdAt: 'ASC' }, withDeleted: true });
   });
 
   it('returns one organization by id', async () => {

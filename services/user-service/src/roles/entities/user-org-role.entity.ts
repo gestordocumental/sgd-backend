@@ -34,6 +34,11 @@ export class UserOrgRole {
   @Column({ name: 'assigned_by', type: 'uuid', nullable: true })
   assignedBy!: string | null;
 
+  // Set when the user is explicitly removed from the org (DELETE /users/:id/orgs/:orgId).
+  // Null means the user is an active member (with or without a role assigned).
+  @Column({ name: 'removed_at', type: 'timestamptz', nullable: true, default: null })
+  removedAt!: Date | null;
+
   @ManyToOne(() => User, (user) => user.orgRoles, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user!: User;

@@ -384,6 +384,7 @@ export class WorkflowsService {
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'NO_FINAL_USER_ALERT',
       recipientUserIds: dto.recipientIds,
+      orgId,
       workflowId:       null,
       workflowTitle:    null,
       message:          `Alerta: la tipología "${dto.typologyName}" no tiene usuarios configurados como usuarios finales. Es necesario asignar el cargo, área o departamento correcto a los usuarios de la organización.`,

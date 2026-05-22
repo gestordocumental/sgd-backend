@@ -9,6 +9,7 @@ import { NotificationsService } from './notifications.service';
 import { NotificationsConsumer } from './notifications.consumer';
 import { EmailService } from './email/email.service';
 import { UserClientService } from './user-client/user-client.service';
+import { OrgClientService } from './org-client/org-client.service';
 import { AppLogger } from '../common/logger/app-logger.service';
 import { KAFKA_CLIENT } from '../common/kafka/kafka.constants';
 
@@ -24,6 +25,7 @@ import { KAFKA_CLIENT } from '../common/kafka/kafka.constants';
     NotificationsConsumer,
     EmailService,
     UserClientService,
+    OrgClientService,
     {
       provide: KAFKA_CLIENT,
       inject: [ConfigService],

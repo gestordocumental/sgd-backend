@@ -146,6 +146,7 @@ export class WorkflowAdminCycleService {
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'ADMIN_CYCLE_TASK',
       recipientUserIds: [firstStep.userId],
+      orgId:            workflow.orgId,
       workflowId,
       workflowTitle:    workflow.title,
       message:          `Tienes una tarea en el ciclo administrativo del workflow "${workflow.title}"`,
@@ -315,6 +316,7 @@ export class WorkflowAdminCycleService {
       this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
         type:             'ADMIN_CYCLE_COMPLETED',
         recipientUserIds: [cycle.initiatedBy],
+        orgId:            workflow.orgId,
         workflowId,
         workflowTitle:    workflow.title,
         message:          `El ciclo administrativo #${cycle.cycleNumber} del workflow "${workflow.title}" ha finalizado.`,
@@ -324,6 +326,7 @@ export class WorkflowAdminCycleService {
       this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
         type:             'ADMIN_CYCLE_TASK',
         recipientUserIds: [nextStep!.userId],
+        orgId:            workflow.orgId,
         workflowId,
         workflowTitle:    workflow.title,
         message:          `Tienes una tarea pendiente en el ciclo administrativo del workflow "${workflow.title}"`,
@@ -465,6 +468,7 @@ export class WorkflowAdminCycleService {
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'WORKFLOW_CLOSED',
       recipientUserIds: [workflow.createdBy],
+      orgId:            workflow.orgId,
       workflowId,
       workflowTitle:    workflow.title,
       message:          `El workflow "${workflow.title}" ha sido cerrado definitivamente.`,

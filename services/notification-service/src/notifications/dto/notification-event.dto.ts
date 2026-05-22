@@ -15,6 +15,14 @@ export class NotificationEventDto {
 
   @IsOptional()
   @IsUUID('4')
+  orgId?: string;
+
+  @IsOptional()
+  @IsString()
+  orgName?: string;
+
+  @IsOptional()
+  @IsUUID('4')
   workflowId?: string;
 
   @IsOptional()

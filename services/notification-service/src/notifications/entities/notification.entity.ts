@@ -35,6 +35,14 @@ export class Notification {
   @Column('text')
   message!: string;
 
+  /** ID de la organización a la que pertenece la notificación (null = super admin). */
+  @Column({ name: 'org_id', type: 'uuid', nullable: true })
+  orgId!: string | null;
+
+  /** Nombre de la organización en el momento de emitir la notificación. */
+  @Column({ name: 'org_name', type: 'varchar', length: 300, nullable: true })
+  orgName!: string | null;
+
   @Column({ name: 'workflow_id', nullable: true, type: 'uuid' })
   workflowId!: string | null;
 

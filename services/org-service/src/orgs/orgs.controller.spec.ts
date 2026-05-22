@@ -89,27 +89,39 @@ describe('OrgsController', () => {
     const org = makeOrg({ name: 'Beta' });
     service.update.mockResolvedValue(org);
 
-    const result = await controller.update(org.id, { name: 'Beta' });
+    const result = await controller.update('actor-1', org.id, { name: 'Beta' });
 
-    expect(service.update).toHaveBeenCalledWith(org.id, { name: 'Beta' });
+    expect(service.update).toHaveBeenCalledWith(org.id, { name: 'Beta' }, 'actor-1');
     expect(result).toMatchObject({ id: org.id, name: 'Beta' });
+  });
+
+  it('throws UnauthorizedException when actorId is missing on update', async () => {
+    await expect(controller.update(undefined, 'org-1', { name: 'X' })).rejects.toThrow(UnauthorizedException);
   });
 
   it('delegates delete to the service', async () => {
     service.remove.mockResolvedValue(undefined);
 
-    await controller.remove('org-1');
+    await controller.remove('actor-1', 'org-1');
 
-    expect(service.remove).toHaveBeenCalledWith('org-1');
+    expect(service.remove).toHaveBeenCalledWith('org-1', 'actor-1');
+  });
+
+  it('throws UnauthorizedException when actorId is missing on remove', async () => {
+    await expect(controller.remove(undefined, 'org-1')).rejects.toThrow(UnauthorizedException);
   });
 
   it('delegates restore to the service and maps the response', async () => {
     const org = makeOrg();
     service.restore.mockResolvedValue(org);
 
-    const result = await controller.restore(org.id);
+    const result = await controller.restore('actor-1', org.id);
 
-    expect(service.restore).toHaveBeenCalledWith(org.id);
+    expect(service.restore).toHaveBeenCalledWith(org.id, 'actor-1');
     expect(result).toMatchObject({ id: org.id, name: org.name });
+  });
+
+  it('throws UnauthorizedException when actorId is missing on restore', async () => {
+    await expect(controller.restore(undefined, 'org-1')).rejects.toThrow(UnauthorizedException);
   });
 });

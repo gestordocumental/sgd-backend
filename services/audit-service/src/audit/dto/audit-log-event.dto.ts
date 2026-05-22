@@ -5,7 +5,7 @@
 export interface AuditLogEvent {
   service:        string;
   actorId:        string;
-  orgId:          string;
+  orgId:          string | null;
   action:         string;
   resourceType:   string;
   resourceId:     string;
@@ -22,7 +22,7 @@ export function isValidAuditLogEvent(raw: unknown): raw is AuditLogEvent {
   return (
     typeof p['service']      === 'string' &&
     typeof p['actorId']      === 'string' &&
-    typeof p['orgId']        === 'string' &&
+    (p['orgId'] === null || typeof p['orgId'] === 'string') &&
     typeof p['action']       === 'string' &&
     typeof p['resourceType'] === 'string' &&
     typeof p['resourceId']   === 'string' &&

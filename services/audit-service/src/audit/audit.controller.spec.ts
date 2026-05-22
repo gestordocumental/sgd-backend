@@ -28,7 +28,7 @@ describe('AuditController', () => {
       const me = makePayload({ isSuperAdmin: true });
       mockService.query.mockResolvedValue({ data: [], total: 0, page: 1, limit: 50 });
       await controller.getLogs(dto, me);
-      expect(mockService.query).toHaveBeenCalledWith(dto);
+      expect(mockService.query).toHaveBeenCalledWith(dto, true);
     });
 
     it('normal user without companyId throws ForbiddenException', async () => {
@@ -49,7 +49,7 @@ describe('AuditController', () => {
       mockService.query.mockResolvedValue({ data: [], total: 0, page: 1, limit: 50 });
       await controller.getLogs(dto, me);
       expect(dto.orgId).toBe('my-org');
-      expect(mockService.query).toHaveBeenCalledWith(dto);
+      expect(mockService.query).toHaveBeenCalledWith(dto, false);
     });
 
     it('normal user can pass their own orgId', async () => {
@@ -67,7 +67,7 @@ describe('AuditController', () => {
       const me = makePayload({ isSuperAdmin: true });
       mockService.export.mockResolvedValue([]);
       await controller.exportLogs(dto, me);
-      expect(mockService.export).toHaveBeenCalledWith(dto);
+      expect(mockService.export).toHaveBeenCalledWith(dto, true);
     });
 
     it('normal user without companyId throws ForbiddenException', async () => {
@@ -98,12 +98,26 @@ describe('AuditController', () => {
       await expect(controller.getById('missing-id', me)).rejects.toThrow(NotFoundException);
     });
 
-    it('super admin can access any document', async () => {
-      const doc = { id: 'doc-1', orgId: 'other-org' } as any;
+    it('super admin can access events without orgId', async () => {
+      const doc = { id: 'doc-1', orgId: null } as any;
       mockService.findById.mockResolvedValue(doc);
       const me = makePayload({ isSuperAdmin: true });
       const result = await controller.getById('doc-1', me);
       expect(result).toBe(doc);
+    });
+
+    it('super admin cannot access org-scoped events', async () => {
+      const doc = { id: 'doc-1', orgId: 'other-org' } as any;
+      mockService.findById.mockResolvedValue(doc);
+      const me = makePayload({ isSuperAdmin: true });
+      await expect(controller.getById('doc-1', me)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('normal user without companyId throws ForbiddenException', async () => {
+      const doc = { id: 'doc-1', orgId: 'my-org' } as any;
+      mockService.findById.mockResolvedValue(doc);
+      const me = makePayload({ companyId: undefined });
+      await expect(controller.getById('doc-1', me)).rejects.toThrow(ForbiddenException);
     });
 
     it('normal user can access document from their org', async () => {
