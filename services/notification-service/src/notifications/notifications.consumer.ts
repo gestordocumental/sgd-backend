@@ -11,7 +11,7 @@ import { runWithCorrelation } from '../common/kafka/kafka-consumer.util';
 import { AppLogger } from '../common/logger/app-logger.service';
 import { NotificationsService } from './notifications.service';
 import { EmailService } from './email/email.service';
-import { NotificationType } from './entities/notification.entity';
+import { NotificationType, NOTIFICATION_TYPES } from './entities/notification.entity';
 
 interface NotificationPayload {
   type: NotificationType;
@@ -44,7 +44,7 @@ function isValidNotificationPayload(raw: unknown): raw is NotificationPayload {
   const metadata     = p['metadata'];
   return (
     typeof type === 'string' &&
-    Object.values(NotificationType).includes(type as NotificationType) &&
+    (NOTIFICATION_TYPES as readonly unknown[]).includes(type) &&
     Array.isArray(p['recipientUserIds']) &&
     (p['recipientUserIds'] as unknown[]).every((id) => typeof id === 'string') &&
     typeof p['message'] === 'string' &&
