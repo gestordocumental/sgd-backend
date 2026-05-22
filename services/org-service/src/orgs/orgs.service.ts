@@ -113,7 +113,14 @@ export class OrgsService {
         `revokeOrgAccess failed for org ${id} — compensating by restoring the record`,
         (err as Error).stack,
       );
-      await this.orgRepo.restore(id);
+      try {
+        await this.orgRepo.restore(id);
+      } catch (restoreErr) {
+        this.logger.error(
+          `restore failed while compensating org ${id}`,
+          (restoreErr as Error).stack,
+        );
+      }
       throw err;
     }
 

@@ -35,15 +35,25 @@ interface UserInvitedPayload {
 function isValidNotificationPayload(raw: unknown): raw is NotificationPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;
-  const orgId   = p['orgId'];
-  const orgName = p['orgName'];
+  const type         = p['type'];
+  const orgId        = p['orgId'];
+  const orgName      = p['orgName'];
+  const workflowId   = p['workflowId'];
+  const workflowTitle = p['workflowTitle'];
+  const timestamp    = p['timestamp'];
+  const metadata     = p['metadata'];
   return (
-    typeof p['type'] === 'string' &&
+    typeof type === 'string' &&
+    Object.values(NotificationType).includes(type as NotificationType) &&
     Array.isArray(p['recipientUserIds']) &&
     (p['recipientUserIds'] as unknown[]).every((id) => typeof id === 'string') &&
     typeof p['message'] === 'string' &&
-    (orgId   === undefined || orgId   === null || typeof orgId   === 'string') &&
-    (orgName === undefined || orgName === null || typeof orgName === 'string')
+    (orgId        === undefined || orgId        === null || typeof orgId        === 'string') &&
+    (orgName      === undefined || orgName      === null || typeof orgName      === 'string') &&
+    (workflowId   === undefined || typeof workflowId   === 'string') &&
+    (workflowTitle === undefined || typeof workflowTitle === 'string') &&
+    (timestamp    === undefined || typeof timestamp    === 'string') &&
+    (metadata === undefined || (metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)))
   );
 }
 
