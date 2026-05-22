@@ -43,6 +43,7 @@ const makeUor = (overrides: Partial<UserOrgRole> = {}): UserOrgRole => ({
   orgId: 'org-uuid-1',
   roleId: 'role-uuid-1',
   assignedBy: 'admin-uuid',
+  removedAt: null,
   user: null as any,
   role: null as any,
   createdAt: new Date('2024-01-01'),
@@ -212,7 +213,7 @@ describe('UsersController', () => {
       const user = makeUser();
       const roles = [{ roleId: 'role-uuid-1', roleName: 'ADMIN' }];
 
-      usersService.findByOrg.mockResolvedValue([{ user, roles }]);
+      usersService.findByOrg.mockResolvedValue([{ user, roles, orgRemovedAt: null }]);
 
       const result = await controller.findByOrg('org-uuid-1');
 

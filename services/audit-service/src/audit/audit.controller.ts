@@ -95,6 +95,7 @@ export class AuditController {
       // Super admin solo puede acceder a eventos sin org (sus propias acciones)
       if (doc.orgId) throw new ForbiddenException('Access to this event is not allowed');
     } else {
+      if (!me.companyId) throw new ForbiddenException('No organization context found in token');
       // Org user solo puede acceder a eventos de su org
       if (doc.orgId !== me.companyId) throw new ForbiddenException('Access to this organization is not allowed');
     }

@@ -99,8 +99,8 @@ export class OrgsService {
 
   async remove(id: string, actorId?: string): Promise<void> {
     const org = await this.findOne(id);
-    await this.orgRepo.softRemove(org);
     await this.revokeOrgAccess(id);
+    await this.orgRepo.softRemove(org);
     if (actorId) this.emitAuditLog('COMPANY_DELETED', org, actorId);
   }
 

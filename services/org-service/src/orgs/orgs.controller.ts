@@ -85,6 +85,7 @@ export class OrgsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateOrgDto,
   ): Promise<OrgResponseDto> {
+    if (!actorId) throw new UnauthorizedException('Could not extract caller identity from token');
     return OrgResponseDto.from(await this.orgsService.update(id, dto, actorId));
   }
 
@@ -102,6 +103,7 @@ export class OrgsController {
     @CurrentUser() actorId: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
+    if (!actorId) throw new UnauthorizedException('Could not extract caller identity from token');
     return this.orgsService.remove(id, actorId);
   }
 
@@ -118,6 +120,7 @@ export class OrgsController {
     @CurrentUser() actorId: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<OrgResponseDto> {
+    if (!actorId) throw new UnauthorizedException('Could not extract caller identity from token');
     return OrgResponseDto.from(await this.orgsService.restore(id, actorId));
   }
 }

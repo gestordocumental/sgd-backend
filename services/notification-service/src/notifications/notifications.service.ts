@@ -34,13 +34,14 @@ export class NotificationsService {
     metadata?: Record<string, unknown>;
   }): Promise<void> {
     const { type, recipientUserIds, message, orgId, workflowId, workflowTitle, metadata } = opts;
+    const uniqueRecipientUserIds = [...new Set(recipientUserIds)];
     const title = getNotificationTitle(type);
 
     // Resolver nombre de la organización si llega orgId pero no orgName
     const orgName = opts.orgName ?? (orgId ? await this.orgClient.getOrgName(orgId) : null);
 
     // Guardar notificaciones internas en bulk
-    const entities = recipientUserIds.map((userId) => {
+    const entities = uniqueRecipientUserIds.map((userId) => {
       const n = this.repo.create({
         userId,
         type,
@@ -64,10 +65,10 @@ export class NotificationsService {
     );
 
     // Enviar emails — obtener datos de usuario de forma paralela
-    const userMap = await this.userClient.getUsersByIds(recipientUserIds);
+    const userMap = await this.userClient.getUsersByIds(uniqueRecipientUserIds);
 
     const results = await Promise.allSettled(
-      recipientUserIds.map(async (userId) => {
+      uniqueRecipientUserIds.map(async (userId) => {
         const user = userMap.get(userId);
         if (!user?.email) {
           this.logger.warn(`No email found for user ${userId} — skipping email`, 'NotificationsService');

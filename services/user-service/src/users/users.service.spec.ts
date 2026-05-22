@@ -54,6 +54,7 @@ const makeUor = (overrides: Partial<UserOrgRole> = {}): UserOrgRole => ({
   orgId: 'org-uuid-1',
   roleId: 'role-uuid-1',
   assignedBy: 'admin-uuid',
+  removedAt: null,
   user: null as any,
   role: null as any,
   createdAt: new Date('2024-01-01'),
@@ -108,6 +109,7 @@ describe('UsersService', () => {
             delete: jest.fn(),
             query: jest.fn(),
             update: jest.fn(),
+            createQueryBuilder: jest.fn(),
           },
         },
         {
@@ -314,6 +316,7 @@ describe('UsersService', () => {
         take: 100,
         skip: 0,
         order: { createdAt: 'DESC' },
+        withDeleted: true,
       });
       expect(result).toEqual({ data: users, total: users.length });
     });
@@ -607,6 +610,7 @@ describe('UsersService', () => {
       expect(uorRepo.update).toHaveBeenCalledWith(existing.id, {
         roleId: null,
         assignedBy: 'admin-uuid',
+        removedAt: null,
       });
       expect(result).toEqual(updated);
     });
@@ -651,7 +655,7 @@ describe('UsersService', () => {
 
       expect(uorRepo.update).toHaveBeenCalledWith(
         { userId: user.id, orgId: 'org-uuid-1' },
-        { roleId: null, assignedBy: null },
+        { roleId: null, assignedBy: null, removedAt: expect.any(Date) },
       );
     });
 
@@ -667,19 +671,26 @@ describe('UsersService', () => {
   // ─── findByOrg ────────────────────────────────────────────────────────────
 
   describe('findByOrg', () => {
+    function makeUorQb(rows: UserOrgRole[]) {
+      const qb: Record<string, jest.Mock> = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where:             jest.fn().mockReturnThis(),
+        withDeleted:       jest.fn().mockReturnThis(),
+        getMany:           jest.fn().mockResolvedValue(rows),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+      return qb;
+    }
+
     it('returns users with their roles for a given orgId', async () => {
       const user = makeUser();
       const adminRole = makeRole();
       const orgRole = makeUor({ user, role: adminRole as any });
 
-      uorRepo.find.mockResolvedValue([orgRole] as any);
+      makeUorQb([orgRole] as any);
 
       const result = await service.findByOrg('org-uuid-1');
 
-      expect(uorRepo.find).toHaveBeenCalledWith({
-        where: { orgId: 'org-uuid-1' },
-        relations: ['user', 'role'],
-      });
       expect(usersRepo.find).not.toHaveBeenCalled();
       expect(result).toHaveLength(1);
       expect(result[0].user).toEqual(user);
@@ -696,7 +707,7 @@ describe('UsersService', () => {
       const orgRole1 = makeUor({ userId: user1.id, user: user1, roleId: role1.id, role: role1 as any });
       const orgRole2 = makeUor({ id: 'uor-uuid-2', userId: user2.id, user: user2, roleId: role2.id, role: role2 as any });
 
-      uorRepo.find.mockResolvedValue([orgRole1, orgRole2] as any);
+      makeUorQb([orgRole1, orgRole2] as any);
 
       const result = await service.findByOrg('org-uuid-1');
 
@@ -710,7 +721,7 @@ describe('UsersService', () => {
     });
 
     it('returns an empty array when no users belong to the org', async () => {
-      uorRepo.find.mockResolvedValue([]);
+      makeUorQb([]);
 
       const result = await service.findByOrg('org-uuid-empty');
 

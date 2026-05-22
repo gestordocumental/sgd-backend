@@ -35,11 +35,15 @@ interface UserInvitedPayload {
 function isValidNotificationPayload(raw: unknown): raw is NotificationPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;
+  const orgId   = p['orgId'];
+  const orgName = p['orgName'];
   return (
     typeof p['type'] === 'string' &&
     Array.isArray(p['recipientUserIds']) &&
     (p['recipientUserIds'] as unknown[]).every((id) => typeof id === 'string') &&
-    typeof p['message'] === 'string'
+    typeof p['message'] === 'string' &&
+    (orgId   === undefined || orgId   === null || typeof orgId   === 'string') &&
+    (orgName === undefined || orgName === null || typeof orgName === 'string')
   );
 }
 

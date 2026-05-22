@@ -142,6 +142,42 @@ describe('NotificationsService', () => {
       );
     });
 
+    it('uses provided orgName without calling orgClient', async () => {
+      const orgClient = (service as any).orgClient;
+      userClient.getUsersByIds.mockResolvedValue(new Map());
+
+      await service.dispatch({
+        type: 'WORKFLOW_APPROVED',
+        recipientUserIds: ['user-1'],
+        message: 'Aprobado',
+        orgId: 'org-uuid',
+        orgName: 'Proasistemas',
+      });
+
+      expect(orgClient.getOrgName).not.toHaveBeenCalled();
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ orgName: 'Proasistemas' }),
+      );
+    });
+
+    it('calls orgClient.getOrgName when orgId present but orgName is absent', async () => {
+      const orgClient = (service as any).orgClient;
+      orgClient.getOrgName.mockResolvedValue('Proasistemas');
+      userClient.getUsersByIds.mockResolvedValue(new Map());
+
+      await service.dispatch({
+        type: 'WORKFLOW_APPROVED',
+        recipientUserIds: ['user-1'],
+        message: 'Aprobado',
+        orgId: 'org-uuid',
+      });
+
+      expect(orgClient.getOrgName).toHaveBeenCalledWith('org-uuid');
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ orgName: 'Proasistemas' }),
+      );
+    });
+
     it('handles empty recipientUserIds without error', async () => {
       userClient.getUsersByIds.mockResolvedValue(new Map());
 

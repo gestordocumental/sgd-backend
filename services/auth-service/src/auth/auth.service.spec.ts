@@ -53,7 +53,7 @@ describe('AuthService', () => {
     };
     userClient = {
       getUserInfo: jest.fn().mockResolvedValue({ isSuperAdmin: false }),
-      getUserCompanies: jest.fn().mockResolvedValue([]),
+      getUserCompanies: jest.fn().mockResolvedValue(['some-org-id']),
     };
 
     const module: TestingModule = await Test.createTestingModule({

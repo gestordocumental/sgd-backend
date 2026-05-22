@@ -493,10 +493,16 @@ export class UsersService {
   }
 
   async removeAllFromOrg(orgId: string): Promise<void> {
-    await this.userOrgRoleRepository.update(
-      { orgId },
-      { roleId: null, assignedBy: null, removedAt: new Date() },
-    );
+    await this.userOrgRoleRepository
+      .createQueryBuilder()
+      .update(UserOrgRole)
+      .set({
+        roleId:     null,
+        assignedBy: null,
+        removedAt:  () => 'COALESCE(removed_at, NOW())',
+      })
+      .where('org_id = :orgId', { orgId })
+      .execute();
   }
 
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {

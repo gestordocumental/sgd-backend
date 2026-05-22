@@ -136,6 +136,8 @@ describe('NotificationsConsumer', () => {
       type:             'WORKFLOW_APPROVED',
       recipientUserIds: ['user-1', 'user-2'],
       message:          'Aprobado',
+      orgId:            null,
+      orgName:          null,
       workflowId:       'wf-uuid',
       workflowTitle:    'WF Test',
       metadata:         undefined,
