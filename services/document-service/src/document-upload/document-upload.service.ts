@@ -12,13 +12,14 @@ import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
 import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
 
 /**
- * Returns true only if newVer is exactly one increment above oldVer.
- * Rules:
- *  - The first segment that changes must increase by exactly 1.
- *  - All segments to the right of that change must be 0 (reset on bump).
- *  - Incrementing a higher segment while keeping lower ones unchanged is invalid.
+ * Determine whether `newVer` is exactly one incremental bump above `oldVer`.
  *
- * Examples: "05"→"06" ✓  "05"→"07" ✗  "v1.0"→"v1.1" ✓  "v1.9"→"v2.0" ✓  "v1.0"→"v2.1" ✗
+ * Leading `v`/`V` prefixes are ignored; both versions must be numeric dotted sequences (e.g. `1.2.3`).
+ * The first differing segment must equal the corresponding old segment plus one, and every segment to the right must be `0`.
+ *
+ * Examples: "05" → "06" ✓, "v1.0" → "v1.1" ✓, "v1.9" → "v2.0" ✓, "v1.0" → "v2.1" ✗
+ *
+ * @returns `true` if `newVer` increases `oldVer` by exactly one at the first differing numeric segment with all lower segments reset to `0`, `false` otherwise.
  */
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const parse = (v: string): number[] | null => {

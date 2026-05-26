@@ -16,6 +16,12 @@ export interface AuditLogEvent {
   ip?:            string | null;
 }
 
+/**
+ * Determine whether a value conforms to the AuditLogEvent shape.
+ *
+ * @param raw - The value to validate
+ * @returns `true` if `raw` has the required string fields `service`, `actorId`, `action`, `resourceType`, `resourceId`, and `timestamp`, and the optional fields meet their allowed types/nullable states; `false` otherwise. Optional fields: `orgId` may be `null` or a string; `resourceName`, `correlationId`, and `ip` may be `undefined`, `null`, or a string; `metadata` may be `undefined` or `null` or a non-array object.
+ */
 export function isValidAuditLogEvent(raw: unknown): raw is AuditLogEvent {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;

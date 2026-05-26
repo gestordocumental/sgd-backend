@@ -6,10 +6,22 @@ collectDefaultMetrics({ register: registry });
 
 let httpRequestDuration: Histogram | undefined;
 
+/**
+ * Retrieve the module-level metrics Registry.
+ *
+ * @returns The module-level `Registry` instance used to register and collect metrics
+ */
 export function getRegistry(): Registry {
   return registry;
 }
 
+/**
+ * Provide a process-level Histogram for measuring HTTP request durations.
+ *
+ * Initializes the histogram on first call and returns the cached instance; the histogram records durations in seconds and is labeled by `method`, `route`, and `status_code`.
+ *
+ * @returns The `Histogram` instance used to observe HTTP request durations (seconds)
+ */
 export function getHttpRequestDurationHistogram(): Histogram {
   if (!httpRequestDuration) {
     httpRequestDuration = new Histogram({

@@ -14,7 +14,14 @@ import { getCorrelationId } from '../correlation/correlation.context';
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const IS_PROD = process.env['NODE_ENV'] === 'production';
 
-/** Replaces UUID values in error bodies with '[id]' when running in production. Recurses into objects and arrays. */
+/**
+ * Sanitizes a value by replacing UUID-like strings with "[id]" when running in production.
+ *
+ * Recursively processes arrays and objects; returns the input unchanged when not in production.
+ *
+ * @param value - The value to sanitize (may be string, array, object, or other)
+ * @returns The sanitized value with UUIDs replaced by `"[id]"` in production, or the original value otherwise
+ */
 function sanitize(value: unknown): unknown {
   if (!IS_PROD) return value;
   if (typeof value === 'string') return value.replace(UUID_RE, '[id]');

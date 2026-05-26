@@ -8,6 +8,14 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+/**
+ * Bootstraps and starts the NestJS application for the Document Service.
+ *
+ * Configures application-level logging, validation, interceptors, and exception handling;
+ * builds and mounts the Swagger/OpenAPI documentation (including JWT bearer auth) at
+ * `api/documents/docs`; then starts the HTTP server on `process.env.PORT` or `3003`
+ * and logs the startup message.
+ */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 

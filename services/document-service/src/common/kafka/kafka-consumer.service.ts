@@ -22,6 +22,15 @@ interface MetadataExtractionFailedPayload {
   reason: string;
 }
 
+/**
+ * Type guard that verifies a value conforms to the MetadataExtractedPayload shape.
+ *
+ * Validates that `orgId` is a non-empty string, `typologyId` is a string accepted by
+ * `Types.ObjectId.isValid`, and that `nombre`, `codigo`, and `version` are either `null` or strings.
+ *
+ * @param raw - The value to validate as a MetadataExtractedPayload
+ * @returns `true` if `raw` matches the MetadataExtractedPayload structure, `false` otherwise
+ */
 function isValidExtractedPayload(raw: unknown): raw is MetadataExtractedPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;
@@ -34,6 +43,12 @@ function isValidExtractedPayload(raw: unknown): raw is MetadataExtractedPayload 
   );
 }
 
+/**
+ * Checks whether a value conforms to the MetadataExtractionFailedPayload shape.
+ *
+ * @param raw - Value to validate as a failed metadata extraction payload
+ * @returns `true` if `raw` has a non-empty `orgId`, a `typologyId` that is a valid ObjectId, and a string `reason`, `false` otherwise.
+ */
 function isValidFailedPayload(raw: unknown): raw is MetadataExtractionFailedPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;

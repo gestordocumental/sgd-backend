@@ -6,10 +6,20 @@ collectDefaultMetrics({ register: registry });
 
 let httpRequestDuration: Histogram | undefined;
 
+/**
+ * Provide the module-level Prometheus registry for the process.
+ *
+ * @returns The shared `Registry` instance used to register and collect metrics
+ */
 export function getRegistry(): Registry {
   return registry;
 }
 
+/**
+ * Get the module-level Histogram that measures HTTP request durations, creating and registering it on first call.
+ *
+ * @returns The `http_request_duration_seconds` Histogram that records request duration in seconds with labels `method`, `route`, and `status_code`
+ */
 export function getHttpRequestDurationHistogram(): Histogram {
   if (!httpRequestDuration) {
     httpRequestDuration = new Histogram({

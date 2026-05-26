@@ -8,7 +8,12 @@ export interface XlsxStructure {
   rightCell: string | null;
 }
 
-// ─── Plain text extraction (all sheets) ──────────────────────────────────────
+/**
+ * Extracts text from every worksheet in an XLSX file and concatenates all non-empty cell values.
+ *
+ * @param buffer - In-memory `.xlsx` file contents
+ * @returns All non-empty cell texts from every worksheet joined by `\n`
+ */
 
 export async function parseXlsx(buffer: Buffer): Promise<string> {
   const workbook = new ExcelJS.Workbook();
@@ -26,7 +31,19 @@ export async function parseXlsx(buffer: Buffer): Promise<string> {
   return lines.join('\n');
 }
 
-// ─── Structured extraction (scans header rows of first sheet) ────────────────
+/**
+ * Extracts all text from an XLSX buffer and heuristically detects title, company and metadata cells from the first worksheet.
+ *
+ * Scans every worksheet to produce a single newline-delimited text blob, then examines up to the first 10 rows of the first worksheet
+ * to build a unique-ordered header sample. From that sample it selects a metadata cell (labels matching `código` or `versión`),
+ * identifies a company-like value using legal-form and uppercase heuristics, and picks a title as the first remaining header entry.
+ *
+ * @returns An XlsxStructure containing:
+ *  - `text`: the full extracted text from all worksheets,
+ *  - `titleCell`: the detected title value or `null`,
+ *  - `leftCell`: the company and title combined with a newline when both are present, otherwise the single detected value or `null`,
+ *  - `rightCell`: the detected metadata value (e.g., "Código" or "Versión") or `null`.
+ */
 
 export async function parseXlsxStructured(buffer: Buffer): Promise<XlsxStructure> {
   const workbook = new ExcelJS.Workbook();
@@ -84,7 +101,12 @@ export async function parseXlsxStructured(buffer: Buffer): Promise<XlsxStructure
   };
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+/**
+ * Extracts a normalized text representation from an Excel cell.
+ *
+ * @param cell - Cell object (as provided by ExcelJS). The function reads `cell.value` and supports primitive types, Date, richText, formula `result`, and objects with a `text` property.
+ * @returns The cell value converted to a plain string; dates are returned as `YYYY-MM-DD`; returns an empty string for `null`, `undefined`, or absent formula results.
+ */
 
 function cellText(cell: any): string {
   const val = cell.value;
@@ -101,6 +123,12 @@ function cellText(cell: any): string {
   return String(val);
 }
 
+/**
+ * Determines whether a text string resembles a company name or contains common corporate identifiers.
+ *
+ * @param text - The input text to evaluate as a potential company name
+ * @returns `true` if `text` matches common corporate legal forms (e.g., "Ltda.", "Inc.", "Grupo", "Holding") or is a short uppercase abbreviation-like name, `false` otherwise.
+ */
 function looksLikeCompany(text: string): boolean {
   if (/\b(s\.?\s*a\.?\s*s?\.?|ltda\.?|corp\.?|inc\.?|cia\.?|grupo|holding)\b/i.test(text)) return true;
   const words = text.trim().split(/\s+/);

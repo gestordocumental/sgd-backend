@@ -11,7 +11,7 @@ set -eu
 # Si PORT no está seteado (local), usar 8000 como fallback.
 export KONG_PROXY_LISTEN="0.0.0.0:${PORT:-8000}"
 
-# Escapa caracteres especiales en la parte de reemplazo de sed.
+# escape_sed_replacement escapa los caracteres '&', '|' y '\' para que la cadena pueda usarse como parte de reemplazo en comandos sed.
 escape_sed_replacement() {
   printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'
 }
