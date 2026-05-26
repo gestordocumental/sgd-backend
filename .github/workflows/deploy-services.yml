@@ -36,7 +36,18 @@ jobs:
   guard:
     name: Verificar CI
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        (
+          github.event.workflow_run.head_branch == 'dev' ||
+          github.event.workflow_run.head_branch == 'test' ||
+          github.event.workflow_run.head_branch == 'master'
+        )
+      )
     steps:
       - run: echo "CI passed — proceeding with deploy"
 

@@ -92,10 +92,11 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       # PLAINTEXT: comunicación interna docker-compose
-      # EXTERNAL:  acceso desde el host local (127.0.0.1:9094)
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://127.0.0.1:9094
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      # HOST: acceso desde herramientas que corren directamente en el host
+      # KIND: acceso desde nodos Kind u otros clientes containerizados
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:9094,KIND://:9095
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://127.0.0.1:9094,KIND://${KAFKA_KIND_ADVERTISED_HOST:-host.docker.internal}:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT,KIND:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -108,7 +109,8 @@ services:
     volumes:
       - kafkadata:/var/lib/kafka/data
     ports:
-      - "9094:9094"     # Puerto externo para Kind y herramientas del host
+      - "9094:9094"     # Host local: localhost:9094
+      - "9095:9095"     # Kind/contenedores: ${KAFKA_KIND_ADVERTISED_HOST:-host.docker.internal}:9095
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
       interval: 10s
