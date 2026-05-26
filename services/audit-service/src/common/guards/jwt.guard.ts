@@ -1,0 +1,72 @@
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
+import { verify, JsonWebTokenError } from 'jsonwebtoken';
+import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+
+/**
+ * Validates a JWT using HS256 and returns its decoded payload.
+ *
+ * @param token - The JWT string in compact serialization (e.g., "header.payload.signature")
+ * @param secret - The HMAC secret used to verify the token
+ * @returns The decoded JWT payload as a plain object
+ * @throws UnauthorizedException - If verification fails due to an invalid token or signature
+ * @throws Error - Re-throws any other verification errors unchanged
+ */
+function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
+  try {
+    return verify(token, secret, { algorithms: ['HS256'] }) as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof JsonWebTokenError) {
+      throw new UnauthorizedException(err.message);
+    }
+    throw err;
+  }
+}
+
+@Injectable()
+export class JwtGuard implements CanActivate {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly configService: ConfigService,
+  ) {}
+
+  canActivate(ctx: ExecutionContext): boolean {
+    const meta = this.reflector.getAllAndOverride<AuthMeta | undefined>(AUTH_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
+    if (!meta) return true;
+
+    const request = ctx
+      .switchToHttp()
+      .getRequest<{ headers: Record<string, string>; params: Record<string, string>; user?: Record<string, unknown> }>();
+
+    const internalToken = request.headers['x-internal-token'];
+    if (internalToken) {
+      const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+      const provided  = Buffer.from(internalToken);
+      if (provided.length === expected.length && timingSafeEqual(expected, provided)) return true;
+    }
+
+    const auth = request.headers['authorization'];
+    if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
+
+    const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
+    const payload   = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
+
+    request.user = payload;
+
+    if (payload.isSuperAdmin) return true;
+    if (meta.superAdminOnly) throw new ForbiddenException('Super admin access required');
+
+    return true;
+  }
+}

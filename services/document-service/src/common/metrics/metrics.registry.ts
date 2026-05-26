@@ -1,23 +1,26 @@
 import { Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
+// One registry per process — safe across hot reloads because module-level vars persist.
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
 
 let httpRequestDuration: Histogram | undefined;
 
 /**
- * Provide the module-level Prometheus registry for the process.
+ * Get the module-level Prometheus `Registry` used by the process.
  *
- * @returns The shared `Registry` instance used to register and collect metrics
+ * @returns The shared `Registry` instance used to register metrics
  */
 export function getRegistry(): Registry {
   return registry;
 }
 
 /**
- * Get the module-level Histogram that measures HTTP request durations, creating and registering it on first call.
+ * Returns the process-shared Histogram used to measure HTTP request durations.
  *
- * @returns The `http_request_duration_seconds` Histogram that records request duration in seconds with labels `method`, `route`, and `status_code`
+ * The histogram is initialized on first use and is configured with `method`, `route`, and `status_code` labels and second-based buckets for request durations.
+ *
+ * @returns The shared `Histogram` instance for HTTP request duration in seconds.
  */
 export function getHttpRequestDurationHistogram(): Histogram {
   if (!httpRequestDuration) {

@@ -5,6 +5,13 @@ import { AppModule } from './app.module';
 import { AppLogger } from '@sgd/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+/**
+ * Initialize and start the NestJS application with logging and Swagger configuration.
+ *
+ * Sets the application's logger to the injected `AppLogger`, configures OpenAPI docs
+ * (served at `api/metadata-extractor/docs`), and starts the HTTP server on the port
+ * taken from `process.env.PORT` or `3004` if unset.
+ */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 

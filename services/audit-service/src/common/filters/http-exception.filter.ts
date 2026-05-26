@@ -10,7 +10,7 @@ import * as Sentry from '@sentry/node';
 import { AppLogger } from '../logger/app-logger.service';
 import { getCorrelationId } from '../correlation/correlation.context';
 
-// UUID pattern — strips internal IDs from error messages in production.
+// UUID pattern — used to strip internal IDs from error messages in production.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const IS_PROD = process.env['NODE_ENV'] === 'production';
 
@@ -37,29 +37,32 @@ export class HttpExceptionFilter implements ExceptionFilter {
   constructor(private readonly logger: AppLogger) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    const ctx = host.switchToHttp();
-    const req = ctx.getRequest<Request>();
-    const res = ctx.getResponse<Response>();
+    const ctx   = host.switchToHttp();
+    const req   = ctx.getRequest<Request>();
+    const res   = ctx.getResponse<Response>();
 
-    const isHttp = exception instanceof HttpException;
-    const status = isHttp ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    const isHttp  = exception instanceof HttpException;
+    const status  = isHttp ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const rawBody = isHttp ? exception.getResponse() : null;
 
+    // Preserve structured error bodies (e.g. ConflictException with details)
     const errorBody =
       typeof rawBody === 'object' && rawBody !== null
         ? rawBody
         : { message: isHttp ? exception.message : 'Internal server error' };
 
+    // Sanitize internal IDs from outgoing messages in production
     const sanitized = sanitize(errorBody) as Record<string, unknown>;
 
     const responseBody = {
       ...sanitized,
-      statusCode: status,
+      statusCode:    status,
       correlationId: getCorrelationId(),
-      timestamp: new Date().toISOString(),
-      path: req.path,
+      timestamp:     new Date().toISOString(),
+      path:          req.path,
     };
 
+    // Log as error only for 5xx — 4xx are expected business errors
     if (status >= 500) {
       Sentry.captureException(exception);
       this.logger.error(
@@ -68,7 +71,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         'HttpExceptionFilter',
       );
     } else {
-      this.logger.warn(`${req.method} ${req.path} → ${status}`, 'HttpExceptionFilter');
+      this.logger.warn(
+        `${req.method} ${req.path} → ${status}`,
+        'HttpExceptionFilter',
+      );
     }
 
     res.status(status).json(responseBody);

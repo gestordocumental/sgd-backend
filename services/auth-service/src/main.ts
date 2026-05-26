@@ -6,6 +6,9 @@ import { AppModule } from './app.module';
 import { AppLogger, LoggingInterceptor, HttpExceptionFilter } from '@sgd/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+/**
+ * Bootstraps and starts the NestJS application: creates the app, replaces the logger, registers global validation, logging interceptor and exception filter, configures Swagger, and begins listening on the configured port.
+ */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
