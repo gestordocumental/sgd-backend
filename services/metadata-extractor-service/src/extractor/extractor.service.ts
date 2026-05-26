@@ -19,6 +19,12 @@ interface FileUploadedPayload {
   orgName?: string;
 }
 
+/**
+ * Type guard that checks whether a value conforms to the FileUploadedPayload shape.
+ *
+ * @param raw - Value to validate
+ * @returns `true` if `raw` matches FileUploadedPayload: required non-empty `orgId`, `typologyId`, `r2Key`, and `mimeType` (strings), and an optional `orgName` that may be `null/undefined` or a string; `false` otherwise.
+ */
 function isValidFileUploadedPayload(raw: unknown): raw is FileUploadedPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;

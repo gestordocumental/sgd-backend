@@ -1,8 +1,10 @@
 import * as pdfParse from 'pdf-parse';
 
 /**
- * Extracts plain text from a PDF buffer.
- * Returns empty string if parsing fails — the rules service handles nulls.
+ * Extract plain text from a PDF buffer.
+ *
+ * @param buffer - PDF file contents as a Buffer
+ * @returns The extracted text, or an empty string if parsing fails or no text is present
  */
 export async function parsePdf(buffer: Buffer): Promise<string> {
   try {

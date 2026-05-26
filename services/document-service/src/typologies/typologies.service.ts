@@ -13,6 +13,13 @@ import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
 import { TOPICS } from '../common/kafka/kafka.constants';
 import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
 
+/**
+ * Determines whether `newVer` represents exactly a +1 increment over `oldVer` at the first differing segment, with all subsequent segments in `newVer` equal to zero.
+ *
+ * @param newVer - New dotted version string (optionally prefixed with `v`, e.g. `v1.2.0`)
+ * @param oldVer - Old dotted version string (optionally prefixed with `v`)
+ * @returns `true` if the first differing segment in `newVer` equals the corresponding segment in `oldVer` plus one and every following segment in `newVer` is `0`, `false` otherwise.
+ */
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const parse = (v: string) =>
     v.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);

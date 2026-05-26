@@ -11,6 +11,15 @@ import { timingSafeEqual } from 'crypto';
 import { verify, JsonWebTokenError } from 'jsonwebtoken';
 import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
 
+/**
+ * Validates a JWT using HS256 and returns its decoded payload.
+ *
+ * @param token - The JWT string in compact serialization (e.g., "header.payload.signature")
+ * @param secret - The HMAC secret used to verify the token
+ * @returns The decoded JWT payload as a plain object
+ * @throws UnauthorizedException - If verification fails due to an invalid token or signature
+ * @throws Error - Re-throws any other verification errors unchanged
+ */
 function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
   try {
     return verify(token, secret, { algorithms: ['HS256'] }) as Record<string, unknown>;

@@ -11,6 +11,12 @@ export interface JwtPayload {
   isSuperAdmin?: boolean;
 }
 
+/**
+ * Extracts and validates the authenticated JWT payload from the current HTTP request.
+ *
+ * @returns The validated `JwtPayload` found on `request.user`
+ * @throws UnauthorizedException If no authenticated user is present or the user's `sub` is missing
+ */
 export function jwtPayloadFactory(
   _data: unknown,
   ctx: ExecutionContext,

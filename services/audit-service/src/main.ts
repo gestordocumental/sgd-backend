@@ -22,6 +22,9 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+/**
+ * Bootstraps and starts the NestJS application: creates the app, installs the application logger, registers global validation, logging interceptor and HTTP exception filter, configures Swagger (Bearer JWT) at `api/audit/docs`, and listens on the port from `process.env.PORT` or `3007`.
+ */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 

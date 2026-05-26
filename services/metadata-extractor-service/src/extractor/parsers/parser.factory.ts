@@ -22,8 +22,10 @@ const XLSX_MIMES = new Set([
 ]);
 
 /**
- * Selects the right parser based on mimeType and returns extracted plain text.
- * Returns null if the mimeType is not supported.
+ * Selects a parser for the provided MIME type and returns the extracted plain text.
+ *
+ * @param mimeType - The document MIME type used to select the parser
+ * @returns The extracted plain text, or `null` if the MIME type is unsupported
  */
 export async function extractText(buffer: Buffer, mimeType: string): Promise<string | null> {
   const parser = MIME_PARSERS[mimeType];
@@ -32,7 +34,15 @@ export async function extractText(buffer: Buffer, mimeType: string): Promise<str
 }
 
 /**
- * Like extractText but also returns structured header cell data for DOCX files.
+ * Extracts structured document information (text plus header/table cell fields) when available.
+ *
+ * Uses the provided MIME type to choose a parser. For DOCX and XLSX returns parser-specific structured
+ * results; for PDFs returns a structure with extracted text and `titleCell`, `leftCell`, and `rightCell`
+ * set to `null`. If the MIME type is not supported, returns `null`.
+ *
+ * @param buffer - The document bytes to parse.
+ * @param mimeType - MIME type used to select the appropriate parser; unsupported types result in `null`.
+ * @returns A `DocxStructure` containing extracted `text` and cell fields (cells may be `null` for PDF), or `null` if the MIME type is unsupported.
  */
 export async function extractStructured(buffer: Buffer, mimeType: string): Promise<DocxStructure | null> {
   if (!MIME_PARSERS[mimeType]) return null;

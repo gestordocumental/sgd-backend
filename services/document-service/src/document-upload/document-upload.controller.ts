@@ -30,6 +30,12 @@ import { DocumentUploadService } from './document-upload.service';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
 import { multerOptions } from './document-upload.constants';
 
+/**
+ * Extracts the `sub` (user/actor id) from a JWT provided in an HTTP `Authorization` header.
+ *
+ * @param authHeader - The raw `Authorization` header value (expected `"Bearer <token>"`) or `undefined`
+ * @returns The `sub` claim from the token payload if present and parseable, `undefined` otherwise.
+ */
 function extractUserId(authHeader: string | undefined): string | undefined {
   if (!authHeader?.startsWith('Bearer ')) return undefined;
   try {
