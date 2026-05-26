@@ -3,7 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TerminusModule } from '@nestjs/terminus';
 import { ElasticsearchModule } from '@nestjs/elasticsearch';
 import { Kafka } from 'kafkajs';
-import { KAFKA_CLIENT } from '../common/kafka/kafka.constants';
+import { KAFKA_CLIENT } from '@sgd/common';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 

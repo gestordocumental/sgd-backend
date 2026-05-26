@@ -3,13 +3,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
-import { KAFKA_CLIENT, TOPICS } from '../common/kafka/kafka.constants';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { runWithCorrelation } from '../common/kafka/kafka-consumer.util';
+import { AppLogger, KAFKA_CLIENT, KafkaProducerService, TOPICS, runWithCorrelation } from '@sgd/common';
 import { StorageService } from '../common/storage/storage.service';
 import { MetadataRulesService } from './rules/metadata-rules.service';
 import { extractStructured } from './parsers/parser.factory';
-import { AppLogger } from '../common/logger/app-logger.service';
 
 interface FileUploadedPayload {
   orgId: string;
@@ -46,7 +43,13 @@ export class ExtractorService implements OnApplicationBootstrap, OnApplicationSh
 
   async onApplicationBootstrap() {
     const groupId = this.config.getOrThrow<string>('KAFKA_CONSUMER_GROUP');
-    this.consumer = this.kafka.consumer({ groupId });
+    this.consumer = this.kafka.consumer({
+      groupId,
+      // Connection-level retry: reconnects up to 3 times on broker unavailability.
+      // Message-level failures are handled internally by handleFileUploaded, which
+      // emits typology.metadata.extraction.failed on any processing error.
+      retry: { initialRetryTime: 300, retries: 3 },
+    });
 
     await this.consumer.connect();
     await this.subscribeWithRetry();

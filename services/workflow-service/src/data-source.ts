@@ -9,6 +9,7 @@ import { WorkflowAdminStep } from './workflows/entities/workflow-admin-step.enti
 import { WorkflowAdminAttachment } from './workflows/entities/workflow-admin-attachment.entity';
 import { WorkflowNote } from './workflows/entities/workflow-note.entity';
 import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity';
+import { IdempotencyKey } from './workflows/entities/idempotency-key.entity';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -41,6 +42,7 @@ export const AppDataSource = new DataSource({
     WorkflowAdminAttachment,
     WorkflowNote,
     WorkflowTimeline,
+    IdempotencyKey,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   // 'each' da a cada migración su propia transacción

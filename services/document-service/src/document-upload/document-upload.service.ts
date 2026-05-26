@@ -4,10 +4,7 @@ import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { Typology, TypologyDocument, ExtractionStatus, TypologyStatus } from '../typologies/schemas/typology.schema';
 import { StorageService } from '../common/storage/storage.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
+import { AppLogger, KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sgd/common';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
 import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
 

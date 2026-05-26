@@ -1,0 +1,16 @@
+{
+  "name": "sgd-backend",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build:common": "npm run build -w packages/common",
+    "build:common:watch": "npm run build:watch -w packages/common"
+  },
+  "devDependencies": {
+    "@nestjs/mongoose": "^11.0.4",
+    "mongoose": "^8.24.0"
+  }
+}

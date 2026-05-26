@@ -6,15 +6,11 @@ import { TypologiesModule } from './typologies/typologies.module';
 import { BulkImportModule } from './bulk-import/bulk-import.module';
 import { DocumentUploadModule } from './document-upload/document-upload.module';
 import { WorkflowFilesModule } from './workflow-files/workflow-files.module';
-import { KafkaModule } from './common/kafka/kafka.module';
+import { KafkaModule, KAFKA_CLIENT, CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
 import { KafkaConsumerService } from './common/kafka/kafka-consumer.service';
 import { TypologiesService } from './typologies/typologies.service';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
 
 import { StorageService } from './common/storage/storage.service';
-import { KAFKA_CLIENT } from './common/kafka/kafka.constants';
 import { ConfigService as CS } from '@nestjs/config';
 import { Kafka } from 'kafkajs';
 

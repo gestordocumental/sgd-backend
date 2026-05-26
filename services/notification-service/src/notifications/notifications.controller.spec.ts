@@ -1,6 +1,6 @@
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
-import { JwtPayload } from '../common/decorators/jwt-payload.decorator';
+import { JwtPayload } from '@sgd/common';
 
 function makeService(): jest.Mocked<NotificationsService> {
   return {
@@ -16,10 +16,21 @@ const user: JwtPayload = { sub: 'user-1', email: 'user@test.com', isSuperAdmin: 
 describe('NotificationsController', () => {
   let ctrl:    NotificationsController;
   let service: jest.Mocked<NotificationsService>;
+  let sseService: { connect: jest.Mock; emit: jest.Mock };
 
   beforeEach(() => {
     service = makeService();
-    ctrl    = new NotificationsController(service);
+    sseService = { connect: jest.fn(), emit: jest.fn() };
+    ctrl    = new NotificationsController(service, sseService as any);
+  });
+
+  it('stream() delegates to sseService.connect with user.sub', () => {
+    const req = {} as any;
+    const stream = {} as any;
+    sseService.connect.mockReturnValue(stream);
+
+    expect(ctrl.stream(user, req)).toBe(stream);
+    expect(sseService.connect).toHaveBeenCalledWith('user-1', req);
   });
 
   it('list() delegates to service.list with user.sub', async () => {

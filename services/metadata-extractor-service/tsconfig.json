@@ -12,6 +12,10 @@
     "incremental": true,
     "skipLibCheck": true,
     "strict": true,
-    "types": ["jest", "node", "multer"]
+    "types": [
+      "jest",
+      "node",
+      "multer"
+    ]
   }
 }

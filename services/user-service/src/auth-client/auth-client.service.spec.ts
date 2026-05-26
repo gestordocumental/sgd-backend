@@ -4,16 +4,11 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { of, throwError } from 'rxjs';
 import { AuthClientService } from './auth-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 // Mock the correlation context so it does not rely on AsyncLocalStorage state
-jest.mock('../common/correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('test-correlation-id'),
-}));
-
-// Mock the middleware constant to avoid importing the full middleware
-jest.mock('../common/middleware/correlation.middleware', () => ({
-  CORRELATION_ID_HEADER: 'x-correlation-id',
 }));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -50,8 +45,8 @@ describe('AuthClientService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn((key: string) => {
-              if (key === 'AUTH_SERVICE_URL') return AUTH_URL;
-              if (key === 'INTERNAL_TOKEN') return INTERNAL_TOKEN;
+              if (key === 'AUTH_SERVICE_URL')      return AUTH_URL;
+              if (key === 'INTERNAL_TOKEN_USER_AUTH') return INTERNAL_TOKEN;
               throw new Error(`Unknown config key: ${key}`);
             }),
           },

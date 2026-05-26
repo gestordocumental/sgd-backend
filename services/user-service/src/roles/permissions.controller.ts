@@ -11,7 +11,7 @@ import { PermissionsService } from './permissions.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('Permissions')
-@Controller('api/permissions')
+@Controller('api/v1/permissions')
 export class PermissionsController {
   constructor(
     private readonly permissionsService: PermissionsService,
@@ -53,7 +53,8 @@ export class PermissionsController {
     @Query('module') module: string,
     @Query('action') action: string,
   ): Promise<{ allowed: boolean }> {
-    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+    // org-service is the sole caller of this endpoint (via OrgPermissionsGuard).
+    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER'));
     const provided = Buffer.from(internalToken ?? '');
     const isValid =
       provided.length === expected.length && timingSafeEqual(expected, provided);

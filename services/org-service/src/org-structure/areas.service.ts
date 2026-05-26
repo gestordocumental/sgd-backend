@@ -5,9 +5,7 @@ import { Area } from './entities/area.entity';
 import { CreateAreaDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 import { DepartamentosService } from './departamentos.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
 export class AreasService {
@@ -34,7 +32,7 @@ export class AreasService {
       resourceType: 'area',
       resourceId:   params.resourceId,
       resourceName: params.resourceName ?? null,
-      ip:           getClientIp(),
+      ip:           correlationStorage.getStore()?.['clientIp'] as string | null,
       metadata:     params.metadata,
       timestamp:    new Date().toISOString(),
     });

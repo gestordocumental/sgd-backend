@@ -20,6 +20,8 @@ import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { SwitchCompanyDto } from "./dto/switch-company.dto";
+import { ForgotPasswordDto } from "./dto/forgot-password.dto";
+import { ResetPasswordDto } from "./dto/reset-password.dto";
 import {
   ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiParam,
 } from '@nestjs/swagger';
@@ -28,7 +30,7 @@ const REFRESH_COOKIE_NAME = 'sgd_refresh_token';
 const REFRESH_COOKIE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 @ApiTags('Auth')
-@Controller("api/auth")
+@Controller("api/v1/auth")
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
@@ -36,7 +38,8 @@ export class AuthController {
   ) {}
 
   private validateInternalToken(internalToken: string): void {
-    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+    // Only user-service is allowed to call auth-service internal endpoints.
+    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN_USER_AUTH'));
     const provided = Buffer.from(internalToken ?? '');
     const isValid =
       provided.length === expected.length &&
@@ -46,11 +49,14 @@ export class AuthController {
 
   private setRefreshCookie(res: Response | undefined, refreshToken: string): void {
     if (!res) return;
+    // sameSite: 'none' is required for cross-origin requests (e.g. Vercel frontend → Railway API).
+    // SameSite=None mandates Secure=true, which is already enforced in production.
+    const isProduction = process.env['NODE_ENV'] === 'production';
     res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/api/auth',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'strict',
+      path: '/api/v1/auth',
       maxAge: REFRESH_COOKIE_MAX_AGE_MS,
     });
     res.setHeader('Cache-Control', 'no-store');
@@ -110,6 +116,21 @@ export class AuthController {
     return this.authService.disableCredential(userId);
   }
 
+  @ApiOperation({ summary: 'Revoke all refresh tokens for a user (internal only)' })
+  @ApiSecurity('internal-token')
+  @ApiParam({ name: 'userId', format: 'uuid' })
+  @ApiResponse({ status: 204, description: 'All refresh tokens revoked' })
+  @ApiResponse({ status: 401, description: 'Invalid internal token' })
+  @Patch("credentials/:userId/revoke-tokens")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  revokeAllRefreshTokens(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("userId") userId: string,
+  ) {
+    this.validateInternalToken(internalToken);
+    return this.authService.revokeAllRefreshTokens(userId);
+  }
+
   @ApiOperation({ summary: 'Enable user credentials (internal only)' })
   @ApiSecurity('internal-token')
   @ApiParam({ name: 'userId', format: 'uuid' })
@@ -167,6 +188,25 @@ export class AuthController {
       }
     }
     return this.toAccessTokenResponse(await this.authService.refresh(refreshToken), res);
+  }
+
+  @ApiOperation({ summary: 'Request a password reset email' })
+  @ApiResponse({ status: 200, description: 'Always returns ok:true to avoid email enumeration' })
+  @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
+  @UseGuards(ThrottlerGuard)
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @ApiOperation({ summary: 'Reset password using the token received by email' })
+  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.newPassword);
   }
 
   // ── PROTECTED routes (Kong validates JWT before arriving here) ───────────────

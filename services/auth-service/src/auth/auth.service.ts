@@ -5,21 +5,27 @@ import {
   Inject,
   ForbiddenException,
   NotFoundException,
+  BadRequestException,
+  Logger,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import * as bcrypt from "bcryptjs";
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes } from "crypto";
 import { Redis } from "ioredis";
 import { Credential, CredentialStatus } from "./entities/credential.entity";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
+import { KafkaProducerService, TOPICS } from "@sgd/common";
 
 // Refresh token TTL in Redis (must match JWT_REFRESH_EXPIRATION: 12h)
 const REFRESH_TTL_SECONDS = 12 * 60 * 60;
+
+// Password reset token TTL: 1 hour
+const RESET_TOKEN_TTL_SECONDS = 60 * 60;
 
 // bcrypt cost factor — read from env so it can be tuned per environment.
 // Default 12 gives ~250ms on modern hardware which is OWASP-recommended.
@@ -41,10 +47,13 @@ const DUMMY_HASH = bcrypt.hashSync('__invalid_password__', BCRYPT_ROUNDS);
 interface TokenOptions {
   companyId?: string;
   isSuperAdmin?: boolean;
+  permissions?: string[];
 }
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(Credential)
     private readonly credentialRepo: Repository<Credential>,
@@ -52,6 +61,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @Inject("REDIS_CLIENT") private readonly redis: Redis,
     private readonly userClientService: UserClientService,
+    private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
   /**
@@ -216,6 +226,30 @@ export class AuthService {
   }
 
   /**
+   * Deletes all refresh tokens for a user from Redis and writes a short-lived
+   * revocation marker so the JWT guard can deny super-admin requests immediately,
+   * without waiting for the access token to expire.
+   * TTL matches JWT_EXPIRATION so the marker auto-cleans once all issued tokens
+   * have expired and can no longer be presented.
+   */
+  async revokeAllRefreshTokens(userId: string): Promise<void> {
+    const pattern = `refresh:${userId}:*`;
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) await this.redis.del(...keys);
+    } while (cursor !== '0');
+
+    // Mark the user as super-admin-revoked for the duration of the access-token TTL.
+    // The JWT guard reads this key to block super-admin requests even while the
+    // existing token is still cryptographically valid.
+    const ttl = this.configService.get<string>('JWT_EXPIRATION') ?? '300s';
+    const ttlSeconds = Number.parseInt(ttl.replace(/[^0-9]/g, ''), 10) || 300;
+    await this.redis.set(`sa-revoked:${userId}`, '1', 'EX', ttlSeconds);
+  }
+
+  /**
    * Re-enables credentials for a user (called when user is restored in user-service).
    * No-op if no credential exists — user was never provisioned.
    */
@@ -276,9 +310,72 @@ export class AuthService {
     // operates with their company role permissions only, regardless of global
     // super admin status. The global token (stored in sgd-super-admin-token)
     // retains isSuperAdmin for exitCompany() to work correctly.
+    const rawPermissions = await this.userClientService.getUserEffectivePermissions(
+      credential.userId,
+      companyId,
+    );
+    const permissions = rawPermissions.map((p) => `${p.module}:${p.action}`);
+
     return this.generateTokenPair(credential, {
       companyId,
+      permissions,
     });
+  }
+
+  /**
+   * Generates a password reset token and emits a Kafka event so the
+   * notification-service sends the reset email.
+   * Always returns { ok: true } to avoid leaking whether an email exists.
+   */
+  async forgotPassword(email: string): Promise<{ ok: true }> {
+    const credential = await this.credentialRepo.findOne({ where: { email } });
+
+    if (!credential || credential.status !== CredentialStatus.ACTIVE) {
+      // Return silently — do not reveal whether the email is registered.
+      return { ok: true };
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const redisKey = `pwd-reset:${token}`;
+    await this.redis.setex(redisKey, RESET_TOKEN_TTL_SECONDS, credential.userId);
+
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_SECONDS * 1000).toISOString();
+
+    this.kafkaProducer.emitSafe(TOPICS.PASSWORD_RESET, {
+      email,
+      resetToken: token,
+      expiresAt,
+    });
+
+    this.logger.log(`Password reset token issued for userId ${credential.userId}`);
+    return { ok: true };
+  }
+
+  /**
+   * Validates the reset token and sets the new password.
+   * The token is consumed atomically (GETDEL) to prevent reuse.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<{ ok: true }> {
+    const redisKey = `pwd-reset:${token}`;
+    const userId = await this.redis.getdel(redisKey);
+
+    if (!userId) {
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+
+    const credential = await this.credentialRepo.findOne({ where: { userId } });
+    if (!credential || credential.status !== CredentialStatus.ACTIVE) {
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+
+    credential.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await this.credentialRepo.save(credential);
+
+    // Invalidate all existing sessions so the user must log in with the new password.
+    await this.revokeAllRefreshTokens(userId);
+
+    this.logger.log(`Password reset completed for userId ${userId}`);
+    return { ok: true };
   }
 
   private async generateTokenPair(
@@ -295,6 +392,7 @@ export class AuthService {
 
     if (options.companyId) basePayload.companyId = options.companyId;
     if (options.isSuperAdmin) basePayload.isSuperAdmin = options.isSuperAdmin;
+    if (options.permissions?.length) basePayload.permissions = options.permissions;
 
     const accessToken = this.jwtService.sign(basePayload, {
       secret: this.configService.get<string>("JWT_SECRET"),

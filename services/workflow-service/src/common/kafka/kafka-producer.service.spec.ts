@@ -1,6 +1,5 @@
 import { Kafka, Producer } from 'kafkajs';
-import { KafkaProducerService } from './kafka-producer.service';
-import { AppLogger } from '../logger/app-logger.service';
+import { AppLogger, KafkaProducerService } from '@sgd/common';
 
 function makeProducer(): jest.Mocked<Producer> {
   return {
@@ -112,7 +111,8 @@ describe('KafkaProducerService', () => {
 
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to emit'),
-        expect.any(String),
+        undefined,
+        'KafkaProducerService',
       );
     });
 

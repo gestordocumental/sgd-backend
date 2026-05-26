@@ -1,7 +1,6 @@
-import { MetricsController } from './metrics.controller';
-import { getRegistry } from './metrics.registry';
+import { MetricsController, getRegistry } from '@sgd/common';
 
-jest.mock('./metrics.registry', () => ({
+jest.mock('@sgd/common/metrics/metrics.registry', () => ({
   getRegistry: jest.fn(),
 }));
 

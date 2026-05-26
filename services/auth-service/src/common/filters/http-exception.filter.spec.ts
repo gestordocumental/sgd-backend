@@ -1,9 +1,7 @@
-import { HttpExceptionFilter } from './http-exception.filter';
-import { AppLogger } from '../logger/app-logger.service';
+import { HttpExceptionFilter, AppLogger } from '@sgd/common';
 import { HttpException, HttpStatus, ArgumentsHost } from '@nestjs/common';
-import * as correlationContext from '../correlation/correlation.context';
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('filter-correlation-id'),
 }));
 

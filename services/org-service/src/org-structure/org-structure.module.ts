@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { KafkaModule } from '../common/kafka/kafka.module';
+import { AppLogger, KafkaModule } from '@sgd/common';
 import { Departamento } from './entities/departamento.entity';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';

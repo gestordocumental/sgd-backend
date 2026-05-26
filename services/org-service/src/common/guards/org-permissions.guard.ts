@@ -67,7 +67,7 @@ export class OrgPermissionsGuard implements CanActivate {
     // Pass userId and orgId as explicit params — no JWT forwarded — so
     // user-service never has to re-parse or re-trust JWT claims.
     const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
-    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
+    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER');
     const url =
       `${userServiceUrl}/api/permissions/check` +
       `?userId=${encodeURIComponent(userId)}` +

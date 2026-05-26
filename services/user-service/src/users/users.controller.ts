@@ -42,7 +42,7 @@ import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
 import { RequireSuperAdmin } from "../common/decorators/require-super-admin.decorator";
 import { CurrentUserId } from "../common/decorators/current-user-id.decorator";
-import { JwtPayloadParam, JwtPayload } from "../common/decorators/jwt-payload.decorator";
+import { JwtPayloadParam, JwtPayload } from '@sgd/common';
 import { PermissionsGuard } from "../common/guards/permissions.guard";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
 import { PermissionModule, PermissionAction } from "../roles/entities/permission.entity";
@@ -57,6 +57,34 @@ export class UsersController {
     private readonly configService: ConfigService,
     private readonly storageService: StorageService,
   ) {}
+
+  /**
+   * Validates x-internal-token against every known caller of user-service.
+   * Each token is specific to one (caller → user-service) direction:
+   *   INTERNAL_TOKEN_AUTH_USER     — auth-service
+   *   INTERNAL_TOKEN_NOTIF_USER    — notification-service
+   *   INTERNAL_TOKEN_WORKFLOW_USER — workflow-service
+   *   INTERNAL_TOKEN_ORG_USER      — org-service
+   */
+  private verifyInternalToken(token: string | undefined): void {
+    const keys = [
+      'INTERNAL_TOKEN_AUTH_USER',
+      'INTERNAL_TOKEN_NOTIF_USER',
+      'INTERNAL_TOKEN_WORKFLOW_USER',
+      'INTERNAL_TOKEN_ORG_USER',
+    ];
+    const allowed = keys
+      .map((k) => this.configService.get<string>(k))
+      .filter((t): t is string => !!t)
+      .map((t) => Buffer.from(t));
+
+    const provided = Buffer.from(token ?? '');
+    const valid = allowed.some(
+      (expected) =>
+        provided.length === expected.length && timingSafeEqual(expected, provided),
+    );
+    if (!valid) throw new UnauthorizedException();
+  }
 
   @ApiOperation({ summary: 'Create a new user and send invitation email' })
   @ApiResponse({ status: 201, description: 'User created, returns user + invitationToken', type: CreateUserResponseDto })
@@ -99,15 +127,17 @@ export class UsersController {
     return this.usersService.getCountsByOrg();
   }
 
-  @ApiOperation({ summary: 'List all super admin users (paginated)' })
+  @ApiOperation({ summary: 'List all super admin users (paginated, with server-side search and status filter)' })
   @ApiResponse({ status: 200, description: 'Paginated super admin users' })
   @Get("super-admins")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAllSuperAdmin(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('search') search?: string,
+    @Query('status') status?: 'active' | 'deleted' | 'pending',
   ): Promise<{ data: UserResponseDto[]; total: number }> {
-    const { data, total } = await this.usersService.findAllSuperAdmin(page, limit);
+    const { data, total } = await this.usersService.findAllSuperAdmin(page, limit, search, status);
     return { data: data.map(UserResponseDto.from), total };
   }
 
@@ -119,17 +149,23 @@ export class UsersController {
     return UserResponseDto.from(await this.usersService.findByEmail(email));
   }
 
-  @ApiOperation({ summary: 'List users belonging to an organization' })
+  @ApiOperation({ summary: 'List users belonging to an organization (paginated)' })
   @ApiParam({ name: 'orgId', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Users found', type: UserWithOrgRolesDto, isArray: true })
+  @ApiResponse({ status: 200, description: 'Paginated users' })
   @Get('by-org/:orgId')
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByOrg(
     @Param('orgId', ParseUUIDPipe) orgId: string,
-  ): Promise<UserWithOrgRolesDto[]> {
-    return (await this.usersService.findByOrg(orgId)).map(({ user, roles, orgRemovedAt }) =>
-      UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt),
-    );
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(500), ParseIntPipe) limit: number,
+  ): Promise<{ data: UserWithOrgRolesDto[]; total: number }> {
+    const { data, total } = await this.usersService.findByOrg(orgId, page, limit);
+    return {
+      data: data.map(({ user, roles, orgRemovedAt }) =>
+        UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt),
+      ),
+      total,
+    };
   }
 
   /**
@@ -204,15 +240,22 @@ export class UsersController {
     @Headers("x-internal-token") internalToken: string,
     @Param("orgId", ParseUUIDPipe) orgId: string,
   ): Promise<void> {
-    const expected = Buffer.from(
-      this.configService.getOrThrow<string>("INTERNAL_TOKEN"),
-    );
-    const provided = Buffer.from(internalToken ?? "");
-    const isValid =
-      provided.length === expected.length &&
-      timingSafeEqual(expected, provided);
-    if (!isValid) throw new UnauthorizedException();
+    this.verifyInternalToken(internalToken);
     await this.usersService.removeAllFromOrg(orgId);
+  }
+
+  @ApiOperation({ summary: 'Get effective permissions for a user in an org (internal only)' })
+  @ApiSecurity('internal-token')
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @Get(":id/effective-permissions")
+  async getEffectivePermissions(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Query("companyId") companyId: string,
+  ): Promise<{ module: string; action: string }[]> {
+    this.verifyInternalToken(internalToken);
+    if (!companyId) throw new UnauthorizedException('companyId query param required');
+    return this.usersService.getEffectivePermissions(id, companyId);
   }
 
   @ApiOperation({ summary: "Get companies a user belongs to (internal only)" })
@@ -223,14 +266,7 @@ export class UsersController {
     @Headers("x-internal-token") internalToken: string,
     @Param("id") id: string,
   ) {
-    const expected = Buffer.from(
-      this.configService.getOrThrow<string>("INTERNAL_TOKEN"),
-    );
-    const provided = Buffer.from(internalToken ?? "");
-    const isValid =
-      provided.length === expected.length &&
-      timingSafeEqual(expected, provided);
-    if (!isValid) throw new UnauthorizedException();
+    this.verifyInternalToken(internalToken);
     return this.usersService.getCompanies(id);
   }
 

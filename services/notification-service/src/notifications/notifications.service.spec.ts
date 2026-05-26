@@ -3,7 +3,7 @@ import { NotificationsService } from './notifications.service';
 import { Notification } from './entities/notification.entity';
 import { EmailService } from './email/email.service';
 import { UserClientService } from './user-client/user-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 import { ListNotificationsDto } from './dto/list-notifications.dto';
 
 function buildNotification(overrides: Partial<Notification> = {}): Notification {
@@ -56,11 +56,14 @@ describe('NotificationsService', () => {
     logger       = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
     const orgClient = { getOrgName: jest.fn().mockResolvedValue(null) };
 
+    const sseService = { emit: jest.fn() };
+
     service = new NotificationsService(
       repo,
       emailService as any,
       userClient as any,
       orgClient as any,
+      sseService as any,
       logger as any,
     );
   });

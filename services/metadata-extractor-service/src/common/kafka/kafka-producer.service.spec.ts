@@ -1,12 +1,10 @@
-import { KafkaProducerService } from './kafka-producer.service';
+import { KafkaProducerService, getCorrelationId } from '@sgd/common';
 
 // ── Module-level mocks ────────────────────────────────────────────────────────
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('producer-correlation-id'),
 }));
-
-import { getCorrelationId } from '../correlation/correlation.context';
 
 const mockGetCorrelationId = getCorrelationId as jest.MockedFunction<typeof getCorrelationId>;
 

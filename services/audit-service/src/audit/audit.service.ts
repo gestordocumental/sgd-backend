@@ -1,7 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { getCorrelationId } from '../common/correlation/correlation.context';
+import { AppLogger, getCorrelationId } from '@sgd/common';
 import { AuditLogEvent } from './dto/audit-log-event.dto';
 import {
   AuditLogDocument,

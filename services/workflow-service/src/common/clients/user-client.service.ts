@@ -3,13 +3,13 @@ import {
   InternalServerErrorException,
   GatewayTimeoutException,
   BadRequestException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
-import { AppLogger } from '../logger/app-logger.service';
-import { getCorrelationId } from '../correlation/correlation.context';
-import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
+import { AppLogger, getCorrelationId, CORRELATION_ID_HEADER } from '@sgd/common';
+import CircuitBreaker = require('opossum');
 
 export interface UserBasicInfo {
   id: string;
@@ -32,6 +32,7 @@ export class UserClientService {
   private readonly userServiceUrl: string;
   private readonly internalToken: string;
   private readonly timeoutMs: number;
+  private readonly cb: CircuitBreaker;
 
   constructor(
     private readonly httpService: HttpService,
@@ -39,10 +40,24 @@ export class UserClientService {
     private readonly logger: AppLogger,
   ) {
     this.userServiceUrl = this.config.getOrThrow<string>('USER_SERVICE_URL');
-    this.internalToken  = this.config.getOrThrow<string>('INTERNAL_TOKEN');
+    this.internalToken  = this.config.getOrThrow<string>('INTERNAL_TOKEN_WORKFLOW_USER');
     const raw           = this.config.get<string | number>('USER_SERVICE_TIMEOUT_MS');
     const parsed        = raw == null ? 5_000 : Number(raw);
     this.timeoutMs      = Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000;
+
+    this.cb = new CircuitBreaker(
+      (fn: () => Promise<unknown>) => fn(),
+      {
+        name:                     'user-service',
+        timeout:                  false,   // RxJS timeout() handles per-request timeouts
+        errorThresholdPercentage: 50,
+        resetTimeout:             30_000,
+        volumeThreshold:          3,
+      },
+    );
+    this.cb.on('open',     () => this.logger.warn('[circuit] user-service OPEN — failing fast', 'UserClientService'));
+    this.cb.on('halfOpen', () => this.logger.log('[circuit] user-service HALF-OPEN — probing', 'UserClientService'));
+    this.cb.on('close',    () => this.logger.log('[circuit] user-service CLOSED — recovered', 'UserClientService'));
   }
 
   /**
@@ -69,19 +84,21 @@ export class UserClientService {
     });
 
     try {
-      const response = await firstValueFrom(
-        this.httpService
-          .post<UsersByPositionResult>(
-            url,
-            { orgId, ...filters },
-            {
-              headers: {
-                'x-internal-token':      this.internalToken,
-                [CORRELATION_ID_HEADER]: correlationId,
+      const response = await this.fireWithCb<{ data: UsersByPositionResult }>(() =>
+        firstValueFrom(
+          this.httpService
+            .post<UsersByPositionResult>(
+              url,
+              { orgId, ...filters },
+              {
+                headers: {
+                  'x-internal-token':      this.internalToken,
+                  [CORRELATION_ID_HEADER]: correlationId,
+                },
               },
-            },
-          )
-          .pipe(timeout(this.timeoutMs)),
+            )
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
 
       this.logger.http({
@@ -94,6 +111,7 @@ export class UserClientService {
 
       return response.data;
     } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
       return this.handleError(error, 'user-service', url, correlationId);
     }
   }
@@ -109,19 +127,33 @@ export class UserClientService {
     const url = `${this.userServiceUrl}/internal/users/${userId}/exists`;
 
     try {
-      const response = await firstValueFrom(
-        this.httpService
-          .get<UserExistsResult>(url, {
-            headers: {
-              'x-internal-token':      this.internalToken,
-              [CORRELATION_ID_HEADER]: correlationId,
-            },
-          })
-          .pipe(timeout(this.timeoutMs)),
+      const response = await this.fireWithCb<{ data: UserExistsResult }>(() =>
+        firstValueFrom(
+          this.httpService
+            .get<UserExistsResult>(url, {
+              headers: {
+                'x-internal-token':      this.internalToken,
+                [CORRELATION_ID_HEADER]: correlationId,
+              },
+            })
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
       return response.data;
     } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
       return this.handleError(error, 'user-service', url, correlationId);
+    }
+  }
+
+  private async fireWithCb<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await this.cb.fire(fn) as T;
+    } catch (err: any) {
+      if (err?.code === 'EOPENBREAKER') {
+        throw new ServiceUnavailableException('user-service is temporarily unavailable');
+      }
+      throw err;
     }
   }
 

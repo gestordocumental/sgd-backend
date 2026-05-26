@@ -1,5 +1,5 @@
 import { KafkaMessage } from 'kafkajs';
-import { runWithCorrelation } from './kafka-consumer.util';
+import { runWithCorrelation } from '@sgd/common';
 
 function makeMsg(correlationId?: string | Buffer): KafkaMessage {
   return {

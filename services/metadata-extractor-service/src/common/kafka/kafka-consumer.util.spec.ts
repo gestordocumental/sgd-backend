@@ -1,6 +1,5 @@
 import { KafkaMessage } from 'kafkajs';
-import { getCorrelationId } from '../correlation/correlation.context';
-import { runWithCorrelation } from './kafka-consumer.util';
+import { getCorrelationId, runWithCorrelation } from '@sgd/common';
 
 function makeMessage(correlationId?: string | Buffer): KafkaMessage {
   return {

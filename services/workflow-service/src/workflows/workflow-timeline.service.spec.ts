@@ -2,8 +2,7 @@ import { WorkflowTimelineService } from './workflow-timeline.service';
 import { WorkflowTimeline } from './entities/workflow-timeline.entity';
 import { TimelineEventType } from './entities/enums';
 import { Repository, EntityManager } from 'typeorm';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger, KafkaProducerService } from '@sgd/common';
 
 function makeRepo(saved: Partial<WorkflowTimeline> = {}): jest.Mocked<Repository<WorkflowTimeline>> {
   const entity = { id: 'tl-1', ...saved } as WorkflowTimeline;

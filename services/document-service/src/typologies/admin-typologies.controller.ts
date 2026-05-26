@@ -1,12 +1,11 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiOkResponse, ApiTags } from '@nestjs/swagger';
-import { JwtGuard } from '../common/guards/jwt.guard';
-import { SuperAdminOnly } from '../common/decorators/auth.decorator';
+import { JwtGuard, SuperAdminOnly } from '@sgd/common';
 import { TypologiesService } from './typologies.service';
 
 @ApiTags('Typologies (Admin)')
 @ApiBearerAuth('JWT')
-@Controller('api/documents/admin')
+@Controller('api/v1/documents/admin')
 @UseGuards(JwtGuard)
 @SuperAdminOnly()
 export class AdminTypologiesController {

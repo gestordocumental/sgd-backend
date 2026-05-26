@@ -1,4 +1,4 @@
-import { AppLogger } from './app-logger.service';
+import { AppLogger, getCorrelationId } from '@sgd/common';
 
 // ── Module-level mock for winston and correlation context ─────────────────────
 
@@ -20,11 +20,9 @@ jest.mock('winston', () => {
   };
 });
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('test-correlation-id'),
 }));
-
-import { getCorrelationId } from '../correlation/correlation.context';
 
 const mockGetCorrelationId = getCorrelationId as jest.MockedFunction<typeof getCorrelationId>;
 

@@ -1,6 +1,6 @@
-import { KafkaProducerService } from './kafka-producer.service';
+import { KafkaProducerService } from '@sgd/common';
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('kafka-correlation-id'),
 }));
 

@@ -1,4 +1,4 @@
-import { correlationStorage, getCorrelationId, getClientIp } from './correlation.context';
+import { correlationStorage, getClientIp, getCorrelationId } from '@sgd/common';
 
 describe('correlation.context', () => {
   it('getCorrelationId returns no-correlation-id outside of a run context', () => {

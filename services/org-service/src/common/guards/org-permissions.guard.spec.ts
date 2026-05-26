@@ -41,9 +41,9 @@ describe('OrgPermissionsGuard', () => {
     reflector = { get: jest.fn() };
     configService = {
       getOrThrow: jest.fn((key: string) => {
-        if (key === 'USER_SERVICE_URL') return 'http://user-service';
-        if (key === 'INTERNAL_TOKEN')   return 'internal-secret';
-        if (key === 'JWT_SECRET')       return TEST_JWT_SECRET;
+        if (key === 'USER_SERVICE_URL')      return 'http://user-service';
+        if (key === 'INTERNAL_TOKEN_ORG_USER') return 'internal-secret';
+        if (key === 'JWT_SECRET')            return TEST_JWT_SECRET;
         throw new Error(`Unexpected key ${key}`);
       }),
     };

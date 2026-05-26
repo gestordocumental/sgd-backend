@@ -3,7 +3,7 @@ import * as ExcelJS from 'exceljs';
 import { TypologiesService } from '../typologies/typologies.service';
 import { OrgClientService, ResolveStructureItem } from '../common/org-client/org-client.service';
 import { CreationSource } from '../typologies/schemas/typology.schema';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 const MAX_ROWS = 500;
 

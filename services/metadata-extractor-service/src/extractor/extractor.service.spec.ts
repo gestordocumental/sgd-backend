@@ -7,7 +7,7 @@ jest.mock('./parsers/parser.factory', () => ({
 }));
 
 import { extractStructured } from './parsers/parser.factory';
-import { TOPICS } from '../common/kafka/kafka.constants';
+import { TOPICS } from '@sgd/common';
 
 const mockExtractStructured = extractStructured as jest.MockedFunction<typeof extractStructured>;
 

@@ -17,11 +17,12 @@ import { WorkflowAdminStep } from './entities/workflow-admin-step.entity';
 import { WorkflowAdminAttachment } from './entities/workflow-admin-attachment.entity';
 import { WorkflowNote } from './entities/workflow-note.entity';
 import { WorkflowTimeline } from './entities/workflow-timeline.entity';
+import { IdempotencyKey } from './entities/idempotency-key.entity';
+import { IdempotencyService } from './idempotency.service';
 
-import { KafkaModule } from '../common/kafka/kafka.module';
+import { KafkaModule, AppLogger, PermissionsGuard } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
 import { UserClientService } from '../common/clients/user-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { AppLogger } from '../common/logger/app-logger.service';
       WorkflowAdminAttachment,
       WorkflowNote,
       WorkflowTimeline,
+      IdempotencyKey,
     ]),
     HttpModule,
     KafkaModule,
@@ -47,7 +49,9 @@ import { AppLogger } from '../common/logger/app-logger.service';
     WorkflowTimelineService,
     DocumentClientService,
     UserClientService,
+    IdempotencyService,
     AppLogger,
+    PermissionsGuard,
   ],
 })
 export class WorkflowsModule {}

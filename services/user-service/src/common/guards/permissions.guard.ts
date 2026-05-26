@@ -4,12 +4,17 @@ import {
   ExecutionContext,
   UnauthorizedException,
   ForbiddenException,
+  Inject,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createHmac, timingSafeEqual } from 'crypto';
+import type { Redis } from 'ioredis';
+import { UserOrgRole } from '../../roles/entities/user-org-role.entity';
+import { PERMISSION_KEY } from '../decorators/require-permission.decorator';
+import { PermissionModule, PermissionAction } from '../../roles/entities/permission.entity';
 
 function verifyAndDecodeJwt(token: string, secret: string): Record<string, unknown> {
   const parts = token.split('.');
@@ -32,50 +37,31 @@ function verifyAndDecodeJwt(token: string, secret: string): Record<string, unkno
   }
   return decoded;
 }
-import { UserOrgRole } from '../../roles/entities/user-org-role.entity';
-import { PERMISSION_KEY } from '../decorators/require-permission.decorator';
-import { PermissionModule, PermissionAction } from '../../roles/entities/permission.entity';
-
-interface CachedPermissions {
-  permissions: { module: string; action: string }[];
-  expiresAt: number;
-}
+const CACHE_TTL_SECONDS = 120; // 2 minutes
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  // In-memory permissions cache: key = `userId:companyId`
-  private readonly permissionsCache = new Map<string, CachedPermissions>();
-  private readonly CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
-
   constructor(
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepo: Repository<UserOrgRole>,
+    @Inject('REDIS_CLIENT')
+    private readonly redis: Redis,
   ) {}
 
-  /** Invalidate cached permissions for a user (call after role changes). */
-  invalidate(userId: string, companyId: string): void {
-    this.permissionsCache.delete(`${userId}:${companyId}`);
-  }
-
-  /** Remove all expired entries to prevent unbounded memory growth in long-running services. */
-  private evictExpired(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.permissionsCache) {
-      if (entry.expiresAt <= now) this.permissionsCache.delete(key);
-    }
+  /** Invalidate cached permissions for a user in all service instances. */
+  async invalidate(userId: string, companyId: string): Promise<void> {
+    await this.redis.del(`perms:${userId}:${companyId}`);
   }
 
   private async resolvePermissions(
     userId: string,
     companyId: string,
   ): Promise<{ module: string; action: string }[]> {
-    const key = `${userId}:${companyId}`;
-    const cached = this.permissionsCache.get(key);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.permissions;
-    }
+    const key = `perms:${userId}:${companyId}`;
+    const cached = await this.redis.get(key);
+    if (cached) return JSON.parse(cached) as { module: string; action: string }[];
 
     const userOrgRoles = await this.userOrgRoleRepo.find({
       where: { userId, orgId: companyId },
@@ -91,8 +77,7 @@ export class PermissionsGuard implements CanActivate {
         uor.role?.permissions?.map((p) => ({ module: p.module as string, action: p.action as string })) ?? [],
     );
 
-    this.evictExpired();
-    this.permissionsCache.set(key, { permissions, expiresAt: Date.now() + this.CACHE_TTL_MS });
+    await this.redis.set(key, JSON.stringify(permissions), 'EX', CACHE_TTL_SECONDS);
     return permissions;
   }
 
@@ -102,47 +87,63 @@ export class PermissionsGuard implements CanActivate {
       ctx.getHandler(),
     );
 
-    // Endpoints without @RequirePermission pass through directly
-    if (!required) return true;
+    const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string>; user?: Record<string, unknown> }>();
 
-    const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string> }>();
-
-    // Internal calls between microservices — skip JWT validation
+    // Internal calls between microservices — skip JWT validation.
+    // Each key identifies one (caller → user-service) pair; any valid caller is allowed through.
     const internalToken = request.headers['x-internal-token'];
     if (internalToken) {
-      const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+      const allowed = [
+        'INTERNAL_TOKEN_AUTH_USER',
+        'INTERNAL_TOKEN_NOTIF_USER',
+        'INTERNAL_TOKEN_WORKFLOW_USER',
+        'INTERNAL_TOKEN_ORG_USER',
+      ]
+        .map((k) => this.configService.get<string>(k))
+        .filter((t): t is string => !!t)
+        .map((t) => Buffer.from(t));
       const provided = Buffer.from(internalToken);
-      const isValid =
-        provided.length === expected.length && timingSafeEqual(expected, provided);
+      const isValid = allowed.some(
+        (expected) =>
+          provided.length === expected.length && timingSafeEqual(expected, provided),
+      );
       if (isValid) return true;
     }
 
     const auth = request.headers['authorization'];
 
-    if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
+    // Decode JWT and populate request.user whenever a Bearer token is present,
+    // so @JwtPayloadParam() works on all endpoints (with or without @RequirePermission).
+    if (auth?.startsWith('Bearer ')) {
+      const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
+      const payload = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
+      request.user = payload;
 
-    const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
-    const payload = verifyAndDecodeJwt(auth.split(' ')[1], jwtSecret);
+      // Endpoints without @RequirePermission pass through after populating user
+      if (!required) return true;
 
-    // Super admin has access to everything
-    if (payload.isSuperAdmin) return true;
+      // Super admin has access to everything
+      if (payload.isSuperAdmin) return true;
 
-    const userId = payload.sub as string | undefined;
-    const companyId = payload.companyId as string | undefined;
+      const userId = payload.sub as string | undefined;
+      const companyId = payload.companyId as string | undefined;
 
-    if (!userId) throw new UnauthorizedException('Token has no sub claim');
-    if (!companyId) {
-      throw new ForbiddenException('Token has no companyId — call POST /api/auth/switch-company first');
+      if (!userId) throw new UnauthorizedException('Token has no sub claim');
+      if (!companyId) {
+        throw new ForbiddenException('Token has no companyId — call POST /api/auth/switch-company first');
+      }
+
+      const permissions = await this.resolvePermissions(userId, companyId);
+      const hasPermission = permissions.some(
+        (p) => p.module === required.module && p.action === required.action,
+      );
+
+      if (!hasPermission) throw new ForbiddenException('Insufficient permissions');
+      return true;
     }
 
-    const permissions = await this.resolvePermissions(userId, companyId);
-
-    const hasPermission = permissions.some(
-      (p) => p.module === required.module && p.action === required.action,
-    );
-
-    if (!hasPermission) throw new ForbiddenException('Insufficient permissions');
-
-    return true;
+    // No Bearer token present
+    if (!required) return true;
+    throw new UnauthorizedException('Missing token');
   }
 }

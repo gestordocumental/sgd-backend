@@ -47,6 +47,13 @@ export class WorkflowAdminCycle {
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt: Date | null = null;
 
+  /**
+   * UUIDs de usuarios que pueden ser invocados como revisores opcionales en cualquier
+   * paso de este ciclo. Definido al crear el ciclo por el usuario final iniciador.
+   */
+  @Column({ name: 'allowed_optional_reviewer_ids', type: 'uuid', array: true, default: [] })
+  allowedOptionalReviewerIds!: string[];
+
   @Column({ name: 'metadata', type: 'jsonb', nullable: true })
   metadata: Record<string, unknown> | null = null;
 

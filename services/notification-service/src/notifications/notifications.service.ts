@@ -7,7 +7,8 @@ import { ListNotificationsDto } from './dto/list-notifications.dto';
 import { EmailService, getNotificationTitle } from './email/email.service';
 import { UserClientService } from './user-client/user-client.service';
 import { OrgClientService } from './org-client/org-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { SseService } from './sse.service';
+import { AppLogger } from '@sgd/common';
 
 @Injectable()
 export class NotificationsService {
@@ -17,6 +18,7 @@ export class NotificationsService {
     private readonly emailService: EmailService,
     private readonly userClient: UserClientService,
     private readonly orgClient: OrgClientService,
+    private readonly sseService: SseService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -73,6 +75,11 @@ export class NotificationsService {
       `Stored ${entities.length} internal notification(s) [${type}]`,
       'NotificationsService',
     );
+
+    // Push SSE event to connected users so they get instant updates without polling
+    for (const userId of uniqueRecipientUserIds) {
+      this.sseService.emit(userId, { type, title, message, workflowId: workflowId ?? null, workflowTitle: workflowTitle ?? null });
+    }
 
     // Enviar emails — obtener datos de usuario de forma paralela
     const userMap = await this.userClient.getUsersByIds(uniqueRecipientUserIds);

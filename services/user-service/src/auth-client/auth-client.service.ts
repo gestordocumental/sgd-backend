@@ -6,9 +6,7 @@ import {
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
 import { firstValueFrom } from "rxjs";
-import { AppLogger } from "../common/logger/app-logger.service";
-import { getCorrelationId } from "../common/correlation/correlation.context";
-import { CORRELATION_ID_HEADER } from "../common/middleware/correlation.middleware";
+import { AppLogger, getCorrelationId, CORRELATION_ID_HEADER } from '@sgd/common';
 
 export interface ProvisionPayload {
   userId: string;
@@ -29,7 +27,7 @@ export class AuthClientService {
     this.authServiceUrl =
       this.configService.getOrThrow<string>("AUTH_SERVICE_URL");
     this.internalToken =
-      this.configService.getOrThrow<string>("INTERNAL_TOKEN");
+      this.configService.getOrThrow<string>("INTERNAL_TOKEN_USER_AUTH");
   }
 
   async provisionCredentials(payload: ProvisionPayload): Promise<void> {
@@ -98,6 +96,10 @@ export class AuthClientService {
 
   async enableCredentials(userId: string): Promise<void> {
     await this.internalPatch(`/api/auth/credentials/${userId}/enable`);
+  }
+
+  async revokeAllTokens(userId: string): Promise<void> {
+    await this.internalPatch(`/api/auth/credentials/${userId}/revoke-tokens`);
   }
 
   private async internalPatch(path: string): Promise<void> {

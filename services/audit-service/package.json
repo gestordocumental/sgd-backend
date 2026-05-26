@@ -11,6 +11,7 @@
     "test:cov": "jest --coverage"
   },
   "dependencies": {
+    "@sgd/common": "*",
     "@elastic/elasticsearch": "^8.13.0",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",
@@ -43,31 +44,5 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.{ts,js}",
-      "!**/*.spec.{ts,js}",
-      "!**/*.module.{ts,js}",
-      "!main.{ts,js}"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node",
-    "coverageThreshold": {
-      "global": {
-        "statements": 85,
-        "lines": 85
-      }
-    }
   }
 }

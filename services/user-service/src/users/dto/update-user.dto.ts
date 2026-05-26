@@ -32,6 +32,11 @@ export class UpdateUserDto {
   @IsOptional()
   isActive?: boolean;
 
+  @ApiPropertyOptional({ description: 'Marca al usuario como revisor opcional en ciclos administrativos de workflows' })
+  @IsBoolean()
+  @IsOptional()
+  isOptionalReviewer?: boolean;
+
   @ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
   @ValidateIf((o) => o.departamentoId !== null)
   @IsUUID()

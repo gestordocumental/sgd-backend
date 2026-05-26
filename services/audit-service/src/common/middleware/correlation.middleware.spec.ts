@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { CorrelationMiddleware, CORRELATION_ID_HEADER } from './correlation.middleware';
+import { CorrelationMiddleware, CORRELATION_ID_HEADER } from '@sgd/common';
 
 function makeReq(correlationId?: string | string[]): Request {
   return { headers: correlationId !== undefined ? { [CORRELATION_ID_HEADER]: correlationId } : {} } as unknown as Request;

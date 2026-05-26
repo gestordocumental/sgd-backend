@@ -1,8 +1,7 @@
 import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
 import { Request, Response } from 'express';
-import { LoggingInterceptor } from './logging.interceptor';
-import { AppLogger } from '../logger/app-logger.service';
+import { AppLogger, LoggingInterceptor } from '@sgd/common';
 
 function makeReq(method = 'GET', path = '/api/test', ip = '127.0.0.1'): Request {
   return { method, path, ip } as unknown as Request;

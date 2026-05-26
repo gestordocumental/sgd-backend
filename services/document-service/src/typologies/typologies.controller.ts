@@ -33,8 +33,7 @@ import {
 } from '@nestjs/swagger';
 import { ExtractorClientService, PreviewExtractResult } from '../common/extractor-client/extractor-client.service';
 import { OrgClientService } from '../common/org-client/org-client.service';
-import { JwtGuard } from '../common/guards/jwt.guard';
-import { OrgMember } from '../common/decorators/auth.decorator';
+import { JwtGuard, OrgMember } from '@sgd/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { ResolveDiscrepancyDto } from './dto/resolve-discrepancy.dto';
@@ -47,7 +46,7 @@ import { multerOptions } from '../document-upload/document-upload.constants';
 @ApiTags('Typologies')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/documents/:orgId/typologies')
+@Controller('api/v1/documents/:orgId/typologies')
 @UseGuards(JwtGuard)
 @OrgMember()
 export class TypologiesController {

@@ -157,6 +157,9 @@ services:
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.file.uploaded --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extracted --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extraction.failed --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic user.org-removed --partitions 1 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic user.super-admin-revoked --partitions 1 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic auth.password-reset --partitions 1 --replication-factor 1 &&
       echo '>>> Tópicos creados correctamente.' &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
       "
@@ -246,7 +249,7 @@ services:
   kong:
     image: kong:3.4
     container_name: sgd-kong
-    # sed sustituye ${KONG_JWT_SECRET} en el template antes de que Kong lo cargue.
+    # envsubst sustituye variables de entorno en el template antes de que Kong lo cargue.
     # _transform: true en el YAML de Kong NO hace sustitución de variables de entorno.
     entrypoint: ["/bin/sh", "/kong-entrypoint.sh", "kong", "docker-start"]
     environment:
@@ -258,6 +261,8 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_JWT_SECRET: "${KONG_JWT_SECRET:-local-jwt-secret-change-me}"
+      # KONG_CONFIG_TEMPLATE y KONG_CORS_ORIGIN_* solo son necesarios en producción;
+      # en dev local los orígenes CORS están hardcodeados en kong.local.yaml.
     volumes:
       - ./docker/kong/kong.local.yaml:/etc/kong/kong.template.yaml:ro
       - ./docker/kong/entrypoint.sh:/kong-entrypoint.sh:ro

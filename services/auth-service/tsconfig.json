@@ -13,5 +13,8 @@
     "skipLibCheck": true,
     "strictNullChecks": false,
     "noImplicitAny": false
-  }
+  },
+  "include": [
+    "src/**/*"
+  ]
 }

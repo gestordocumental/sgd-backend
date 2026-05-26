@@ -1,4 +1,4 @@
-import { AppLogger } from './app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 // ─── Mock winston so we never open real Console transports ───────────────────
 
@@ -27,7 +27,7 @@ jest.mock('winston', () => {
   };
 });
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('logger-correlation-id'),
 }));
 

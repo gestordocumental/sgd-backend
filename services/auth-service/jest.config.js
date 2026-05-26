@@ -1,11 +1,21 @@
+process.env.SERVICE_NAME = 'auth-service';
+
 /** @type {import('jest').Config} */
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
   testRegex: '.*\\.spec\\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    '^.+\\.ts$': 'ts-jest',
   },
+  moduleNameMapper: {
+    '^@sgd/common$': '<rootDir>/../../../packages/common/src/index.ts',
+    '^@sgd/common/(.*)$': '<rootDir>/../../../packages/common/src/$1',
+  },
+  moduleDirectories: [
+    'node_modules',
+    '<rootDir>/../node_modules',
+  ],
   collectCoverageFrom: [
     '**/*.{ts,js}',
     '!**/*.spec.{ts,js}',

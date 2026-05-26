@@ -18,7 +18,7 @@ import {
   ResolvedStructureItem,
   UnresolvedStructureItem,
 } from "./dto/resolve-structure-response.dto";
-import { AppLogger } from "../common/logger/app-logger.service";
+import { AppLogger } from "@sgd/common";
 import { ResolveByIdRequestDto, ResolveByIdResponseDto } from "./dto/resolve-by-id-request.dto";
 
 const MAX_ROWS = 500;

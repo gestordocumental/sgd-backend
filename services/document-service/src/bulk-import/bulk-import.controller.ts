@@ -18,8 +18,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { OrgMember } from '../common/decorators/auth.decorator';
-import { JwtGuard } from '../common/guards/jwt.guard';
+import { JwtGuard, OrgMember } from '@sgd/common';
 import { BulkImportResponseDto } from './dto/bulk-import-response.dto';
 import { BulkImportService } from './bulk-import.service';
 
@@ -31,7 +30,7 @@ const ALLOWED_MIMETYPES = [
 @ApiTags('Typologies Bulk Import')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/documents/:orgId/typologies/bulk')
+@Controller('api/v1/documents/:orgId/typologies/bulk')
 @UseGuards(JwtGuard)
 @OrgMember()
 export class BulkImportController {

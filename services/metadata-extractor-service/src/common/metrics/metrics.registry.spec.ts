@@ -1,4 +1,4 @@
-import { getHttpRequestDurationHistogram, getRegistry } from './metrics.registry';
+import { getHttpRequestDurationHistogram, getRegistry } from '@sgd/common';
 
 describe('metrics registry', () => {
   it('returns the same process registry instance', () => {

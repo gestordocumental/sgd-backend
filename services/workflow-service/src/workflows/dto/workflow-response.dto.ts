@@ -88,6 +88,8 @@ export class AdminStepResponseDto {
   @ApiProperty() userId!: string;
   @ApiProperty() stepOrder!: number;
   @ApiProperty({ enum: AdminStepStatus }) status!: AdminStepStatus;
+  @ApiProperty() isOptional!: boolean;
+  @ApiPropertyOptional() insertedByStepId: string | null = null;
   @ApiPropertyOptional() completedAt: Date | null = null;
   @ApiProperty({ type: [AdminStepNoteResponseDto] }) notes!: AdminStepNoteResponseDto[];
   @ApiProperty({ type: [AdminStepAttachmentResponseDto] }) attachments!: AdminStepAttachmentResponseDto[];
@@ -101,6 +103,7 @@ export class AdminCycleResponseDto {
   @ApiProperty({ enum: AdminCycleStatus }) status!: AdminCycleStatus;
   @ApiPropertyOptional() currentStepOrder: number | null = null;
   @ApiPropertyOptional() completedAt: Date | null = null;
+  @ApiProperty({ type: [String] }) allowedOptionalReviewerIds!: string[];
   @ApiProperty({ type: [AdminStepResponseDto] }) steps!: AdminStepResponseDto[];
   @ApiProperty() createdAt!: Date;
 
@@ -113,13 +116,16 @@ export class AdminCycleResponseDto {
       status:           cycle.status,
       currentStepOrder: cycle.currentStepOrder,
       completedAt:      cycle.completedAt,
+      allowedOptionalReviewerIds: cycle.allowedOptionalReviewerIds ?? [],
       steps: (cycle.steps ?? []).map((s) => ({
-        id:          s.id,
-        cycleId:     s.cycleId,
-        userId:      s.userId,
-        stepOrder:   s.stepOrder,
-        status:      s.status,
-        completedAt: s.completedAt,
+        id:                s.id,
+        cycleId:           s.cycleId,
+        userId:            s.userId,
+        stepOrder:         s.stepOrder,
+        status:            s.status,
+        isOptional:        s.isOptional,
+        insertedByStepId:  s.insertedByStepId,
+        completedAt:       s.completedAt,
         notes: (s.notes ?? []).map((n) => ({
           id:        n.id,
           content:   n.content,

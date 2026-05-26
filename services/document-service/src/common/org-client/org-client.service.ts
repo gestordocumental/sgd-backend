@@ -2,9 +2,8 @@ import { Injectable, InternalServerErrorException, GatewayTimeoutException } fro
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
-import { AppLogger } from '../logger/app-logger.service';
-import { getCorrelationId } from '../correlation/correlation.context';
-import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
+import { AppLogger, CORRELATION_ID_HEADER } from '@sgd/common';
+import { getCorrelationId } from '@sgd/common';
 
 export interface ResolveStructureItem {
   department: string;
@@ -50,7 +49,7 @@ export class OrgClientService {
     private readonly logger: AppLogger,
   ) {
     this.orgServiceUrl = this.config.getOrThrow<string>('ORG_SERVICE_URL');
-    this.internalToken = this.config.getOrThrow<string>('INTERNAL_TOKEN');
+    this.internalToken = this.config.getOrThrow<string>('INTERNAL_TOKEN_DOC_ORG');
     const rawTimeout   = this.config.get<string | number>('ORG_SERVICE_TIMEOUT_MS');
     const parsedTimeout = rawTimeout == null ? 5_000 : Number(rawTimeout);
     this.timeoutMs      = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 5_000;

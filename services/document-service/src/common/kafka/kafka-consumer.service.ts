@@ -4,9 +4,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
 import { Types } from 'mongoose';
-import { KAFKA_CLIENT, TOPICS } from './kafka.constants';
-import { runWithCorrelation } from './kafka-consumer.util';
-import { AppLogger } from '../logger/app-logger.service';
+import { AppLogger, KAFKA_CLIENT, TOPICS, runWithCorrelation } from '@sgd/common';
 
 interface MetadataExtractedPayload {
   orgId: string;

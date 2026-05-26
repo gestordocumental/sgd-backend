@@ -4,11 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
-
-import { JwtGuard } from './common/guards/jwt.guard';
+import { CorrelationMiddleware, AppLogger, MetricsModule, JwtGuard } from '@sgd/common';
 import { Notification } from './notifications/entities/notification.entity';
 
 @Module({

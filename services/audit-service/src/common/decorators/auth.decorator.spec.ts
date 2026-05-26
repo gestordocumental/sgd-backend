@@ -1,4 +1,4 @@
-import { AUTH_KEY, Auth, SuperAdminOnly } from './auth.decorator';
+import { AUTH_KEY, Auth, SuperAdminOnly } from '@sgd/common';
 import { SetMetadata } from '@nestjs/common';
 
 jest.mock('@nestjs/common', () => ({

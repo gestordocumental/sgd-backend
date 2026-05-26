@@ -8,9 +8,7 @@ import { Org } from './orgs/entities/org.entity';
 import { Departamento } from './org-structure/entities/departamento.entity';
 import { Area } from './org-structure/entities/area.entity';
 import { Cargo } from './org-structure/entities/cargo.entity';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
+import { CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
 
 
 @Module({
@@ -35,6 +33,10 @@ import { MetricsModule } from './common/metrics/metrics.module';
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
+          extra: {
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000,
+          },
         };
       },
     }),

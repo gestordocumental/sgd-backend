@@ -6,9 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
-import { KAFKA_CLIENT, TOPICS } from '../common/kafka/kafka.constants';
-import { runWithCorrelation } from '../common/kafka/kafka-consumer.util';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { KAFKA_CLIENT, TOPICS, runWithCorrelation, withDlt, KafkaProducerService, AppLogger } from '@sgd/common';
 import { AuditService } from './audit.service';
 import { isValidAuditLogEvent } from './dto/audit-log-event.dto';
 
@@ -23,11 +21,17 @@ export class AuditConsumer
     private readonly config: ConfigService,
     private readonly auditService: AuditService,
     private readonly logger: AppLogger,
+    private readonly producer: KafkaProducerService,
   ) {}
 
   async onApplicationBootstrap() {
     const groupId = this.config.getOrThrow<string>('KAFKA_CONSUMER_GROUP');
-    this.consumer = this.kafka.consumer({ groupId });
+    this.consumer = this.kafka.consumer({
+      groupId,
+      // Connection-level retry: reconnects up to 3 times on broker unavailability.
+      // Message-level retry is handled by withDlt inside eachMessage.
+      retry: { initialRetryTime: 300, retries: 3 },
+    });
 
     await this.consumer.connect();
     await this.consumer.subscribe({
@@ -37,16 +41,18 @@ export class AuditConsumer
 
     await this.consumer.run({
       eachMessage: async (payload: EachMessagePayload) => {
-        await runWithCorrelation(payload.message, async () => {
-          await this.handleMessage(payload);
-        }).catch((err: unknown) => {
-          this.logger.error(
-            `[kafka] Unhandled error processing message from topic ${payload.topic}: ${err instanceof Error ? err.message : String(err)}`,
-            err instanceof Error ? err.stack : undefined,
-            'AuditConsumer',
-          );
-          throw err;
-        });
+        await runWithCorrelation(payload.message, () =>
+          withDlt(
+            {
+              topic: payload.topic,
+              message: payload.message,
+              producer: this.producer,
+              logger: this.logger,
+              context: 'AuditConsumer',
+            },
+            () => this.handleMessage(payload),
+          ),
+        );
       },
     });
 

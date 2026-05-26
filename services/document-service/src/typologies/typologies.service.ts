@@ -9,9 +9,7 @@ import {
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { ResolveDiscrepancyDto, ResolveAction } from './dto/resolve-discrepancy.dto';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
+import { KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sgd/common';
 
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const parse = (v: string) =>

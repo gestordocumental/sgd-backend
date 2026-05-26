@@ -9,8 +9,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "typeorm": "ts-node ./node_modules/typeorm/cli.js",
-    "typeorm:prod": "node ./node_modules/typeorm/cli.js",
+    "typeorm": "ts-node ../../node_modules/typeorm/cli.js",
+    "typeorm:prod": "node ../../node_modules/typeorm/cli.js",
     "migration:generate": "npm run typeorm -- migration:generate -d src/data-source.ts",
     "migration:run": "npm run typeorm:prod -- migration:run -d dist/data-source.js",
     "migration:revert": "npm run typeorm:prod -- migration:revert -d dist/data-source.js",
@@ -19,6 +19,7 @@
     "start:migrate": "npm run migration:run && npm run start:prod"
   },
   "dependencies": {
+    "@sgd/common": "*",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",
@@ -57,34 +58,5 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.{ts,js}",
-      "!**/*.spec.{ts,js}",
-      "!**/migrations/**",
-      "!**/*.entity.{ts,js}",
-      "!**/*.module.{ts,js}",
-      "!main.{ts,js}",
-      "!data-source.{ts,js}"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node",
-    "coverageThreshold": {
-      "global": {
-        "statements": 85,
-        "lines": 85
-      }
-    }
   }
 }

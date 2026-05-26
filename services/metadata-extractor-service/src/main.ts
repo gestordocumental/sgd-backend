@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import './instrument';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { AppLogger } from './common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
@@ -17,7 +17,7 @@ async function bootstrap() {
     .setVersion('1.0')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/metadata-extractor/docs', app, document);
+  SwaggerModule.setup('api/v1/metadata-extractor/docs', app, document);
 
   const port = process.env.PORT ?? 3004;
   await app.listen(port);

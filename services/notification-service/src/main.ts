@@ -14,9 +14,7 @@ if (process.env.DISABLE_TLS_VERIFY === 'true') {
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { AppLogger } from './common/logger/app-logger.service';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { AppLogger, LoggingInterceptor, HttpExceptionFilter } from '@sgd/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
@@ -40,7 +38,7 @@ async function bootstrap() {
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'JWT')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/notifications/docs', app, document);
+  SwaggerModule.setup('api/v1/notifications/docs', app, document);
 
   const port = process.env.PORT ?? 3006;
   await app.listen(port);

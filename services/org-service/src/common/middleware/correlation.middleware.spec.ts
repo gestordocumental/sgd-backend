@@ -1,9 +1,9 @@
-import { CorrelationMiddleware, CORRELATION_ID_HEADER } from './correlation.middleware';
+import { CorrelationMiddleware, CORRELATION_ID_HEADER } from '@sgd/common';
 import { Request, Response, NextFunction } from 'express';
 
 const mockRun = jest.fn((store: unknown, cb: () => void) => cb());
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   correlationStorage: {
     run: (store: unknown, cb: () => void) => mockRun(store, cb),
   },

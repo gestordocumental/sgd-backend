@@ -6,6 +6,7 @@ import { AuthService } from "./auth.service";
 import { Credential } from "./entities/credential.entity";
 import { UserClientModule } from "../user-client/user-client.module";
 import { CredentialSeeder } from "./credential.seeder";
+import { KafkaModule } from "@sgd/common";
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { CredentialSeeder } from "./credential.seeder";
     // Dynamic config: the service passes secret/expiresIn in each .sign()
     JwtModule.register({}),
     UserClientModule,
+    KafkaModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, CredentialSeeder],

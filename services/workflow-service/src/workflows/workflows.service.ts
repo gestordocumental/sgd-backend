@@ -29,11 +29,8 @@ import {
   TimelineEventResponseDto,
 } from './dto/workflow-response.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { KafkaProducerService, AppLogger, JwtPayload, TOPICS } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { JwtPayload } from '../common/decorators/jwt-payload.decorator';
 
 @Injectable()
 export class WorkflowsService {
@@ -219,8 +216,8 @@ export class WorkflowsService {
     const userId = user.sub!;
     const orgId  = user.companyId!;
 
-    // El userId debe estar en el array finalUserIds (snapshot guardado al aprobar)
-    const workflows = await this.workflowRepo
+    // 1. Workflows donde el usuario es usuario final
+    const finalUserWorkflows = await this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
       .where('w.org_id = :orgId', { orgId })
@@ -233,7 +230,99 @@ export class WorkflowsService {
       .take(100)
       .getMany();
 
-    return workflows.map((w) => WorkflowResponseDto.from(w));
+    // 2. Workflows donde el usuario tiene un paso opcional PENDING en un ciclo activo
+    const optionalReviewerWorkflows = await this.workflowRepo
+      .createQueryBuilder('w')
+      .leftJoinAndSelect('w.approvalSteps', 'steps')
+      .where('w.org_id = :orgId', { orgId })
+      .andWhere('w.status = :wStatus', { wStatus: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS })
+      .andWhere('w.deleted_at IS NULL')
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM workflow_admin_cycles c
+          INNER JOIN workflow_admin_steps s ON s.cycle_id = c.id
+          WHERE c.workflow_id = w.id
+            AND c.status = 'IN_PROGRESS'
+            AND s.user_id = :userId
+            AND s.status = 'PENDING'
+            AND s.is_optional = true
+        )`,
+        { userId },
+      )
+      .orderBy('w.updatedAt', 'DESC')
+      .take(100)
+      .getMany();
+
+    // 3. Workflows donde el usuario está en allowedOptionalReviewerIds de un ciclo activo
+    //    (puede ser llamado como revisor opcional en cualquier momento del ciclo)
+    const allowedOptionalWorkflows = await this.workflowRepo
+      .createQueryBuilder('w')
+      .leftJoinAndSelect('w.approvalSteps', 'steps')
+      .where('w.org_id = :orgId', { orgId })
+      .andWhere('w.status = :wStatus', { wStatus: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS })
+      .andWhere('w.deleted_at IS NULL')
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM workflow_admin_cycles c
+          WHERE c.workflow_id = w.id
+            AND c.status = 'IN_PROGRESS'
+            AND CAST(:userId2 AS UUID) = ANY(c.allowed_optional_reviewer_ids)
+        )`,
+        { userId2: userId },
+      )
+      .orderBy('w.updatedAt', 'DESC')
+      .take(100)
+      .getMany();
+
+    // 4. Workflows donde el usuario participó como revisor opcional en algún ciclo
+    //    (cubre tanto el ciclo activo post-completado como el ciclo ya finalizado con
+    //    el workflow en estado AVAILABLE_FOR_FINAL_USERS o CLOSED)
+    const pastOptionalReviewerWorkflows = await this.workflowRepo
+      .createQueryBuilder('w')
+      .leftJoinAndSelect('w.approvalSteps', 'steps')
+      .where('w.org_id = :orgId', { orgId })
+      .andWhere('w.status IN (:...visibleStatuses)', {
+        visibleStatuses: [
+          WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+        ],
+      })
+      .andWhere('w.deleted_at IS NULL')
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM workflow_admin_cycles c
+          INNER JOIN workflow_admin_steps s ON s.cycle_id = c.id
+          WHERE c.workflow_id = w.id
+            AND s.user_id = :userId
+            AND s.is_optional = true
+        )`,
+        { userId },
+      )
+      .orderBy('w.updatedAt', 'DESC')
+      .take(100)
+      .getMany();
+
+    // Combinar y deduplicar por id
+    const merged = new Map<string, Workflow>();
+    for (const w of [
+      ...finalUserWorkflows,
+      ...optionalReviewerWorkflows,
+      ...allowedOptionalWorkflows,
+      ...pastOptionalReviewerWorkflows,
+    ]) {
+      merged.set(w.id, w);
+    }
+
+    this.logger.log(
+      `getMyAvailable userId=${userId} ` +
+      `finalUser=${finalUserWorkflows.length} ` +
+      `optionalStep=${optionalReviewerWorkflows.length} ` +
+      `allowedOptional=${allowedOptionalWorkflows.length} ` +
+      `pastOptional=${pastOptionalReviewerWorkflows.length} ` +
+      `total=${merged.size}`,
+    );
+
+    return Array.from(merged.values()).map((w) => WorkflowResponseDto.from(w));
   }
 
   // ── Actualizar workflow (solo en DRAFT) ───────────────────────────────────────
