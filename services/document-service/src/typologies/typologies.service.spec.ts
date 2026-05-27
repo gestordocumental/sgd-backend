@@ -260,6 +260,14 @@ describe('TypologiesService', () => {
       await expect(service.update('org-1', doc.id, { version: 'v2.1' })).rejects.toThrow(BadRequestException);
     });
 
+    it('rejects non-numeric version segment (e.g. v1.1beta)', async () => {
+      const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: 'v1.0', fuente: DataSource.MANUAL } });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(service.update('org-1', doc.id, { version: 'v1.1beta' })).rejects.toThrow(BadRequestException);
+    });
+
     it('allows version when no previous version is set', async () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: null, fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);

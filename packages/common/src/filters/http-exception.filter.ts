@@ -50,10 +50,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? rawBody
         : { message: isHttp ? exception.message : 'Internal server error' };
 
-    const sanitized = sanitize(errorBody) as Record<string, unknown>;
+    const sanitized = sanitize(errorBody);
+    const normalizedErrorBody = Array.isArray(sanitized)
+      ? { message: sanitized }
+      : typeof sanitized === 'object' && sanitized !== null
+        ? (sanitized as Record<string, unknown>)
+        : { message: String(sanitized) };
 
     const responseBody = {
-      ...sanitized,
+      ...normalizedErrorBody,
       statusCode: status,
       correlationId: getCorrelationId(),
       timestamp: new Date().toISOString(),

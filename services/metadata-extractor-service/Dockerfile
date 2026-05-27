@@ -25,7 +25,7 @@ COPY --from=builder /app/dist ./dist
 COPY start.sh ./start.sh
 RUN sed -i 's/\r//' start.sh && chmod +x start.sh
 
-EXPOSE 3000
+EXPOSE 3004
 
 USER node
 

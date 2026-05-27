@@ -120,7 +120,7 @@ export class EmailService {
       return;
     }
 
-    const registrationUrl = `${this.frontendUrl}/complete-registration?token=${opts.invitationToken}`;
+    const registrationUrl = `${this.frontendUrl}/complete-registration?token=${encodeURIComponent(opts.invitationToken)}`;
     const expiresDate     = new Date(opts.expiresAt).toLocaleString('es-CO', {
       timeZone: 'America/Bogota',
       dateStyle: 'long',

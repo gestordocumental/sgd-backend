@@ -26,14 +26,5 @@ export function runWithCorrelation(
         ? raw
         : randomUUID();
 
-  return new Promise((resolve, reject) => {
-    correlationStorage.run({ correlationId, clientIp: null }, async () => {
-      try {
-        await fn();
-        resolve();
-      } catch (err) {
-        reject(err);
-      }
-    });
-  });
+  return correlationStorage.run({ correlationId, clientIp: null }, fn);
 }

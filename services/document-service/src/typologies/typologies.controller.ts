@@ -61,7 +61,16 @@ export class TypologiesController {
     description: 'Accepts a PDF/DOCX file and returns extracted nombre, codigo and version without persisting anything.',
   })
   @ApiConsumes('multipart/form-data')
-  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file:    { type: 'string', format: 'binary' },
+        orgName: { type: 'string', nullable: true, example: 'Helisa SAS' },
+      },
+    },
+  })
   @ApiOkResponse({ schema: { example: { nombre: 'Política de Seguridad', codigo: 'POL-SEG-001', version: 'v1.0' } } })
   @Post('preview-extract')
   @UseInterceptors(FileInterceptor('file', multerOptions))

@@ -61,7 +61,7 @@ services:
     routes:
       - name: auth-docs-route
         paths:
-          - /api/auth/docs
+          - /api/v1/auth/docs
         strip_path: false
 
   - name: user-docs
@@ -69,7 +69,7 @@ services:
     routes:
       - name: user-docs-route
         paths:
-          - /api/users/docs
+          - /api/v1/users/docs
         strip_path: false
 
   - name: org-docs
@@ -77,7 +77,7 @@ services:
     routes:
       - name: org-docs-route
         paths:
-          - /api/org/docs
+          - /api/v1/org/docs
         strip_path: false
 
   - name: document-docs
@@ -85,7 +85,7 @@ services:
     routes:
       - name: document-docs-route
         paths:
-          - /api/documents/docs
+          - /api/v1/documents/docs
         strip_path: false
 
   - name: metadata-extractor-docs
@@ -93,7 +93,7 @@ services:
     routes:
       - name: metadata-extractor-docs-route
         paths:
-          - /api/metadata-extractor/docs
+          - /api/v1/metadata-extractor/docs
         strip_path: false
 
   # ── auth-service: rutas PÚBLICAS (sin JWT) ──────────────────────────────
@@ -102,9 +102,9 @@ services:
     routes:
       - name: auth-login
         paths:
-          - /api/auth/login
-          - /api/auth/refresh
-          - /api/auth/forgot-password
+          - /api/v1/auth/login
+          - /api/v1/auth/refresh
+          - /api/v1/auth/forgot-password
         methods: [POST]
         strip_path: false
     plugins:
@@ -120,7 +120,7 @@ services:
     routes:
       - name: auth-reset-password-route
         paths:
-          - /api/auth/reset-password
+          - /api/v1/auth/reset-password
         methods: [POST]
         strip_path: false
     plugins:
@@ -136,7 +136,7 @@ services:
     routes:
       - name: auth-provision-route
         paths:
-          - /api/auth/credentials/provision
+          - /api/v1/auth/credentials/provision
         methods: [POST]
         strip_path: false
 
@@ -146,7 +146,7 @@ services:
     routes:
       - name: auth-me
         paths:
-          - /api/auth
+          - /api/v1/auth
         strip_path: false
     plugins:
       - name: jwt
@@ -157,10 +157,20 @@ services:
     routes:
       - name: org-routes
         paths:
-          - /api/org
+          - /api/v1/org
         strip_path: false
     plugins:
       - name: jwt
+
+  # ── user-service: avatares estáticos (sin JWT) ────────────────────────────
+  - name: user-avatars
+    url: "${USER_SERVICE_URL}"
+    routes:
+      - name: user-avatars-route
+        paths:
+          - /uploads/avatars
+        methods: [GET]
+        strip_path: false
 
   # ── user-service: rutas PÚBLICAS (sin JWT) ───────────────────────────────
   - name: user-service-public
@@ -168,7 +178,7 @@ services:
     routes:
       - name: complete-registration
         paths:
-          - /api/users/complete-registration
+          - /api/v1/users/complete-registration
         methods: [POST]
         strip_path: false
 
@@ -178,9 +188,9 @@ services:
     routes:
       - name: user-routes
         paths:
-          - /api/users
-          - /api/roles
-          - ~/api/permissions$
+          - /api/v1/users
+          - /api/v1/roles
+          - ~/api/v1/permissions$
         strip_path: false
     plugins:
       - name: jwt
@@ -191,7 +201,7 @@ services:
     routes:
       - name: document-routes
         paths:
-          - /api/documents
+          - /api/v1/documents
         strip_path: false
     plugins:
       - name: jwt
@@ -202,7 +212,7 @@ services:
     routes:
       - name: workflow-routes
         paths:
-          - /api/workflows
+          - /api/v1/workflows
         strip_path: false
     plugins:
       - name: jwt
@@ -213,7 +223,7 @@ services:
     routes:
       - name: notification-sse-ticket-route
         paths:
-          - /api/notifications/stream/ticket
+          - /api/v1/notifications/stream/ticket
         methods: [POST]
         strip_path: false
     plugins:
@@ -225,7 +235,7 @@ services:
     routes:
       - name: notification-sse-route
         paths:
-          - /api/notifications/stream
+          - /api/v1/notifications/stream
         methods: [GET]
         strip_path: false
     plugins:
@@ -241,7 +251,7 @@ services:
     routes:
       - name: notification-routes
         paths:
-          - /api/notifications
+          - /api/v1/notifications
         strip_path: false
     plugins:
       - name: jwt
@@ -252,7 +262,7 @@ services:
     routes:
       - name: audit-docs-route
         paths:
-          - /api/audit/docs
+          - /api/v1/audit/docs
         strip_path: false
 
   # ── audit-service (con JWT) ───────────────────────────────────────────────
@@ -261,7 +271,7 @@ services:
     routes:
       - name: audit-routes
         paths:
-          - /api/audit
+          - /api/v1/audit
         strip_path: false
     plugins:
       - name: jwt

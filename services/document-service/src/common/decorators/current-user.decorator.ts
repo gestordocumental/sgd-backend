@@ -6,7 +6,8 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
  */
 export const currentUserFactory = (_data: unknown, ctx: ExecutionContext): string | undefined => {
   const request = ctx.switchToHttp().getRequest<{ user?: Record<string, unknown> }>();
-  return request.user?.['sub'] as string | undefined;
+  const sub = request.user?.['sub'];
+  return typeof sub === 'string' ? sub : undefined;
 };
 
 export const CurrentUser = createParamDecorator(currentUserFactory);

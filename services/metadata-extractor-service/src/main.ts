@@ -20,7 +20,7 @@ async function bootstrap() {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Metadata Extractor Service')
-    .setDescription('Async Kafka worker that extracts metadata from uploaded documents (PDF, DOCX). Exposes only the health check endpoint.')
+    .setDescription('Async Kafka worker that extracts metadata from uploaded documents (PDF, DOCX, XLSX). Exposes health and preview extraction endpoints.')
     .setVersion('1.0')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);

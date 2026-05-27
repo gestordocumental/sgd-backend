@@ -20,7 +20,7 @@ export interface AuditLogEvent {
  * Determine whether a value conforms to the AuditLogEvent shape.
  *
  * @param raw - The value to validate
- * @returns `true` if `raw` has the required string fields `service`, `actorId`, `action`, `resourceType`, `resourceId`, and `timestamp`, and the optional fields meet their allowed types/nullable states; `false` otherwise. Optional fields: `orgId` may be `null` or a string; `resourceName`, `correlationId`, and `ip` may be `undefined`, `null`, or a string; `metadata` may be `undefined` or `null` or a non-array object.
+ * @returns `true` if `raw` has the required string fields `service`, `actorId`, `action`, `resourceType`, `resourceId`, and `timestamp`, and the optional fields meet their allowed types/nullable states; `false` otherwise. Optional fields: `orgId` may be `null` or a string; `resourceName`, `correlationId`, and `ip` may be `undefined`, `null`, or a string; `metadata` must be present as `null` or a non-array object (never `undefined`).
  */
 export function isValidAuditLogEvent(raw: unknown): raw is AuditLogEvent {
   if (!raw || typeof raw !== 'object') return false;
@@ -34,7 +34,7 @@ export function isValidAuditLogEvent(raw: unknown): raw is AuditLogEvent {
     typeof p['resourceId']   === 'string' &&
     typeof p['timestamp']    === 'string' &&
     (p['resourceName']  === undefined || p['resourceName']  === null || typeof p['resourceName']  === 'string') &&
-    (p['metadata']      === undefined || p['metadata']      === null || (typeof p['metadata'] === 'object' && !Array.isArray(p['metadata']))) &&
+    (p['metadata']      === null || (typeof p['metadata'] === 'object' && !Array.isArray(p['metadata']))) &&
     (p['correlationId'] === undefined || p['correlationId'] === null || typeof p['correlationId'] === 'string') &&
     (p['ip']            === undefined || p['ip']            === null || typeof p['ip']            === 'string')
   );

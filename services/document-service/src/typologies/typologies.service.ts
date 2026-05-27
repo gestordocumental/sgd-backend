@@ -19,10 +19,14 @@ import { KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sg
  * @returns `true` if the first differing segment in `newVer` equals the corresponding segment in `oldVer` plus one and every following segment in `newVer` is `0`, `false` otherwise.
  */
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
-  const parse = (v: string) =>
-    v.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const parse = (v: string): number[] | null => {
+    const normalized = v.replace(/^v/i, '');
+    if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
+    return normalized.split('.').map((n) => Number(n));
+  };
   const nv = parse(newVer);
   const ov = parse(oldVer);
+  if (!nv || !ov) return false;
   const len = Math.max(nv.length, ov.length);
   while (nv.length < len) nv.push(0);
   while (ov.length < len) ov.push(0);
