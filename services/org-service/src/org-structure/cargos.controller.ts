@@ -24,7 +24,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @ApiParam({ name: 'orgId', format: 'uuid' })
 @ApiParam({ name: 'departamentoId', format: 'uuid' })
 @ApiParam({ name: 'areaId', format: 'uuid' })
-@Controller('api/org/:orgId/departamentos/:departamentoId/areas/:areaId/cargos')
+@Controller('api/v1/org/:orgId/departamentos/:departamentoId/areas/:areaId/cargos')
 @UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class CargosController {

@@ -45,6 +45,14 @@ export class WorkflowAdminStep {
   })
   status!: AdminStepStatus;
 
+  /** Indica que este paso fue insertado dinámicamente como revisor opcional. */
+  @Column({ name: 'is_optional', type: 'boolean', default: false })
+  isOptional!: boolean;
+
+  /** ID del paso que disparó la inserción de este paso opcional. */
+  @Column({ name: 'inserted_by_step_id', type: 'uuid', nullable: true })
+  insertedByStepId: string | null = null;
+
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt: Date | null = null;
 

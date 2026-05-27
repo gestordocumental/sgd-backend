@@ -17,7 +17,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@ne
 // orgId comes from the JWT payload forwarded by Kong as x-org-id header
 @ApiTags('Roles')
 @ApiBearerAuth('JWT')
-@Controller('api/roles')
+@Controller('api/v1/roles')
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 

@@ -26,13 +26,31 @@ export class InternalUsersController {
     private readonly configService: ConfigService,
   ) {}
 
+  /**
+   * Validates x-internal-token against every known caller of user-service.
+   * Each token is specific to one (caller → user-service) direction:
+   *   INTERNAL_TOKEN_AUTH_USER     — auth-service
+   *   INTERNAL_TOKEN_NOTIF_USER    — notification-service
+   *   INTERNAL_TOKEN_WORKFLOW_USER — workflow-service
+   *   INTERNAL_TOKEN_ORG_USER      — org-service
+   */
   private verifyToken(token: string | undefined): void {
-    const expected = Buffer.from(
-      this.configService.getOrThrow<string>('INTERNAL_TOKEN'),
-    );
+    const keys = [
+      'INTERNAL_TOKEN_AUTH_USER',
+      'INTERNAL_TOKEN_NOTIF_USER',
+      'INTERNAL_TOKEN_WORKFLOW_USER',
+      'INTERNAL_TOKEN_ORG_USER',
+    ];
+    const allowed = keys
+      .map((k) => this.configService.get<string>(k))
+      .filter((t): t is string => !!t)
+      .map((t) => Buffer.from(t));
+
     const provided = Buffer.from(token ?? '');
-    const valid =
-      provided.length === expected.length && timingSafeEqual(expected, provided);
+    const valid = allowed.some(
+      (expected) =>
+        provided.length === expected.length && timingSafeEqual(expected, provided),
+    );
     if (!valid) throw new UnauthorizedException();
   }
 

@@ -1,6 +1,7 @@
-import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule, Inject } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import type { Redis } from 'ioredis';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
 import { HealthModule } from './health/health.module';
@@ -8,9 +9,7 @@ import { User } from './users/entities/user.entity';
 import { Role } from './roles/entities/role.entity';
 import { Permission } from './roles/entities/permission.entity';
 import { UserOrgRole } from './roles/entities/user-org-role.entity';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
+import { CorrelationMiddleware, AppLogger, MetricsModule, SUPER_ADMIN_REVOCATION_CHECKER } from '@sgd/common';
 
 import { RedisModule } from './common/redis/redis.module';
 
@@ -36,6 +35,10 @@ import { RedisModule } from './common/redis/redis.module';
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
+          extra: {
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000,
+          },
         };
       },
     }),
@@ -46,7 +49,17 @@ import { RedisModule } from './common/redis/redis.module';
     HealthModule,
     MetricsModule,
   ],
-  providers: [AppLogger],
+  providers: [
+    AppLogger,
+    {
+      provide: SUPER_ADMIN_REVOCATION_CHECKER,
+      inject: ['REDIS_CLIENT'],
+      useFactory: (redis: Redis) => async (userId: string): Promise<boolean> => {
+        const val = await redis.get(`sa-revoked:${userId}`);
+        return val !== null;
+      },
+    },
+  ],
   exports: [AppLogger],
 })
 export class AppModule implements NestModule {

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  BadRequestException,
   InternalServerErrorException,
   HttpException,
   Inject,
@@ -21,9 +22,8 @@ import { UserResponseDto } from "./dto/user-response.dto";
 import { AuthClientService } from "../auth-client/auth-client.service";
 import { UserOrgRole } from "../roles/entities/user-org-role.entity";
 import { Role, SystemRoleName, RoleScope } from "../roles/entities/role.entity";
-import { KafkaProducerService } from "../common/kafka/kafka-producer.service";
-import { TOPICS } from "../common/kafka/kafka.constants";
-import { getClientIp } from "../common/correlation/correlation.context";
+import { KafkaProducerService, TOPICS, getClientIp } from '@sgd/common';
+import { OrgClientService } from '../common/org-client/org-client.service';
 
 const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
 
@@ -40,6 +40,7 @@ export class UsersService {
     @Inject("REDIS_CLIENT")
     private readonly redis: Redis,
     private readonly kafkaProducer: KafkaProducerService,
+    private readonly orgClientService: OrgClientService,
   ) {}
 
   private static userDisplayName(user: { firstName?: string | null; lastName?: string | null; email: string }): string {
@@ -65,7 +66,7 @@ export class UsersService {
       resourceId:   params.resourceId,
       resourceName: params.resourceName ?? null,
       ip:           getClientIp(),
-      metadata:     params.metadata,
+      metadata:     params.metadata ?? null,
       timestamp:    new Date().toISOString(),
     });
   }
@@ -229,18 +230,45 @@ export class UsersService {
     return { data, total };
   }
 
-  async findAllSuperAdmin(page = 1, limit = 100): Promise<{ data: User[]; total: number }> {
+  async findAllSuperAdmin(
+    page = 1,
+    limit = 20,
+    search?: string,
+    status?: 'active' | 'deleted' | 'pending',
+  ): Promise<{ data: User[]; total: number }> {
     const safePage  = Math.max(1, page);
-    const safeLimit = Math.max(1, limit);
-    const take = Math.min(safeLimit, 500);
-    const skip = (safePage - 1) * take;
-    const [data, total] = await this.usersRepository.findAndCount({
-      withDeleted: true,
-      where: { isSuperAdmin: true },
-      take,
-      skip,
-      order: { createdAt: 'DESC' },
-    });
+    const safeLimit = Math.min(Math.max(1, limit), 500);
+    const skip = (safePage - 1) * safeLimit;
+
+    const qb = this.usersRepository
+      .createQueryBuilder('u')
+      .withDeleted()
+      .where('u.isSuperAdmin = :isSuperAdmin', { isSuperAdmin: true });
+
+    if (search?.trim()) {
+      const q = `%${search.trim()}%`;
+      qb.andWhere(
+        '(u.email ILIKE :q OR u.firstName ILIKE :q OR u.lastName ILIKE :q)',
+        { q },
+      );
+    }
+
+    if (status === 'deleted') {
+      qb.andWhere('u.deletedAt IS NOT NULL');
+    } else if (status === 'pending') {
+      qb.andWhere('u.deletedAt IS NULL')
+        .andWhere('u.registrationStatus = :rs', { rs: 'pending_credentials' });
+    } else if (status === 'active') {
+      qb.andWhere('u.deletedAt IS NULL')
+        .andWhere('u.registrationStatus != :rs', { rs: 'pending_credentials' });
+    }
+
+    const [data, total] = await qb
+      .skip(skip)
+      .take(safeLimit)
+      .orderBy('u.createdAt', 'DESC')
+      .getManyAndCount();
+
     return { data, total };
   }
 
@@ -264,6 +292,38 @@ export class UsersService {
   async update(id: string, dto: UpdateUserDto, actorId?: string, orgId?: string): Promise<User> {
     const user = await this.findOne(id);
 
+    // Validate org-structure references before persisting.
+    // Only triggered when at least one field is being set to a non-null value and the caller
+    // supplies an orgId (which is always present on authenticated PATCH requests).
+    const settingAnyOrgField =
+      ('departamentoId' in dto && dto.departamentoId !== null && dto.departamentoId !== undefined) ||
+      ('areaId' in dto && dto.areaId !== null && dto.areaId !== undefined) ||
+      ('cargoId' in dto && dto.cargoId !== null && dto.cargoId !== undefined);
+
+    if (settingAnyOrgField && orgId) {
+      // Merge DTO values with current user values to build the effective assignment.
+      // Fields set to null in the DTO are being cleared — they don't need validation.
+      const effectiveDeptId =
+        'departamentoId' in dto ? dto.departamentoId : user.departamentoId;
+      const effectiveAreaId =
+        'areaId' in dto ? dto.areaId : user.areaId;
+      const effectiveCargoId =
+        'cargoId' in dto ? dto.cargoId : user.cargoId;
+
+      if (effectiveDeptId === null || effectiveDeptId === undefined) {
+        throw new BadRequestException(
+          'departamentoId is required when assigning an area or cargo',
+        );
+      }
+
+      await this.orgClientService.validateOrgStructure(
+        orgId,
+        effectiveDeptId,
+        effectiveAreaId ?? undefined,
+        effectiveCargoId ?? undefined,
+      );
+    }
+
     const before: Record<string, unknown> = {}
     for (const key of Object.keys(dto)) before[key] = (user as unknown as Record<string, unknown>)[key]
 
@@ -276,14 +336,16 @@ export class UsersService {
         const to = (dto as Record<string, unknown>)[key]
         if (before[key] !== to) changes[key] = { from: before[key], to }
       }
-      this.emitAuditLog({
-        actorId,
-        orgId,
-        action:       'USER_UPDATED',
-        resourceId:   id,
-        resourceName: UsersService.userDisplayName(saved),
-        metadata:     { changes },
-      });
+      if (Object.keys(changes).length > 0) {
+        this.emitAuditLog({
+          actorId,
+          orgId,
+          action:       'USER_UPDATED',
+          resourceId:   id,
+          resourceName: UsersService.userDisplayName(saved),
+          metadata:     { changes },
+        });
+      }
     }
     return saved;
   }
@@ -371,6 +433,7 @@ export class UsersService {
 
   async setSuperAdmin(id: string, enabled: boolean, actorId?: string): Promise<User> {
     const user = await this.findOne(id);
+    const previousState = user.isSuperAdmin;
     user.isSuperAdmin = enabled;
     const saved = await this.usersRepository.save(user);
     this.emitAuditLog({
@@ -378,8 +441,16 @@ export class UsersService {
       action:       'USER_SUPER_ADMIN_CHANGED',
       resourceId:   id,
       resourceName: UsersService.userDisplayName(saved),
-      metadata:     { enabled },
+      metadata:     { changes: { isSuperAdmin: { from: previousState, to: enabled } } },
     });
+    if (!enabled) {
+      // Invalidate all active refresh tokens so the next auto-refresh fails
+      // and the user is forced to re-login without super-admin claims.
+      // Fire-and-forget: if auth-service is temporarily unavailable the SSE
+      // kick-out (below) still forces a frontend logout immediately.
+      this.authClientService.revokeAllTokens(id).catch(() => undefined);
+      this.kafkaProducer.emitSafe(TOPICS.USER_SUPER_ADMIN_REVOKED, { userId: id });
+    }
     return saved;
   }
 
@@ -400,6 +471,10 @@ export class UsersService {
       if (existing.roleId === roleId && existing.removedAt === null) {
         throw new ConflictException("User already has this role in this org");
       }
+      const [oldRole, newRole] = await Promise.all([
+        existing.roleId ? this.roleRepository.findOne({ where: { id: existing.roleId } }) : null,
+        roleId ? this.roleRepository.findOne({ where: { id: roleId } }) : null,
+      ]);
       await this.userOrgRoleRepository.update(existing.id, {
         roleId,
         assignedBy,
@@ -407,11 +482,11 @@ export class UsersService {
       });
       this.emitAuditLog({
         actorId:      assignedBy,
-        orgId:        dto.orgId,
+        orgId:        undefined, // acción de plataforma — visible en auditoría de super admin
         action:       'USER_ORG_ROLE_UPDATED',
         resourceId:   userId,
         resourceName: UsersService.userDisplayName(targetUser),
-        metadata:     { orgId: dto.orgId, roleId },
+        metadata:     { changes: { role: { from: oldRole?.name ?? null, to: newRole?.name ?? null } }, orgId: dto.orgId },
       });
       return this.userOrgRoleRepository.findOne({
         where: { id: existing.id },
@@ -439,7 +514,13 @@ export class UsersService {
 
   async findByOrg(
     orgId: string,
-  ): Promise<{ user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null }[]> {
+    page = 1,
+    limit = 500,
+  ): Promise<{ data: { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null }[]; total: number }> {
+    const safePage  = Math.max(1, page);
+    const safeLimit = Math.min(Math.max(1, limit), 500);
+    const skip = (safePage - 1) * safeLimit;
+
     // Use QueryBuilder with withDeleted() so soft-deleted users are loaded
     // through the relation — find() + withDeleted:true only affects the main
     // entity, not its joined relations.
@@ -450,8 +531,6 @@ export class UsersService {
       .where('uor.orgId = :orgId', { orgId })
       .withDeleted()
       .getMany();
-
-    if (orgRoles.length === 0) return [];
 
     // Group by userId. Users with removedAt set were explicitly removed from
     // the org via the delete button. Users with roleId=null but removedAt=null
@@ -468,7 +547,20 @@ export class UsersService {
       }
     }
 
-    return Array.from(byUser.values());
+    // Also include super admins so their names resolve in workflow/audit views
+    // even if they have no explicit org membership record.
+    const superAdmins = await this.usersRepository.find({
+      where: { isSuperAdmin: true },
+      withDeleted: true,
+    });
+    for (const sa of superAdmins) {
+      if (!byUser.has(sa.id)) {
+        byUser.set(sa.id, { user: sa, roles: [], orgRemovedAt: null });
+      }
+    }
+
+    const all = Array.from(byUser.values());
+    return { data: all.slice(skip, skip + safeLimit), total: all.length };
   }
 
   async getOrgRoles(userId: string): Promise<UserOrgRole[]> {
@@ -490,6 +582,35 @@ export class UsersService {
       where: { userId, orgId, roleId: Not(IsNull()) },
       order: { createdAt: 'ASC' },
     });
+  }
+
+  /**
+   * Returns the flat list of effective permissions for a user in a given org.
+   * Used internally by auth-service to embed permissions in the JWT.
+   */
+  async getEffectivePermissions(
+    userId: string,
+    orgId: string,
+  ): Promise<{ module: string; action: string }[]> {
+    const userOrgRoles = await this.userOrgRoleRepository.find({
+      where: { userId, orgId, roleId: Not(IsNull()) },
+      relations: ['role', 'role.permissions'],
+    });
+
+    const seen = new Set<string>();
+    const permissions: { module: string; action: string }[] = [];
+
+    for (const uor of userOrgRoles) {
+      for (const p of uor.role?.permissions ?? []) {
+        const key = `${p.module}:${p.action}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          permissions.push({ module: p.module as string, action: p.action as string });
+        }
+      }
+    }
+
+    return permissions;
   }
 
   async removeAllFromOrg(orgId: string): Promise<void> {
@@ -515,6 +636,10 @@ export class UsersService {
     if ((result.affected ?? 0) === 0) {
       throw new NotFoundException(`User ${userId} is not assigned to org ${orgId}`);
     }
+
+    // Notify the removed user so their active browser session is revoked immediately
+    this.kafkaProducer.emitSafe(TOPICS.USER_ORG_REMOVED, { userId, orgId });
+
     if (actorId) {
       this.emitAuditLog({
         actorId,

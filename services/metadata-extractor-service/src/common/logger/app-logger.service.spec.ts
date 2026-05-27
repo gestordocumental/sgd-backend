@@ -1,4 +1,4 @@
-import { AppLogger } from './app-logger.service';
+import { AppLogger, getCorrelationId } from '@sgd/common';
 
 // ── Module-level mock for winston and correlation context ─────────────────────
 
@@ -20,11 +20,9 @@ jest.mock('winston', () => {
   };
 });
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('test-correlation-id'),
 }));
-
-import { getCorrelationId } from '../correlation/correlation.context';
 
 const mockGetCorrelationId = getCorrelationId as jest.MockedFunction<typeof getCorrelationId>;
 
@@ -161,16 +159,22 @@ describe('AppLogger', () => {
   describe('NODE_ENV modes', () => {
     it('constructs without throwing in production mode', () => {
       const original = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-      expect(() => new AppLogger()).not.toThrow();
-      process.env.NODE_ENV = original;
+      try {
+        process.env.NODE_ENV = 'production';
+        expect(() => new AppLogger()).not.toThrow();
+      } finally {
+        process.env.NODE_ENV = original;
+      }
     });
 
     it('constructs without throwing in development mode', () => {
       const original = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'development';
-      expect(() => new AppLogger()).not.toThrow();
-      process.env.NODE_ENV = original;
+      try {
+        process.env.NODE_ENV = 'development';
+        expect(() => new AppLogger()).not.toThrow();
+      } finally {
+        process.env.NODE_ENV = original;
+      }
     });
   });
 });

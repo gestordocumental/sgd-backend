@@ -4,7 +4,7 @@ import { Org } from './entities/org.entity';
 import { OrgsService } from './orgs.service';
 import { OrgsController } from './orgs.controller';
 import { OrgGuard } from '../common/guards/org.guard';
-import { KafkaModule } from '../common/kafka/kafka.module';
+import { KafkaModule } from '@sgd/common';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Org]), KafkaModule],

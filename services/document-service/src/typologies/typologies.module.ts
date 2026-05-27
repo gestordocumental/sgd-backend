@@ -7,7 +7,7 @@ import { InternalTypologiesController } from './internal-typologies.controller';
 import { AdminTypologiesController } from './admin-typologies.controller';
 import { OrgClientModule } from '../common/org-client/org-client.module';
 import { ExtractorClientModule } from '../common/extractor-client/extractor-client.module';
-import { KafkaModule } from '../common/kafka/kafka.module';
+import { KafkaModule } from '@sgd/common';
 
 @Module({
   imports: [

@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { EmailService, getNotificationTitle } from './email.service';
-import { AppLogger } from '../../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 import { NotificationType } from '../entities/notification.entity';
 
 // ── global fetch mock ──────────────────────────────────────────────────────
@@ -256,6 +256,67 @@ describe('EmailService', () => {
 
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
       expect(body.html).toContain('complete-registration?token=special-token');
+    });
+  });
+
+  describe('sendPasswordReset', () => {
+    const resetOpts = {
+      to:         'reset@test.com',
+      resetToken: 'reset-token-123',
+      expiresAt:  '2024-12-31T00:00:00Z',
+    };
+
+    it('returns early and warns when email is disabled', async () => {
+      const svc = new EmailService(makeConfig({ RESEND_API_KEY: undefined }), logger);
+
+      await svc.sendPasswordReset(resetOpts);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('password reset email not sent'),
+        'EmailService',
+      );
+    });
+
+    it('warns when FRONTEND_URL is not configured', async () => {
+      const svc = new EmailService(makeConfig({ FRONTEND_URL: undefined }), logger);
+
+      await svc.sendPasswordReset(resetOpts);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('FRONTEND_URL not configured'),
+        'EmailService',
+      );
+    });
+
+    it('sends password reset email with reset URL and logs success', async () => {
+      fetchMock.mockResolvedValue(okFetch({ id: 'reset-1' }));
+      const svc = new EmailService(makeConfig(), logger);
+
+      await svc.sendPasswordReset(resetOpts);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.to).toBe('reset@test.com');
+      expect(body.html).toContain('reset-password?token=reset-token-123');
+      expect(logger.log).toHaveBeenCalledWith(
+        expect.stringContaining('reset@test.com'),
+        'EmailService',
+      );
+    });
+
+    it('logs error when password reset email fails', async () => {
+      fetchMock.mockResolvedValue(failFetch(500, { message: 'Internal error' }));
+      const svc = new EmailService(makeConfig(), logger);
+
+      await svc.sendPasswordReset(resetOpts);
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Internal error'),
+        undefined,
+        'EmailService',
+      );
     });
   });
 });

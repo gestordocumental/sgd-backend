@@ -11,6 +11,7 @@
     "test:cov": "jest --coverage"
   },
   "dependencies": {
+    "@sgd/common": "*",
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0",
     "@nestjs/axios": "^4.0.1",
@@ -53,36 +54,5 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.{ts,js}",
-      "!**/*.spec.{ts,js}",
-      "!**/*.module.{ts,js}",
-      "!main.{ts,js}",
-      "!**/common/kafka/kafka-consumer*",
-      "!**/common/org-client/**",
-      "!**/common/storage/**",
-      "!**/common/extractor-client/**",
-      "!**/typologies/internal-typologies.controller.{ts,js}"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node",
-    "coverageThreshold": {
-      "global": {
-        "statements": 85,
-        "lines": 85
-      }
-    }
   }
 }

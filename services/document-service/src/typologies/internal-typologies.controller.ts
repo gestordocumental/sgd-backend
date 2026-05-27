@@ -19,8 +19,9 @@ export class InternalTypologiesController implements OnModuleInit {
   constructor(private readonly typologiesService: TypologiesService) {}
 
   onModuleInit() {
-    const token = process.env['INTERNAL_TOKEN'];
-    if (!token) throw new Error('INTERNAL_TOKEN env var is not set');
+    // Only workflow-service is allowed to call document-service internal endpoints.
+    const token = process.env['INTERNAL_TOKEN_WORKFLOW_DOC'];
+    if (!token) throw new Error('INTERNAL_TOKEN_WORKFLOW_DOC env var is not set');
     this.internalToken = token;
   }
 

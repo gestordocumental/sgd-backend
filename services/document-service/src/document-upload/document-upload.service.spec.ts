@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { DocumentUploadService } from './document-upload.service';
 import {
@@ -70,7 +70,7 @@ function makeDeps(doc: TypologyDocument | null = null) {
     delete:              jest.fn().mockResolvedValue(undefined),
     getSignedDownloadUrl: jest.fn().mockResolvedValue({ url: 'https://signed.url', expiresAt: new Date() }),
   };
-  const kafka  = { emit: jest.fn().mockResolvedValue(undefined) };
+  const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
   const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return { model, storage, kafka, logger };
 }
@@ -170,6 +170,40 @@ describe('DocumentUploadService', () => {
         service.upload('org-1', doc.id, makeFile({ mimetype: DOCX_MIME, originalname: 'test.docx' })),
       ).resolves.not.toThrow();
     });
+
+    it('emits audit log when actorId is provided', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await service.upload('org-1', doc.id, makeFile(), undefined, 'actor-user-1');
+
+      expect(kafka.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ actorId: 'actor-user-1', action: 'TYPOLOGY_DOCUMENT_UPLOADED' }),
+      );
+    });
+
+    it('throws InternalServerErrorException when Kafka emit fails and deletes the uploaded file', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      kafka.emit.mockRejectedValue(new Error('Kafka down'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.upload('org-1', doc.id, makeFile())).rejects.toThrow(InternalServerErrorException);
+      expect(storage.delete).toHaveBeenCalled();
+    });
+
+    it('deletes orphaned upload and rethrows when DB save fails', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      (doc.save as jest.Mock).mockRejectedValueOnce(new Error('DB error'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.upload('org-1', doc.id, makeFile())).rejects.toThrow('DB error');
+      expect(storage.delete).toHaveBeenCalled();
+      expect(kafka.emit).not.toHaveBeenCalled();
+    });
   });
 
   // ── createNewVersion() ────────────────────────────────────────────────────
@@ -195,7 +229,7 @@ describe('DocumentUploadService', () => {
         upload: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn().mockResolvedValue(undefined),
       };
-      const kafka  = { emit: jest.fn().mockResolvedValue(undefined) };
+      const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
       const logger = { log: jest.fn(), warn: jest.fn() };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
@@ -249,6 +283,98 @@ describe('DocumentUploadService', () => {
       await expect(
         service.createNewVersion('org-1', makeId(), makeFile(), {}),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── retryExtraction() ────────────────────────────────────────────────────
+
+  describe('retryExtraction()', () => {
+    function makeFailedDoc(): TypologyDocument {
+      return makeDoc({
+        documento: {
+          r2Key:             'org/org-1/typologies/file.pdf',
+          originalName:      'file.pdf',
+          mimeType:          PDF_MIME,
+          uploadedAt:        new Date(),
+          extractionStatus:  ExtractionStatus.FAILED,
+        },
+      });
+    }
+
+    it('sets PROCESSING, emits Kafka and returns success message', async () => {
+      const doc = makeFailedDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      const result = await service.retryExtraction('org-1', doc.id);
+
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
+      expect(kafka.emit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ orgId: 'org-1', typologyId: doc.id }),
+      );
+      expect(result).toEqual({ message: 'Extracción reencolada.', extractionStatus: ExtractionStatus.PROCESSING });
+    });
+
+    it('emits audit log when actorId is provided', async () => {
+      const doc = makeFailedDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await service.retryExtraction('org-1', doc.id, undefined, 'actor-1');
+
+      expect(kafka.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ actorId: 'actor-1', action: 'TYPOLOGY_EXTRACTION_RETRIED' }),
+      );
+    });
+
+    it('restores FAILED status and throws InternalServerErrorException when Kafka fails', async () => {
+      const doc = makeFailedDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      kafka.emit.mockRejectedValue(new Error('Kafka down'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(InternalServerErrorException);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.FAILED);
+    });
+
+    it('throws BadRequestException for invalid typology ID', async () => {
+      const { model, storage, kafka, logger } = makeDeps();
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', 'not-an-id')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when typology does not exist', async () => {
+      const { model, storage, kafka, logger } = makeDeps(null);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', makeId())).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when no document has been uploaded', async () => {
+      const doc = makeDoc(); // no r2Key
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when extraction status is not FAILED', async () => {
+      const doc = makeDoc({
+        documento: {
+          r2Key:            'org/org-1/typologies/file.pdf',
+          originalName:     'file.pdf',
+          mimeType:         PDF_MIME,
+          uploadedAt:       new Date(),
+          extractionStatus: ExtractionStatus.PROCESSING,
+        },
+      });
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
     });
   });
 

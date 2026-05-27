@@ -1,9 +1,8 @@
-import { LoggingInterceptor } from './logging.interceptor';
-import { AppLogger } from '../logger/app-logger.service';
+import { LoggingInterceptor, AppLogger } from '@sgd/common';
 import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('interceptor-correlation-id'),
 }));
 

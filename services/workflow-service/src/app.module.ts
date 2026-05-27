@@ -5,11 +5,7 @@ import { HttpModule } from '@nestjs/axios';
 import { APP_GUARD } from '@nestjs/core';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { HealthModule } from './health/health.module';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
-
-import { JwtGuard } from './common/guards/jwt.guard';
+import { CorrelationMiddleware, AppLogger, MetricsModule, JwtGuard } from '@sgd/common';
 
 // Entities — registradas en TypeOrmModule para que el guard y los repositorios las encuentren
 import { Workflow } from './workflows/entities/workflow.entity';
@@ -21,6 +17,7 @@ import { WorkflowAdminStep } from './workflows/entities/workflow-admin-step.enti
 import { WorkflowAdminAttachment } from './workflows/entities/workflow-admin-attachment.entity';
 import { WorkflowNote } from './workflows/entities/workflow-note.entity';
 import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity';
+import { IdempotencyKey } from './workflows/entities/idempotency-key.entity';
 
 @Module({
   imports: [
@@ -50,11 +47,16 @@ import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity'
             WorkflowAdminAttachment,
             WorkflowNote,
             WorkflowTimeline,
+            IdempotencyKey,
           ],
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
-          extra: { parseInt8: true },
+          extra: {
+            parseInt8: true,
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000,
+          },
         };
       },
     }),

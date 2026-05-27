@@ -19,8 +19,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { JwtGuard } from '../common/guards/jwt.guard';
-import { OrgMember } from '../common/decorators/auth.decorator';
+import { JwtGuard, OrgMember } from '@sgd/common';
 import { MAX_FILE_SIZE } from '../document-upload/document-upload.constants';
 import { WorkflowFilesService } from './workflow-files.service';
 import { WorkflowFileUploadResponseDto } from './dto/workflow-file-upload-response.dto';
@@ -47,7 +46,7 @@ const workflowMulterOptions = {
 @ApiTags('Workflow Files')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/documents/:orgId/workflow-files')
+@Controller('api/v1/documents/:orgId/workflow-files')
 @UseGuards(JwtGuard)
 @OrgMember()
 export class WorkflowFilesController {

@@ -1,6 +1,6 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
-import { JwtPayloadParam } from './jwt-payload.decorator';
+import { JwtPayloadParam } from '@sgd/common';
 
 function getDecoratorFactory(decorator: ParameterDecorator) {
   class TestTarget {
@@ -14,15 +14,10 @@ function getDecoratorFactory(decorator: ParameterDecorator) {
   return args[Object.keys(args)[0]].factory;
 }
 
-function buildJwt(payload: Record<string, unknown>): string {
-  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  return `header.${encoded}.signature`;
-}
-
-function makeCtx(headers: Record<string, string>): ExecutionContext {
+function makeCtx(user?: Record<string, unknown>): ExecutionContext {
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ headers }),
+      getRequest: () => ({ user }),
     }),
   } as unknown as ExecutionContext;
 }
@@ -36,31 +31,19 @@ describe('@JwtPayloadParam()', () => {
 
   it('returns the decoded JWT payload', () => {
     const payload = { sub: 'user-1', companyId: 'org-1', isSuperAdmin: false };
-    const ctx = makeCtx({ authorization: `Bearer ${buildJwt(payload)}` });
+    const ctx = makeCtx(payload);
 
     expect(factory(undefined, ctx)).toEqual(payload);
   });
 
-  it('throws UnauthorizedException when Authorization header is missing', () => {
-    const ctx = makeCtx({});
+  it('throws UnauthorizedException when request.user is missing', () => {
+    const ctx = makeCtx(undefined);
 
     expect(() => factory(undefined, ctx)).toThrow(UnauthorizedException);
   });
 
-  it('throws UnauthorizedException when the token is not bearer', () => {
-    const ctx = makeCtx({ authorization: 'Basic abc' });
-
-    expect(() => factory(undefined, ctx)).toThrow(UnauthorizedException);
-  });
-
-  it('throws UnauthorizedException when the token has fewer than 3 parts', () => {
-    const ctx = makeCtx({ authorization: 'Bearer header.payload' });
-
-    expect(() => factory(undefined, ctx)).toThrow(UnauthorizedException);
-  });
-
-  it('throws UnauthorizedException when the payload is not valid JSON', () => {
-    const ctx = makeCtx({ authorization: 'Bearer header.!!!invalid!!!.signature' });
+  it('throws UnauthorizedException when user.sub is missing', () => {
+    const ctx = makeCtx({ email: 'user@example.com' });
 
     expect(() => factory(undefined, ctx)).toThrow(UnauthorizedException);
   });

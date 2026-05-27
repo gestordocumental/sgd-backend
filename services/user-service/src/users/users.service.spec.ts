@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { IsNull, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 import { UsersService } from './users.service';
@@ -8,7 +8,8 @@ import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role, RoleScope, SystemRoleName } from '../roles/entities/role.entity';
 import { AuthClientService } from '../auth-client/auth-client.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { OrgClientService } from '../common/org-client/org-client.service';
+import { KafkaProducerService } from '@sgd/common';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
     overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
   avatarUrl: null,
   isSuperAdmin: false,
+  isOptionalReviewer: false,
   twoFactorEnabled: false,
   orgRoles: [],
   createdAt: new Date('2024-01-01'),
@@ -71,6 +73,7 @@ describe('UsersService', () => {
   let authClient: jest.Mocked<AuthClientService>;
   let redis: { getdel: jest.Mock; setex: jest.Mock };
   let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit' | 'emitSafe'>>;
+  let orgClient: jest.Mocked<Pick<OrgClientService, 'validateOrgStructure'>>;
 
   beforeEach(async () => {
     redis = { getdel: jest.fn(), setex: jest.fn() };
@@ -124,6 +127,7 @@ describe('UsersService', () => {
             provisionCredentials: jest.fn(),
             disableCredentials: jest.fn(),
             enableCredentials: jest.fn(),
+            revokeAllTokens: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -134,6 +138,10 @@ describe('UsersService', () => {
           provide: KafkaProducerService,
           useValue: kafkaProducer,
         },
+        {
+          provide: OrgClientService,
+          useValue: { validateOrgStructure: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -142,6 +150,7 @@ describe('UsersService', () => {
     uorRepo = module.get(getRepositoryToken(UserOrgRole));
     roleRepo = module.get(getRepositoryToken(Role));
     authClient = module.get(AuthClientService);
+    orgClient = module.get(OrgClientService);
   });
 
   // ─── create ───────────────────────────────────────────────────────────────
@@ -389,6 +398,45 @@ describe('UsersService', () => {
       usersRepo.findOne.mockResolvedValue(null);
 
       await expect(service.update('bad-id', { firstName: 'X' })).rejects.toThrow(NotFoundException);
+    });
+
+    it('calls orgClientService.validateOrgStructure when departamentoId is being set', async () => {
+      const user = makeUser();
+      const dto = { departamentoId: 'dept-uuid', areaId: 'area-uuid' };
+      const updated = { ...user, ...dto };
+
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(updated as any);
+
+      await service.update(user.id, dto, undefined, 'org-uuid');
+
+      expect(orgClient.validateOrgStructure).toHaveBeenCalledWith(
+        'org-uuid',
+        'dept-uuid',
+        'area-uuid',
+        undefined,
+      );
+    });
+
+    it('throws BadRequestException when areaId is set but effective departamentoId is null', async () => {
+      const user = makeUser({ departamentoId: null });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(
+        service.update(user.id, { areaId: 'area-uuid' }, undefined, 'org-uuid'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('skips org-structure validation when all three fields are being cleared (set to null)', async () => {
+      const user = makeUser({ departamentoId: 'dept-uuid', areaId: 'area-uuid', cargoId: 'cargo-uuid' });
+      const dto = { departamentoId: null, areaId: null, cargoId: null };
+
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue({ ...user, ...dto } as any);
+
+      await service.update(user.id, dto, undefined, 'org-uuid');
+
+      expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
     });
   });
 
@@ -688,13 +736,14 @@ describe('UsersService', () => {
       const orgRole = makeUor({ user, role: adminRole as any });
 
       makeUorQb([orgRole] as any);
+      usersRepo.find.mockResolvedValue([]);
 
-      const result = await service.findByOrg('org-uuid-1');
+      const { data, total } = await service.findByOrg('org-uuid-1');
 
-      expect(usersRepo.find).not.toHaveBeenCalled();
-      expect(result).toHaveLength(1);
-      expect(result[0].user).toEqual(user);
-      expect(result[0].roles).toEqual([
+      expect(data).toHaveLength(1);
+      expect(total).toBe(1);
+      expect(data[0].user).toEqual(user);
+      expect(data[0].roles).toEqual([
         { roleId: orgRole.roleId, roleName: adminRole.name },
       ]);
     });
@@ -708,25 +757,46 @@ describe('UsersService', () => {
       const orgRole2 = makeUor({ id: 'uor-uuid-2', userId: user2.id, user: user2, roleId: role2.id, role: role2 as any });
 
       makeUorQb([orgRole1, orgRole2] as any);
+      usersRepo.find.mockResolvedValue([]);
 
-      const result = await service.findByOrg('org-uuid-1');
+      const { data, total } = await service.findByOrg('org-uuid-1');
 
-      expect(result).toHaveLength(2);
-      expect(result.find((r) => r.user.id === user1.id)?.roles).toEqual([
+      expect(total).toBe(2);
+      expect(data.find((r) => r.user.id === user1.id)?.roles).toEqual([
         { roleId: role1.id, roleName: role1.name },
       ]);
-      expect(result.find((r) => r.user.id === user2.id)?.roles).toEqual([
+      expect(data.find((r) => r.user.id === user2.id)?.roles).toEqual([
         { roleId: role2.id, roleName: role2.name },
       ]);
     });
 
-    it('returns an empty array when no users belong to the org', async () => {
+    it('returns an empty data array and total=0 when no users belong to the org', async () => {
       makeUorQb([]);
+      usersRepo.find.mockResolvedValue([]);
 
-      const result = await service.findByOrg('org-uuid-empty');
+      const { data, total } = await service.findByOrg('org-uuid-empty');
 
-      expect(result).toEqual([]);
-      expect(usersRepo.find).not.toHaveBeenCalled();
+      expect(data).toEqual([]);
+      expect(total).toBe(0);
+    });
+
+    it('slices the result to the requested page and limit', async () => {
+      const users = Array.from({ length: 10 }, (_, i) =>
+        makeUor({
+          id: `uor-${i}`,
+          userId: `user-${i}`,
+          user: makeUser({ id: `user-${i}`, email: `u${i}@example.com` }),
+          role: makeRole() as any,
+        }),
+      );
+
+      makeUorQb(users as any);
+      usersRepo.find.mockResolvedValue([]);
+
+      const { data, total } = await service.findByOrg('org-uuid-1', 2, 3);
+
+      expect(total).toBe(10);
+      expect(data).toHaveLength(3);
     });
   });
 

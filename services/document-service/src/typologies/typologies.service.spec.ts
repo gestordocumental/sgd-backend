@@ -260,6 +260,14 @@ describe('TypologiesService', () => {
       await expect(service.update('org-1', doc.id, { version: 'v2.1' })).rejects.toThrow(BadRequestException);
     });
 
+    it('rejects non-numeric version segment (e.g. v1.1beta)', async () => {
+      const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: 'v1.0', fuente: DataSource.MANUAL } });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(service.update('org-1', doc.id, { version: 'v1.1beta' })).rejects.toThrow(BadRequestException);
+    });
+
     it('allows version when no previous version is set', async () => {
       const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: null, fuente: DataSource.MANUAL } });
       const { Model } = makeModel(doc);
@@ -293,6 +301,36 @@ describe('TypologiesService', () => {
       expect(doc.deletedAt).toBeInstanceOf(Date);
       expect(doc.typologyStatus).toBe(TypologyStatus.DELETED);
       expect(doc.save).toHaveBeenCalled();
+    });
+  });
+
+  // ── findByIdPublic ────────────────────────────────────────────────────────
+
+  describe('findByIdPublic()', () => {
+    it('returns a typology by ID', async () => {
+      const doc = makeDoc();
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      const result = await service.findByIdPublic('org-1', doc.id);
+
+      expect(result).toBe(doc);
+    });
+
+    it('throws BadRequestException for invalid ObjectId', async () => {
+      const { Model } = makeModel();
+      const service = makeService(Model);
+
+      await expect(service.findByIdPublic('org-1', 'not-an-id')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when typology does not exist', async () => {
+      const { Model } = makeModel();
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+
+      const service = makeService(Model);
+      const validId = makeId();
+      await expect(service.findByIdPublic('org-1', validId)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -460,6 +498,79 @@ describe('TypologiesService', () => {
       await expect(
         service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ── getStats ──────────────────────────────────────────────────────────────
+
+  describe('getStats()', () => {
+    it('returns aggregated stats with uploaded documents', async () => {
+      const { Model } = makeModel();
+      Model.countDocuments = jest.fn()
+        .mockResolvedValueOnce(10)
+        .mockResolvedValueOnce(7);
+      Model.aggregate = jest.fn()
+        .mockResolvedValueOnce([{ uploadedDocuments: 5, storageTotalBytes: 2048 }])
+        .mockResolvedValueOnce([
+          { _id: 'COMPLETED', count: 3 },
+          { _id: 'FAILED',    count: 2 },
+        ]);
+
+      const service = makeService(Model);
+      const result  = await service.getStats('org-1');
+
+      expect(result.totalTypologies).toBe(10);
+      expect(result.activeTypologies).toBe(7);
+      expect(result.uploadedDocuments).toBe(5);
+      expect(result.storageTotalBytes).toBe(2048);
+      expect(result.extractionStatusCounts).toEqual({ COMPLETED: 3, FAILED: 2 });
+    });
+
+    it('returns zeros when no documents have been uploaded', async () => {
+      const { Model } = makeModel();
+      Model.countDocuments = jest.fn()
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(2);
+      Model.aggregate = jest.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const service = makeService(Model);
+      const result  = await service.getStats('org-1');
+
+      expect(result.uploadedDocuments).toBe(0);
+      expect(result.storageTotalBytes).toBe(0);
+      expect(result.extractionStatusCounts).toEqual({});
+    });
+  });
+
+  // ── getStoragePerOrg ──────────────────────────────────────────────────────
+
+  describe('getStoragePerOrg()', () => {
+    it('returns mapped rows from aggregate pipeline', async () => {
+      const { Model } = makeModel();
+      Model.aggregate = jest.fn().mockResolvedValue([
+        { _id: 'org-1', storageTotalBytes: 4096, uploadedDocuments: 3 },
+        { _id: 'org-2', storageTotalBytes: 1024, uploadedDocuments: 1 },
+      ]);
+
+      const service = makeService(Model);
+      const result  = await service.getStoragePerOrg();
+
+      expect(result).toEqual([
+        { orgId: 'org-1', storageTotalBytes: 4096, uploadedDocuments: 3 },
+        { orgId: 'org-2', storageTotalBytes: 1024, uploadedDocuments: 1 },
+      ]);
+    });
+
+    it('returns empty array when no orgs have documents', async () => {
+      const { Model } = makeModel();
+      Model.aggregate = jest.fn().mockResolvedValue([]);
+
+      const service = makeService(Model);
+      const result  = await service.getStoragePerOrg();
+
+      expect(result).toEqual([]);
     });
   });
 });

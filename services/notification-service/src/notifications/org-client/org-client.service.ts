@@ -2,8 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
-import { AppLogger } from '../../common/logger/app-logger.service';
-import { getCorrelationId } from '../../common/correlation/correlation.context';
+import { AppLogger, getCorrelationId } from '@sgd/common';
 
 interface OrgInfo {
   id: string;
@@ -21,7 +20,7 @@ export class OrgClientService {
     private readonly logger: AppLogger,
   ) {
     this.baseUrl       = config.getOrThrow<string>('ORG_SERVICE_URL');
-    this.internalToken = config.getOrThrow<string>('INTERNAL_TOKEN');
+    this.internalToken = config.getOrThrow<string>('INTERNAL_TOKEN_NOTIF_ORG');
   }
 
   async getOrgName(orgId: string): Promise<string | null> {

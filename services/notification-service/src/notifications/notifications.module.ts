@@ -7,11 +7,12 @@ import { Notification } from './entities/notification.entity';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { NotificationsConsumer } from './notifications.consumer';
+import { SseService } from './sse.service';
+import { SseTicketService } from './sse-ticket.service';
 import { EmailService } from './email/email.service';
 import { UserClientService } from './user-client/user-client.service';
 import { OrgClientService } from './org-client/org-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { KAFKA_CLIENT } from '../common/kafka/kafka.constants';
+import { AppLogger, KAFKA_CLIENT, KafkaProducerService } from '@sgd/common';
 
 @Module({
   imports: [
@@ -23,6 +24,9 @@ import { KAFKA_CLIENT } from '../common/kafka/kafka.constants';
     AppLogger,
     NotificationsService,
     NotificationsConsumer,
+    KafkaProducerService,
+    SseService,
+    SseTicketService,
     EmailService,
     UserClientService,
     OrgClientService,

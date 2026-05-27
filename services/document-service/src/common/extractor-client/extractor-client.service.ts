@@ -9,9 +9,8 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import * as FormData from 'form-data';
-import { AppLogger } from '../logger/app-logger.service';
-import { getCorrelationId } from '../correlation/correlation.context';
-import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
+import { AppLogger, CORRELATION_ID_HEADER } from '@sgd/common';
+import { getCorrelationId } from '@sgd/common';
 
 export interface PreviewExtractResult {
   nombre: string | null;

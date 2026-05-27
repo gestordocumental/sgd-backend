@@ -45,8 +45,11 @@ describe('PermissionsGuard', () => {
   let reflector: jest.Mocked<Reflector>;
   let configService: jest.Mocked<ConfigService>;
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
+  let redisClient: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
 
   beforeEach(async () => {
+    redisClient = { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue('OK'), del: jest.fn().mockResolvedValue(1) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PermissionsGuard,
@@ -56,11 +59,15 @@ describe('PermissionsGuard', () => {
         },
         {
           provide: ConfigService,
-          useValue: { getOrThrow: jest.fn() },
+          useValue: { getOrThrow: jest.fn(), get: jest.fn() },
         },
         {
           provide: getRepositoryToken(UserOrgRole),
           useValue: { find: jest.fn() },
+        },
+        {
+          provide: 'REDIS_CLIENT',
+          useValue: redisClient,
         },
       ],
     }).compile();
@@ -74,11 +81,26 @@ describe('PermissionsGuard', () => {
   // ─── No permission required ───────────────────────────────────────────────
 
   describe('when no @RequirePermission is set', () => {
-    it('returns true without checking the token', async () => {
+    it('returns true without a token (public endpoint)', async () => {
       reflector.get.mockReturnValue(undefined);
       const ctx = makeCtx({});
 
       await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    });
+
+    it('decodes JWT and populates request.user even without @RequirePermission', async () => {
+      reflector.get.mockReturnValue(undefined);
+      configService.getOrThrow.mockReturnValue(JWT_SECRET);
+
+      const token = buildJwt({ sub: 'user-1', companyId: 'org-1' });
+      const request: Record<string, unknown> = { headers: { authorization: `Bearer ${token}` } };
+      const ctx = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => ({}),
+      } as unknown as ExecutionContext;
+
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
+      expect(request['user']).toMatchObject({ sub: 'user-1', companyId: 'org-1' });
     });
   });
 
@@ -87,9 +109,10 @@ describe('PermissionsGuard', () => {
   describe('x-internal-token', () => {
     it('returns true when the internal token matches', async () => {
       reflector.get.mockReturnValue({ module: PermissionModule.USERS, action: PermissionAction.READ });
-      configService.getOrThrow.mockImplementation((key: string) => {
-        if (key === 'INTERNAL_TOKEN') return INTERNAL_TOKEN;
-        return JWT_SECRET;
+      configService.getOrThrow.mockReturnValue(JWT_SECRET);
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'INTERNAL_TOKEN_AUTH_USER') return INTERNAL_TOKEN;
+        return undefined;
       });
 
       const ctx = makeCtx({ 'x-internal-token': INTERNAL_TOKEN });
@@ -99,9 +122,10 @@ describe('PermissionsGuard', () => {
 
     it('does NOT short-circuit and falls through to JWT validation when internal token is wrong', async () => {
       reflector.get.mockReturnValue({ module: PermissionModule.USERS, action: PermissionAction.READ });
-      configService.getOrThrow.mockImplementation((key: string) => {
-        if (key === 'INTERNAL_TOKEN') return INTERNAL_TOKEN;
-        return JWT_SECRET;
+      configService.getOrThrow.mockReturnValue(JWT_SECRET);
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'INTERNAL_TOKEN_AUTH_USER') return INTERNAL_TOKEN;
+        return undefined;
       });
 
       // Wrong internal token — will try JWT next, which is missing → UnauthorizedException
@@ -271,6 +295,24 @@ describe('PermissionsGuard', () => {
       });
     });
 
+    it('populates request.user with the decoded JWT payload', async () => {
+      uorRepo.find.mockResolvedValue([
+        {
+          role: { permissions: [{ module: PermissionModule.USERS, action: PermissionAction.READ }] },
+        } as unknown as UserOrgRole,
+      ]);
+      const token = buildJwt({ sub: 'user-1', companyId: 'org-1' });
+      const request: Record<string, unknown> = { headers: { authorization: `Bearer ${token}` } };
+      const ctx = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => ({}),
+      } as unknown as ExecutionContext;
+
+      await guard.canActivate(ctx);
+
+      expect(request['user']).toMatchObject({ sub: 'user-1', companyId: 'org-1' });
+    });
+
     it('handles a role with null permissions gracefully', async () => {
       uorRepo.find.mockResolvedValue([
         { role: { permissions: null } } as unknown as UserOrgRole,
@@ -289,6 +331,98 @@ describe('PermissionsGuard', () => {
       const ctx = makeCtx({ authorization: `Bearer ${token}` });
 
       await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ─── JWT expiry and malformed payload ────────────────────────────────────
+
+  describe('JWT edge cases', () => {
+    beforeEach(() => {
+      reflector.get.mockReturnValue({ module: PermissionModule.USERS, action: PermissionAction.READ });
+      configService.getOrThrow.mockReturnValue(JWT_SECRET);
+    });
+
+    it('throws UnauthorizedException when JWT is expired', async () => {
+      const token = buildJwt({ sub: 'user-1', companyId: 'org-1', exp: Math.floor(Date.now() / 1000) - 60 });
+      const ctx = makeCtx({ authorization: `Bearer ${token}` });
+
+      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when JWT payload is not valid JSON', async () => {
+      const header  = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+      const payload = Buffer.from('not-valid-json{{{').toString('base64url');
+      const sig     = createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+      const token   = `${header}.${payload}.${sig}`;
+      const ctx     = makeCtx({ authorization: `Bearer ${token}` });
+
+      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  // ─── Cache behaviour ─────────────────────────────────────────────────────
+
+  describe('cache behaviour', () => {
+    const required = { module: PermissionModule.USERS, action: PermissionAction.READ };
+    const orgRoles = [
+      {
+        role: { permissions: [{ module: PermissionModule.USERS, action: PermissionAction.READ }] },
+      } as unknown as UserOrgRole,
+    ];
+
+    beforeEach(() => {
+      reflector.get.mockReturnValue(required);
+      configService.getOrThrow.mockReturnValue(JWT_SECRET);
+    });
+
+    it('returns cached permissions on second call without hitting the repo again', async () => {
+      uorRepo.find.mockResolvedValue(orgRoles);
+      const serialized = JSON.stringify([{ module: PermissionModule.USERS, action: PermissionAction.READ }]);
+      // First call: cache miss; second call: Redis cache hit
+      redisClient.get
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(serialized);
+
+      const token = buildJwt({ sub: 'user-1', companyId: 'org-1' });
+      const ctx   = makeCtx({ authorization: `Bearer ${token}` });
+
+      await guard.canActivate(ctx);
+      await guard.canActivate(ctx);
+
+      expect(uorRepo.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('invalidate() forces the next call to re-fetch from the repo', async () => {
+      uorRepo.find.mockResolvedValue(orgRoles);
+      // Both calls are cache misses (redis.del clears the key)
+      redisClient.get.mockResolvedValue(null);
+
+      const token = buildJwt({ sub: 'user-1', companyId: 'org-1' });
+      const ctx   = makeCtx({ authorization: `Bearer ${token}` });
+
+      await guard.canActivate(ctx);           // populates Redis cache
+      await guard.invalidate('user-1', 'org-1'); // evicts from Redis
+      await guard.canActivate(ctx);           // cache miss → hits repo again
+
+      expect(redisClient.del).toHaveBeenCalledWith('perms:user-1:org-1');
+      expect(uorRepo.find).toHaveBeenCalledTimes(2);
+    });
+
+    it('caches permissions in Redis with a 120-second TTL', async () => {
+      uorRepo.find.mockResolvedValue(orgRoles);
+      redisClient.get.mockResolvedValue(null);
+
+      const token = buildJwt({ sub: 'user-1', companyId: 'org-1' });
+      const ctx   = makeCtx({ authorization: `Bearer ${token}` });
+
+      await guard.canActivate(ctx);
+
+      expect(redisClient.set).toHaveBeenCalledWith(
+        'perms:user-1:org-1',
+        expect.any(String),
+        'EX',
+        120,
+      );
     });
   });
 });

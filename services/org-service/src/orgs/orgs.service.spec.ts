@@ -5,9 +5,20 @@ import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { OrgsService } from './orgs.service';
 import { Org, OrgStatus } from './entities/org.entity';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { KafkaProducerService } from '@sgd/common';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
+
+/** Returns a chainable QueryBuilder mock whose getManyAndCount resolves to [rows, total]. */
+function makeQbMock(rows: Org[], total: number) {
+  const qb: Record<string, jest.Mock> = {};
+  const chain = () => qb as unknown as ReturnType<Repository<Org>['createQueryBuilder']>;
+  ['withDeleted', 'orderBy', 'where', 'andWhere', 'skip', 'take'].forEach((m) => {
+    qb[m] = jest.fn().mockReturnValue(chain());
+  });
+  qb['getManyAndCount'] = jest.fn().mockResolvedValue([rows, total]);
+  return qb;
+}
 
 const makeOrg = (overrides: Partial<Org> = {}): Org => ({
   id: '8f9c1d7e-5f6e-4c52-ae54-8eb2be32a111',
@@ -44,6 +55,7 @@ describe('OrgsService', () => {
       find: jest.fn(),
       softRemove: jest.fn(),
       restore: jest.fn(),
+      createQueryBuilder: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -54,7 +66,7 @@ describe('OrgsService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn().mockImplementation((key: string) =>
-              ({ USER_SERVICE_URL: 'http://localhost:3001', INTERNAL_TOKEN: 'test-token' }[key] ??
+              ({ USER_SERVICE_URL: 'http://localhost:3001', INTERNAL_TOKEN_ORG_USER: 'test-token' }[key] ??
                 (() => { throw new Error(`Missing config key: ${key}`); })()),
             ),
           },
@@ -98,12 +110,39 @@ describe('OrgsService', () => {
     await expect(service.create({ name: 'Acme' }, 'user-1')).rejects.toThrow(ConflictException);
   });
 
-  it('returns all organizations ordered by createdAt asc', async () => {
+  it('returns paginated organizations with total count', async () => {
     const orgs = [makeOrg(), makeOrg({ id: 'a66cf75e-49d0-4c12-b3e3-af941da7f8f1', name: 'Beta' })];
-    repo.find!.mockResolvedValue(orgs);
+    const qb = makeQbMock(orgs, 2);
+    repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
-    await expect(service.findAll()).resolves.toEqual(orgs);
-    expect(repo.find).toHaveBeenCalledWith({ order: { createdAt: 'ASC' }, withDeleted: true });
+    const result = await service.findAll({ page: 1, limit: 20 });
+
+    expect(result).toEqual({ data: orgs, total: 2 });
+    expect(repo.createQueryBuilder).toHaveBeenCalledWith('o');
+    expect(qb['withDeleted']).toHaveBeenCalled();
+    expect(qb['getManyAndCount']).toHaveBeenCalled();
+  });
+
+  it('applies search filter via ILIKE when search param is provided', async () => {
+    const orgs = [makeOrg()];
+    const qb = makeQbMock(orgs, 1);
+    repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+    await service.findAll({ search: 'acme' });
+
+    expect(qb['where']).toHaveBeenCalledWith(
+      '(o.name ILIKE :q OR o.nit ILIKE :q)',
+      { q: '%acme%' },
+    );
+  });
+
+  it('filters deleted organizations when status is "deleted"', async () => {
+    const qb = makeQbMock([], 0);
+    repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+    await service.findAll({ status: 'deleted' });
+
+    expect(qb['andWhere']).toHaveBeenCalledWith('o.deletedAt IS NOT NULL');
   });
 
   it('returns one organization by id', async () => {

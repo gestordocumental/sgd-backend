@@ -26,6 +26,7 @@ const PERMISSIONS_CATALOG: {
   { module: PermissionModule.WORKFLOWS, action: PermissionAction.WRITE,   description: 'Create and edit workflows' },
   { module: PermissionModule.WORKFLOWS, action: PermissionAction.DELETE,  description: 'Delete workflows' },
   { module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE, description: 'Approve workflow steps' },
+  { module: PermissionModule.WORKFLOWS, action: PermissionAction.MANAGE,  description: 'View all organization workflows' },
 
   // USERS
   { module: PermissionModule.USERS, action: PermissionAction.READ,   description: 'View users' },

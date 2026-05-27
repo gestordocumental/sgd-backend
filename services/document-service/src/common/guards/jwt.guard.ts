@@ -5,7 +5,7 @@ import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import { verify, JsonWebTokenError } from 'jsonwebtoken';
-import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+import { AUTH_KEY, AuthMeta } from '@sgd/common';
 
 /**
  * Verify a JWT using HS256 and return its decoded payload.
@@ -65,7 +65,7 @@ export class JwtGuard implements CanActivate {
     if (meta.orgMember) {
       const companyId = payload.companyId as string | undefined;
       const orgId = request.params['orgId'];
-      if (!companyId) throw new ForbiddenException('Token has no companyId — call POST /api/auth/switch-company first');
+      if (!companyId) throw new ForbiddenException('Token has no companyId — call POST /api/v1/auth/switch-company first');
       if (orgId && companyId !== orgId) throw new ForbiddenException('Access denied to this organization');
     }
 

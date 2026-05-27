@@ -29,7 +29,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 @ApiTags('Org Structure — Bulk Import')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/org/:orgId/structure')
+@Controller('api/v1/org/:orgId/structure')
 @UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class BulkStructureController {

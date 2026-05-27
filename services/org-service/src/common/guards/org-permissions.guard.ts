@@ -59,7 +59,7 @@ export class OrgPermissionsGuard implements CanActivate {
     if (!userId) throw new UnauthorizedException('Token has no sub claim');
     if (!companyId) {
       throw new ForbiddenException(
-        'Token has no companyId — call POST /api/auth/switch-company first',
+        'Token has no companyId — call POST /api/v1/auth/switch-company first',
       );
     }
 
@@ -67,9 +67,9 @@ export class OrgPermissionsGuard implements CanActivate {
     // Pass userId and orgId as explicit params — no JWT forwarded — so
     // user-service never has to re-parse or re-trust JWT claims.
     const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
-    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
+    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER');
     const url =
-      `${userServiceUrl}/api/permissions/check` +
+      `${userServiceUrl}/api/v1/permissions/check` +
       `?userId=${encodeURIComponent(userId)}` +
       `&orgId=${encodeURIComponent(companyId)}` +
       `&module=${encodeURIComponent(required.module)}` +

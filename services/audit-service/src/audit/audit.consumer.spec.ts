@@ -1,12 +1,21 @@
 import { ConfigService } from '@nestjs/config';
 import { AuditConsumer } from './audit.consumer';
 import { AuditService } from './audit.service';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
+import { AppLogger, KafkaProducerService, TOPICS } from '@sgd/common';
 
-// Make runWithCorrelation a passthrough so handleMessage is exercised directly
-jest.mock('../common/kafka/kafka-consumer.util', () => ({
+// runWithCorrelation → passthrough so handleMessage is exercised directly.
+// withDlt → single-attempt passthrough that routes to DLT on error (mirrors
+//           real behavior without actual retry delays).
+jest.mock('@sgd/common', () => ({
+  ...jest.requireActual('@sgd/common'),
   runWithCorrelation: jest.fn((_msg: unknown, fn: () => Promise<void>) => fn()),
+  withDlt: jest.fn(async ({ producer, topic, message }: any, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch {
+      await producer.emitToDlt(topic, message).catch(() => {});
+    }
+  }),
 }));
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -45,6 +54,7 @@ describe('AuditConsumer', () => {
   let auditService: jest.Mocked<Pick<AuditService, 'index'>>;
   let logger: jest.Mocked<Pick<AppLogger, 'log' | 'warn' | 'error' | 'http'>>;
   let config: jest.Mocked<Pick<ConfigService, 'getOrThrow'>>;
+  let mockProducer: jest.Mocked<Pick<KafkaProducerService, 'emitToDlt'>>;
 
   beforeEach(async () => {
     mockKafkaConsumer = {
@@ -62,12 +72,14 @@ describe('AuditConsumer', () => {
     config       = { getOrThrow: jest.fn().mockReturnValue('audit-consumer-group') };
     auditService = { index: jest.fn().mockResolvedValue(undefined) };
     logger       = { log: jest.fn(), warn: jest.fn(), error: jest.fn(), http: jest.fn() };
+    mockProducer = { emitToDlt: jest.fn().mockResolvedValue(undefined) };
 
     consumer = new AuditConsumer(
       mockKafka as any,
       config as any,
       auditService as any,
       logger as any,
+      mockProducer as any,
     );
 
     await consumer.onApplicationBootstrap();
@@ -88,8 +100,19 @@ describe('AuditConsumer', () => {
     );
   });
 
+  it('creates consumer with connection-level retry config', async () => {
+    const mockKafka = { consumer: jest.fn().mockReturnValue(mockKafkaConsumer) };
+    const c = new AuditConsumer(mockKafka as any, config as any, auditService as any, logger as any, mockProducer as any);
+    await c.onApplicationBootstrap();
+    expect(mockKafka.consumer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupId: expect.any(String),
+        retry: expect.any(Object),
+      }),
+    );
+  });
+
   it('uses the configured consumer group id', () => {
-    expect(mockKafkaConsumer.connect).toHaveBeenCalled();
     expect(config.getOrThrow).toHaveBeenCalledWith('KAFKA_CONSUMER_GROUP');
   });
 
@@ -126,7 +149,7 @@ describe('AuditConsumer', () => {
   // ── handleMessage — invalid payload ───────────────────────────────────────
 
   it('warns and skips payload missing required fields', async () => {
-    const bad = { service: 'x', actorId: 'a' }; // missing orgId, action, resourceType, resourceId, timestamp
+    const bad = { service: 'x', actorId: 'a' };
 
     await capturedEachMessage(makeMsg(JSON.stringify(bad)));
 
@@ -186,31 +209,28 @@ describe('AuditConsumer', () => {
     );
   });
 
-  // ── error propagation ─────────────────────────────────────────────────────
+  // ── DLT routing on handler error ──────────────────────────────────────────
 
-  it('re-throws indexing errors so Kafka offset is not advanced', async () => {
+  it('routes message to DLT and does not re-throw on indexing error', async () => {
     auditService.index.mockRejectedValue(new Error('ES write failed'));
 
+    // Must resolve — offset is advanced; the message goes to DLT instead
     await expect(
       capturedEachMessage(makeMsg(JSON.stringify(validEvent))),
-    ).rejects.toThrow('ES write failed');
+    ).resolves.toBeUndefined();
 
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining('ES write failed'),
-      expect.anything(),
-      'AuditConsumer',
+    expect(mockProducer.emitToDlt).toHaveBeenCalledWith(
+      TOPICS.AUDIT_LOG,
+      expect.objectContaining({ value: expect.any(Buffer) }),
     );
   });
 
-  it('includes topic in error log', async () => {
+  it('routes message to DLT topic derived from the original topic', async () => {
     auditService.index.mockRejectedValue(new Error('down'));
 
-    await expect(capturedEachMessage(makeMsg(JSON.stringify(validEvent)))).rejects.toThrow();
+    await capturedEachMessage(makeMsg(JSON.stringify(validEvent)));
 
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining(TOPICS.AUDIT_LOG),
-      expect.anything(),
-      'AuditConsumer',
-    );
+    const [routedTopic] = mockProducer.emitToDlt.mock.calls[0];
+    expect(routedTopic).toBe(TOPICS.AUDIT_LOG);
   });
 });

@@ -2,7 +2,8 @@ import { WorkflowsController } from './workflows.controller';
 import { WorkflowsService } from './workflows.service';
 import { WorkflowApprovalService } from './workflow-approval.service';
 import { WorkflowAdminCycleService } from './workflow-admin-cycle.service';
-import { JwtPayload } from '../common/decorators/jwt-payload.decorator';
+import { IdempotencyService } from './idempotency.service';
+import { JwtPayload } from '@sgd/common';
 import { WorkflowStatus, AdminCycleStatus } from './entities/enums';
 import { WorkflowResponseDto, AdminCycleResponseDto } from './dto/workflow-response.dto';
 
@@ -68,7 +69,15 @@ function makeAdminCycleService(): jest.Mocked<WorkflowAdminCycleService> {
     finalizeCycle: jest.fn().mockResolvedValue({ id: 'cycle-1', steps: [] }),
     skipReviewCycle: jest.fn().mockResolvedValue(undefined),
     closeWorkflow: jest.fn().mockResolvedValue(undefined),
+    forwardStep: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<WorkflowAdminCycleService>;
+}
+
+function makeIdempotencyService(): jest.Mocked<IdempotencyService> {
+  return {
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<IdempotencyService>;
 }
 
 // ── Build controller ──────────────────────────────────────────────────────────
@@ -77,7 +86,10 @@ function buildController() {
   const workflowsService = makeWorkflowsService();
   const approvalService = makeApprovalService();
   const adminCycleService = makeAdminCycleService();
-  const controller = new WorkflowsController(workflowsService, approvalService, adminCycleService);
+  const idempotencyService = makeIdempotencyService();
+  const controller = new WorkflowsController(
+    workflowsService, approvalService, adminCycleService, idempotencyService,
+  );
   return { controller, workflowsService, approvalService, adminCycleService };
 }
 
@@ -184,7 +196,7 @@ describe('WorkflowsController', () => {
       const { controller, approvalService, workflowsService } = buildController();
       const user = makeUser();
 
-      await controller.startApproval('wf-1', user);
+      await controller.startApproval(undefined, 'wf-1', user);
 
       expect(approvalService.startApproval).toHaveBeenCalledWith('wf-1', user.sub);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
@@ -197,7 +209,7 @@ describe('WorkflowsController', () => {
       const user = makeUser();
       const dto = { observations: 'Looks good' };
 
-      await controller.approve('wf-1', dto, user);
+      await controller.approve(undefined, 'wf-1', dto, user);
 
       expect(approvalService.approve).toHaveBeenCalledWith('wf-1', user.sub, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
@@ -210,7 +222,7 @@ describe('WorkflowsController', () => {
       const user = makeUser();
       const dto = { observations: 'Needs revisions' };
 
-      await controller.reject('wf-1', dto, user);
+      await controller.reject(undefined, 'wf-1', dto, user);
 
       expect(approvalService.reject).toHaveBeenCalledWith('wf-1', user.sub, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
@@ -232,7 +244,7 @@ describe('WorkflowsController', () => {
         steps: [],
       } as never);
 
-      const result = await controller.createAdminCycle('wf-1', dto, user);
+      const result = await controller.createAdminCycle(undefined, 'wf-1', dto, user);
 
       expect(adminCycleService.createCycle).toHaveBeenCalledWith('wf-1', user.sub, dto);
       expect(result).toBeDefined();
@@ -245,7 +257,7 @@ describe('WorkflowsController', () => {
       const user = makeUser();
       const dto = { notes: 'Done' };
 
-      await controller.completeAdminStep('wf-1', 'cycle-1', 'step-1', dto, user);
+      await controller.completeAdminStep(undefined, 'wf-1', 'cycle-1', 'step-1', dto, user);
 
       expect(adminCycleService.completeStep).toHaveBeenCalledWith(
         'wf-1', 'cycle-1', 'step-1', user.sub, dto,
@@ -279,7 +291,7 @@ describe('WorkflowsController', () => {
       const { controller, adminCycleService, workflowsService } = buildController();
       const user = makeUser();
 
-      await controller.skipReviewCycle('wf-1', user);
+      await controller.skipReviewCycle(undefined, 'wf-1', user);
 
       expect(adminCycleService.skipReviewCycle).toHaveBeenCalledWith('wf-1', user.sub);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
@@ -292,7 +304,7 @@ describe('WorkflowsController', () => {
       const user = makeUser();
       const dto = { closingNotes: 'All done' };
 
-      await controller.close('wf-1', dto, user);
+      await controller.close(undefined, 'wf-1', dto, user);
 
       expect(adminCycleService.closeWorkflow).toHaveBeenCalledWith('wf-1', user.sub, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);

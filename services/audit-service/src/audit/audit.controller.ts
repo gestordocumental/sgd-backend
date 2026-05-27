@@ -13,21 +13,20 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth } from '../common/decorators/auth.decorator';
-import { JwtPayloadParam, JwtPayload } from '../common/decorators/jwt-payload.decorator';
+import { Auth, JwtPayloadParam, JwtPayload } from '@sgd/common';
 import { AuditService } from './audit.service';
 import { AuditQueryDto, AuditExportDto } from './dto/audit-query.dto';
 
 @ApiTags('Audit')
 @ApiBearerAuth('JWT')
-@Controller('api/audit')
+@Controller('api/v1/audit')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   /**
    * Consulta paginada del registro de auditoría.
    *
-   * - Super admin: puede filtrar por cualquier orgId (o ver todos si no filtra).
+   * - Super admin: ve eventos de plataforma (orgId = null) — gestión de empresas/usuarios a nivel global.
    * - Usuario normal: solo puede ver eventos de su propia organización (orgId = companyId del token).
    */
   @Auth()
@@ -39,8 +38,8 @@ export class AuditController {
     @JwtPayloadParam() me: JwtPayload,
   ) {
     if (me.isSuperAdmin) {
-      // Super admin: solo eventos sin orgId (acciones propias de super admin).
-      // Cualquier orgId que venga del cliente se ignora.
+      // Super admin: ve eventos de plataforma (orgId = null).
+      // Acciones sobre empresas/usuarios como plataforma, no eventos de negocio de cada empresa.
       dto.orgId = undefined;
       return this.auditService.query(dto, true);
     }
@@ -77,7 +76,7 @@ export class AuditController {
 
   /**
    * Obtiene un evento de auditoría por su ID de Elasticsearch.
-   * Super admin: solo eventos sin orgId. Org user: solo eventos de su org.
+   * Super admin: puede acceder a cualquier evento. Org user: solo eventos de su org.
    */
   @Auth()
   @Get('logs/:id')
@@ -92,7 +91,7 @@ export class AuditController {
     if (!doc) throw new NotFoundException('Audit log not found');
 
     if (me.isSuperAdmin) {
-      // Super admin solo puede acceder a eventos sin org (sus propias acciones)
+      // Super admin solo puede acceder a eventos de plataforma (sin orgId)
       if (doc.orgId) throw new ForbiddenException('Access to this event is not allowed');
     } else {
       if (!me.companyId) throw new ForbiddenException('No organization context found in token');

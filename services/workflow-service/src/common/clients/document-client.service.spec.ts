@@ -1,4 +1,4 @@
-import { BadRequestException, GatewayTimeoutException, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { of, throwError, TimeoutError } from 'rxjs';
@@ -8,29 +8,45 @@ import {
   TypologyPublicInfo,
   ValidateDocumentResult,
 } from './document-client.service';
-import { AppLogger } from '../logger/app-logger.service';
-import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
+import { AppLogger, CORRELATION_ID_HEADER } from '@sgd/common';
+
+// Circuit breaker is mocked as a transparent pass-through by default.
+// Individual tests can reconfigure mockCbInstance.fire to simulate circuit-open.
+jest.mock('opossum', () => jest.fn());
+import CircuitBreaker = require('opossum');
+
+const MockCircuitBreaker = CircuitBreaker as unknown as jest.Mock;
+let mockCbInstance: { fire: jest.Mock; on: jest.Mock; opened: boolean };
 
 describe('DocumentClientService', () => {
   const documentServiceUrl = 'http://document-service';
   const internalToken = 'internal-token';
   let httpService: jest.Mocked<Pick<HttpService, 'get' | 'post'>>;
-  let logger: jest.Mocked<Pick<AppLogger, 'http'>>;
+  let logger: jest.Mocked<Pick<AppLogger, 'http' | 'log' | 'warn'>>;
   let service: DocumentClientService;
 
   beforeEach(() => {
+    mockCbInstance = {
+      fire: jest.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),
+      on: jest.fn(),
+      opened: false,
+    };
+    MockCircuitBreaker.mockImplementation(() => mockCbInstance as any);
+
     httpService = {
       get: jest.fn(),
       post: jest.fn(),
     };
     logger = {
       http: jest.fn(),
+      log: jest.fn(),
+      warn: jest.fn(),
     };
 
     const config = {
       getOrThrow: jest.fn((key: string) => {
-        if (key === 'DOCUMENT_SERVICE_URL') return documentServiceUrl;
-        if (key === 'INTERNAL_TOKEN') return internalToken;
+        if (key === 'DOCUMENT_SERVICE_URL')      return documentServiceUrl;
+        if (key === 'INTERNAL_TOKEN_WORKFLOW_DOC') return internalToken;
         throw new Error(`Unknown key: ${key}`);
       }),
       get: jest.fn().mockReturnValue(1000),
@@ -132,5 +148,29 @@ describe('DocumentClientService', () => {
     await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
       InternalServerErrorException,
     );
+  });
+
+  // ── circuit breaker ──────────────────────────────────────────────────────
+
+  it('throws ServiceUnavailableException when document-service circuit is open', async () => {
+    mockCbInstance.fire.mockRejectedValueOnce(
+      Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+    );
+
+    await expect(service.getTypologyInfo('org-1', 'typology-1')).rejects.toThrow(ServiceUnavailableException);
+  });
+
+  it('throws ServiceUnavailableException on validateDocument when circuit is open', async () => {
+    mockCbInstance.fire.mockRejectedValueOnce(
+      Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+    );
+
+    await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(ServiceUnavailableException);
+  });
+
+  it('registers open/halfOpen/close handlers on the circuit breaker', () => {
+    expect(mockCbInstance.on).toHaveBeenCalledWith('open', expect.any(Function));
+    expect(mockCbInstance.on).toHaveBeenCalledWith('halfOpen', expect.any(Function));
+    expect(mockCbInstance.on).toHaveBeenCalledWith('close', expect.any(Function));
   });
 });

@@ -1,7 +1,6 @@
 import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { HttpExceptionFilter } from './http-exception.filter';
-import { AppLogger } from '../logger/app-logger.service';
+import { AppLogger, HttpExceptionFilter } from '@sgd/common';
 
 function makeRes() {
   const json = jest.fn();

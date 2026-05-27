@@ -11,9 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { Org, OrgStatus } from './entities/org.entity';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
 export class OrgsService {
@@ -30,6 +28,7 @@ export class OrgsService {
     action: string,
     org: Org,
     actorId: string,
+    metadata?: Record<string, unknown>,
   ): void {
     this.kafkaProducer.emitSafe(TOPICS.AUDIT_LOG, {
       service:      'org-service',
@@ -39,8 +38,9 @@ export class OrgsService {
       resourceType: 'company',
       resourceId:   org.id,
       resourceName: org.name,
-      ip:           getClientIp(),
+      ip:           correlationStorage.getStore()?.['clientIp'] as string | null,
       timestamp:    new Date().toISOString(),
+      metadata:     metadata ?? null,
     });
   }
 
@@ -64,8 +64,36 @@ export class OrgsService {
     return saved;
   }
 
-  async findAll(): Promise<Org[]> {
-    return this.orgRepo.find({ order: { createdAt: 'ASC' }, withDeleted: true });
+  async findAll(params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: 'active' | 'inactive' | 'deleted';
+  } = {}): Promise<{ data: Org[]; total: number }> {
+    const page  = Math.max(1, params.page ?? 1);
+    const limit = Math.min(Math.max(1, params.limit ?? 20), 500);
+    const skip  = (page - 1) * limit;
+
+    const qb = this.orgRepo
+      .createQueryBuilder('o')
+      .withDeleted()
+      .orderBy('o.createdAt', 'ASC');
+
+    if (params.search?.trim()) {
+      const q = `%${params.search.trim()}%`;
+      qb.where('(o.name ILIKE :q OR o.nit ILIKE :q)', { q });
+    }
+
+    if (params.status === 'deleted') {
+      qb.andWhere('o.deletedAt IS NOT NULL');
+    } else if (params.status === 'active') {
+      qb.andWhere('o.deletedAt IS NULL').andWhere('o.status = :s', { s: OrgStatus.ACTIVE });
+    } else if (params.status === 'inactive') {
+      qb.andWhere('o.deletedAt IS NULL').andWhere('o.status != :s', { s: OrgStatus.ACTIVE });
+    }
+
+    const [data, total] = await qb.skip(skip).take(limit).getManyAndCount();
+    return { data, total };
   }
 
   async findOne(id: string): Promise<Org> {
@@ -84,6 +112,9 @@ export class OrgsService {
       }
     }
 
+    const before: Record<string, unknown> = {};
+    for (const key of Object.keys(dto)) before[key] = (org as unknown as Record<string, unknown>)[key];
+
     Object.assign(org, {
       ...(dto.name    !== undefined && { name:    dto.name }),
       ...(dto.nit     !== undefined && { nit:     dto.nit }),
@@ -93,7 +124,15 @@ export class OrgsService {
     });
 
     const updated = await this.orgRepo.save(org);
-    if (actorId) this.emitAuditLog('COMPANY_UPDATED', updated, actorId);
+
+    if (actorId) {
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
+      for (const key of Object.keys(dto)) {
+        const to = (dto as Record<string, unknown>)[key];
+        if (before[key] !== to) changes[key] = { from: before[key], to };
+      }
+      this.emitAuditLog('COMPANY_UPDATED', updated, actorId, { changes });
+    }
     return updated;
   }
 
@@ -129,8 +168,8 @@ export class OrgsService {
 
   private async revokeOrgAccess(orgId: string): Promise<void> {
     const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
-    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
-    const url = `${userServiceUrl}/api/users/internal/orgs/${orgId}/users`;
+    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER');
+    const url = `${userServiceUrl}/api/v1/users/internal/orgs/${orgId}/users`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5_000);
     try {

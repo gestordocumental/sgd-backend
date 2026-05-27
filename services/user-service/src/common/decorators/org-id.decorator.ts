@@ -53,7 +53,7 @@ export const OrgId = createParamDecorator(
     if (isSuperAdmin && isUuid) return queryOrgId;
 
     throw new ForbiddenException(
-      'Token has no companyId — call POST /api/auth/switch-company first',
+      'Token has no companyId — call POST /api/v1/auth/switch-company first',
     );
   },
 );

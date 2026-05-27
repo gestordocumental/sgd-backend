@@ -29,6 +29,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   registrationStatus: overrides.registrationStatus ?? RegistrationStatus.ACTIVE,
   avatarUrl: null,
   isSuperAdmin: false,
+  isOptionalReviewer: false,
   twoFactorEnabled: false,
   orgRoles: [],
   createdAt: new Date('2024-01-01'),
@@ -89,11 +90,20 @@ describe('UsersController', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn().mockReturnValue(INTERNAL_TOKEN),
+            get: jest.fn().mockReturnValue(INTERNAL_TOKEN),
           },
         },
         {
           provide: getRepositoryToken(UserOrgRole),
           useValue: { find: jest.fn() },
+        },
+        {
+          provide: 'REDIS_CLIENT',
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
         },
         {
           provide: StorageService,
@@ -209,27 +219,28 @@ describe('UsersController', () => {
   // ─── GET /by-org/:orgId ───────────────────────────────────────────────────
 
   describe('findByOrg', () => {
-    it('returns an array of UserWithOrgRolesDto for the given orgId', async () => {
+    it('returns paginated { data, total } of UserWithOrgRolesDto for the given orgId', async () => {
       const user = makeUser();
       const roles = [{ roleId: 'role-uuid-1', roleName: 'ADMIN' }];
 
-      usersService.findByOrg.mockResolvedValue([{ user, roles, orgRemovedAt: null }]);
+      usersService.findByOrg.mockResolvedValue({ data: [{ user, roles, orgRemovedAt: null }], total: 1 });
 
-      const result = await controller.findByOrg('org-uuid-1');
+      const result = await controller.findByOrg('org-uuid-1', 1, 500);
 
-      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-1');
-      expect(result).toHaveLength(1);
-      result.forEach((r) => expect(r).toBeInstanceOf(UserWithOrgRolesDto));
-      expect(result[0].roles).toEqual(roles);
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-1', 1, 500);
+      expect(result.total).toBe(1);
+      expect(result.data).toHaveLength(1);
+      result.data.forEach((r) => expect(r).toBeInstanceOf(UserWithOrgRolesDto));
+      expect(result.data[0].roles).toEqual(roles);
     });
 
-    it('returns an empty array when no users belong to the org', async () => {
-      usersService.findByOrg.mockResolvedValue([]);
+    it('returns empty data array and total=0 when no users belong to the org', async () => {
+      usersService.findByOrg.mockResolvedValue({ data: [], total: 0 });
 
-      const result = await controller.findByOrg('org-uuid-empty');
+      const result = await controller.findByOrg('org-uuid-empty', 1, 500);
 
-      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-empty');
-      expect(result).toEqual([]);
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-empty', 1, 500);
+      expect(result).toEqual({ data: [], total: 0 });
     });
   });
 

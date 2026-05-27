@@ -2,8 +2,7 @@ import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@ne
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
-import { JwtGuard } from './jwt.guard';
-import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+import { JwtGuard, AUTH_KEY, AuthMeta } from '@sgd/common';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -59,8 +58,11 @@ function buildGuard(meta?: AuthMeta, internalToken = INTERNAL) {
   const config = {
     getOrThrow: jest.fn((key: string) => {
       if (key === 'JWT_SECRET') return SECRET;
-      if (key === 'INTERNAL_TOKEN') return internalToken;
       throw new Error(`Unknown key: ${key}`);
+    }),
+    get: jest.fn((key: string) => {
+      if (key === 'INTERNAL_TOKEN_WORKFLOW_USER') return internalToken;
+      return undefined;
     }),
   } as unknown as ConfigService;
 
@@ -92,7 +94,7 @@ function guardWithMeta(meta?: AuthMeta) {
 }
 
 // Simulate canActivate using the shared reflector mock
-function activate(guard: JwtGuard, request: ReturnType<typeof makeRequest>, meta?: AuthMeta): boolean {
+function activate(guard: JwtGuard, request: ReturnType<typeof makeRequest>, meta?: AuthMeta): Promise<boolean> {
   const reflector = { getAllAndOverride: jest.fn().mockReturnValue(meta) } as unknown as Reflector;
   // Replace the guard's reflector at runtime via casting
   (guard as unknown as { reflector: Reflector }).reflector = reflector;
@@ -108,148 +110,147 @@ function activate(guard: JwtGuard, request: ReturnType<typeof makeRequest>, meta
 
 describe('JwtGuard', () => {
   describe('no auth metadata (public route)', () => {
-    it('returns true without inspecting the request', () => {
+    it('returns true without inspecting the request', async () => {
       const { guard, reflector } = buildGuard(undefined);
       const request = makeRequest();
-      const result = activate(guard, request, undefined);
-      expect(result).toBe(true);
+      await expect(activate(guard, request, undefined)).resolves.toBe(true);
     });
   });
 
   describe('internal token bypass', () => {
     const orgMemberMeta: AuthMeta = { orgMember: true, superAdminOnly: false };
 
-    it('returns true when x-internal-token matches', () => {
+    it('returns true when x-internal-token matches', async () => {
       const { guard } = buildGuard(orgMemberMeta);
       const request = makeRequest({ 'x-internal-token': INTERNAL });
-      expect(activate(guard, request, orgMemberMeta)).toBe(true);
+      await expect(activate(guard, request, orgMemberMeta)).resolves.toBe(true);
     });
 
-    it('falls through to JWT check when internal token does not match', () => {
+    it('falls through to JWT check when internal token does not match', async () => {
       const { guard } = buildGuard(orgMemberMeta);
       const request = makeRequest({ 'x-internal-token': 'wrong-token' });
-      expect(() => activate(guard, request, orgMemberMeta)).toThrow(UnauthorizedException);
+      await expect(activate(guard, request, orgMemberMeta)).rejects.toThrow(UnauthorizedException);
     });
   });
 
   describe('missing / malformed authorization header', () => {
     const meta: AuthMeta = { orgMember: true, superAdminOnly: false };
 
-    it('throws when Authorization header is absent', () => {
+    it('throws when Authorization header is absent', async () => {
       const { guard } = buildGuard(meta);
-      expect(() => activate(guard, makeRequest(), meta)).toThrow(UnauthorizedException);
+      await expect(activate(guard, makeRequest(), meta)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws when Authorization header does not start with Bearer', () => {
+    it('throws when Authorization header does not start with Bearer', async () => {
       const { guard } = buildGuard(meta);
       const request = makeRequest({ authorization: 'Basic abc' });
-      expect(() => activate(guard, request, meta)).toThrow(UnauthorizedException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(UnauthorizedException);
     });
   });
 
   describe('JWT verification', () => {
     const meta: AuthMeta = { orgMember: false, superAdminOnly: false };
 
-    it('returns true for a valid token with correct secret', () => {
+    it('returns true for a valid token with correct secret', async () => {
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1', companyId: 'org-1' }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(activate(guard, request, meta)).toBe(true);
+      await expect(activate(guard, request, meta)).resolves.toBe(true);
     });
 
-    it('sets request.user to the decoded payload', () => {
+    it('sets request.user to the decoded payload', async () => {
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1', companyId: 'org-1' }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      activate(guard, request, meta);
+      await activate(guard, request, meta);
       expect((request as { user: unknown }).user).toMatchObject({ sub: 'user-1' });
     });
 
-    it('throws for wrong secret', () => {
+    it('throws for wrong secret', async () => {
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1' }, 'wrong-secret');
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(() => activate(guard, request, meta)).toThrow(UnauthorizedException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws for malformed token (only 2 parts)', () => {
+    it('throws for malformed token (only 2 parts)', async () => {
       const { guard } = buildGuard(meta);
       const request = makeRequest({ authorization: 'Bearer abc.def' });
-      expect(() => activate(guard, request, meta)).toThrow(UnauthorizedException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws for expired token', () => {
+    it('throws for expired token', async () => {
       const { guard } = buildGuard(meta);
       const exp = Math.floor(Date.now() / 1000) - 10; // 10 seconds ago
       const token = buildToken({ sub: 'user-1', exp }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(() => activate(guard, request, meta)).toThrow(UnauthorizedException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws for not-yet-valid token (nbf in the future)', () => {
+    it('throws for not-yet-valid token (nbf in the future)', async () => {
       const { guard } = buildGuard(meta);
       const nbf = Math.floor(Date.now() / 1000) + 3600;
       const token = buildToken({ sub: 'user-1', nbf }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(() => activate(guard, request, meta)).toThrow(UnauthorizedException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('accepts a token that has not expired', () => {
+    it('accepts a token that has not expired', async () => {
       const { guard } = buildGuard(meta);
       const exp = Math.floor(Date.now() / 1000) + 3600;
       const token = buildToken({ sub: 'user-1', exp, companyId: 'org-1' }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(activate(guard, request, meta)).toBe(true);
+      await expect(activate(guard, request, meta)).resolves.toBe(true);
     });
   });
 
   describe('superAdmin access', () => {
-    it('isSuperAdmin bypasses all checks', () => {
+    it('isSuperAdmin bypasses all checks', async () => {
       const meta: AuthMeta = { orgMember: true, superAdminOnly: true };
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'admin-1', isSuperAdmin: true }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(activate(guard, request, meta)).toBe(true);
+      await expect(activate(guard, request, meta)).resolves.toBe(true);
     });
 
-    it('throws ForbiddenException when superAdminOnly and user is not superAdmin', () => {
+    it('throws ForbiddenException when superAdminOnly and user is not superAdmin', async () => {
       const meta: AuthMeta = { orgMember: false, superAdminOnly: true };
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1', companyId: 'org-1' }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(() => activate(guard, request, meta)).toThrow(ForbiddenException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(ForbiddenException);
     });
   });
 
   describe('orgMember check', () => {
     const meta: AuthMeta = { orgMember: true, superAdminOnly: false };
 
-    it('throws when token has no companyId', () => {
+    it('throws when token has no companyId', async () => {
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1' }, SECRET); // no companyId
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(() => activate(guard, request, meta)).toThrow(ForbiddenException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(ForbiddenException);
     });
 
-    it('returns true when companyId present and no orgId in params', () => {
+    it('returns true when companyId present and no orgId in params', async () => {
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1', companyId: 'org-1' }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` });
-      expect(activate(guard, request, meta)).toBe(true);
+      await expect(activate(guard, request, meta)).resolves.toBe(true);
     });
 
-    it('returns true when companyId matches orgId param', () => {
+    it('returns true when companyId matches orgId param', async () => {
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1', companyId: 'org-1' }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` }, { orgId: 'org-1' });
-      expect(activate(guard, request, meta)).toBe(true);
+      await expect(activate(guard, request, meta)).resolves.toBe(true);
     });
 
-    it('throws ForbiddenException when companyId does not match orgId param', () => {
+    it('throws ForbiddenException when companyId does not match orgId param', async () => {
       const { guard } = buildGuard(meta);
       const token = buildToken({ sub: 'user-1', companyId: 'org-1' }, SECRET);
       const request = makeRequest({ authorization: `Bearer ${token}` }, { orgId: 'org-2' });
-      expect(() => activate(guard, request, meta)).toThrow(ForbiddenException);
+      await expect(activate(guard, request, meta)).rejects.toThrow(ForbiddenException);
     });
   });
 });

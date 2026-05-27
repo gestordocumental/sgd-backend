@@ -1,7 +1,6 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { createHmac } from 'crypto';
-import { JwtGuard } from './jwt.guard';
-import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+import { JwtGuard, AUTH_KEY, AuthMeta } from '@sgd/common';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -21,11 +20,14 @@ function makeReflector(meta: AuthMeta | undefined) {
 
 function makeConfig(overrides: Record<string, string> = {}) {
   const cfg: Record<string, string> = {
-    JWT_SECRET:     JWT_SECRET,
-    INTERNAL_TOKEN: INTERNAL_TOKEN,
+    JWT_SECRET:                  JWT_SECRET,
+    INTERNAL_TOKEN_WORKFLOW_DOC: INTERNAL_TOKEN,
     ...overrides,
   };
-  return { getOrThrow: jest.fn((key: string) => cfg[key]) } as any;
+  return {
+    getOrThrow: jest.fn((key: string) => cfg[key]),
+    get:        jest.fn((key: string) => cfg[key]),
+  } as any;
 }
 
 function makeContext(headers: Record<string, string> = {}, params: Record<string, string> = {}) {
@@ -44,10 +46,10 @@ describe('JwtGuard', () => {
   // ── No auth meta (public route) ──────────────────────────────────────────
 
   describe('when route has no @Auth decorator (meta is undefined)', () => {
-    it('returns true without checking headers', () => {
+    it('returns true without checking headers', async () => {
       const guard = new JwtGuard(makeReflector(undefined), makeConfig());
       const ctx   = makeContext({});
-      expect(guard.canActivate(ctx)).toBe(true);
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
     });
   });
 
@@ -56,17 +58,17 @@ describe('JwtGuard', () => {
   describe('x-internal-token', () => {
     const meta: AuthMeta = { orgMember: true, superAdminOnly: false };
 
-    it('returns true when internal token matches', () => {
+    it('returns true when internal token matches', async () => {
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ 'x-internal-token': INTERNAL_TOKEN });
-      expect(guard.canActivate(ctx)).toBe(true);
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
     });
 
-    it('falls through to JWT check when internal token does NOT match', () => {
+    it('falls through to JWT check when internal token does NOT match', async () => {
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ 'x-internal-token': 'wrong-token' });
       // No bearer token either → should throw
-      expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
     });
   });
 
@@ -75,36 +77,36 @@ describe('JwtGuard', () => {
   describe('JWT Bearer token', () => {
     const meta: AuthMeta = { orgMember: false, superAdminOnly: false };
 
-    it('returns true for a valid JWT with no special claims needed', () => {
+    it('returns true for a valid JWT with no special claims needed', async () => {
       const token = signJwt({ sub: 'user-1' });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` });
-      expect(guard.canActivate(ctx)).toBe(true);
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
     });
 
-    it('throws UnauthorizedException when Authorization header is missing', () => {
+    it('throws UnauthorizedException when Authorization header is missing', async () => {
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({});
-      expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws UnauthorizedException when Authorization does not start with Bearer', () => {
+    it('throws UnauthorizedException when Authorization does not start with Bearer', async () => {
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: 'Basic abc' });
-      expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws UnauthorizedException for a malformed JWT (wrong number of parts)', () => {
+    it('throws UnauthorizedException for a malformed JWT (wrong number of parts)', async () => {
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: 'Bearer only.two' });
-      expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws UnauthorizedException when signature is invalid', () => {
+    it('throws UnauthorizedException when signature is invalid', async () => {
       const token = signJwt({ sub: 'user-1' }, 'wrong-secret');
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` });
-      expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
     });
 
   });
@@ -114,18 +116,18 @@ describe('JwtGuard', () => {
   describe('superAdminOnly routes', () => {
     const meta: AuthMeta = { orgMember: false, superAdminOnly: true };
 
-    it('allows isSuperAdmin payload', () => {
+    it('allows isSuperAdmin payload', async () => {
       const token = signJwt({ sub: 'admin', isSuperAdmin: true });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` });
-      expect(guard.canActivate(ctx)).toBe(true);
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
     });
 
-    it('throws ForbiddenException when user is not superAdmin on superAdminOnly route', () => {
+    it('throws ForbiddenException when user is not superAdmin on superAdminOnly route', async () => {
       const token = signJwt({ sub: 'user', companyId: 'org-1' });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` });
-      expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -134,39 +136,39 @@ describe('JwtGuard', () => {
   describe('orgMember routes', () => {
     const meta: AuthMeta = { orgMember: true, superAdminOnly: false };
 
-    it('returns true when companyId matches orgId param', () => {
+    it('returns true when companyId matches orgId param', async () => {
       const token = signJwt({ sub: 'user', companyId: 'org-abc' });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` }, { orgId: 'org-abc' });
-      expect(guard.canActivate(ctx)).toBe(true);
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
     });
 
-    it('throws ForbiddenException when companyId does NOT match orgId param', () => {
+    it('throws ForbiddenException when companyId does NOT match orgId param', async () => {
       const token = signJwt({ sub: 'user', companyId: 'org-abc' });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` }, { orgId: 'org-xyz' });
-      expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws ForbiddenException when token has no companyId', () => {
+    it('throws ForbiddenException when token has no companyId', async () => {
       const token = signJwt({ sub: 'user' });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` }, { orgId: 'org-abc' });
-      expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
     });
 
-    it('returns true when isSuperAdmin regardless of orgId', () => {
+    it('returns true when isSuperAdmin regardless of orgId', async () => {
       const token = signJwt({ sub: 'admin', isSuperAdmin: true });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` }, { orgId: 'any-org' });
-      expect(guard.canActivate(ctx)).toBe(true);
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
     });
 
-    it('returns true when no orgId param is present (route without :orgId)', () => {
+    it('returns true when no orgId param is present (route without :orgId)', async () => {
       const token = signJwt({ sub: 'user', companyId: 'org-abc' });
       const guard = new JwtGuard(makeReflector(meta), makeConfig());
       const ctx   = makeContext({ authorization: `Bearer ${token}` }, {});
-      expect(guard.canActivate(ctx)).toBe(true);
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
     });
   });
 });

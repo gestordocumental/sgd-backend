@@ -1,0 +1,23 @@
+# Dependencies — never needed inside the Docker build; each Dockerfile runs npm ci
+**/node_modules
+
+# Compiled output — Dockerfiles build from source inside the container
+**/dist
+**/*.tsbuildinfo
+
+# Test artifacts
+**/coverage
+
+# Git history
+.git
+.gitignore
+
+# CI / editor metadata
+.github
+.vscode
+.idea
+
+# Local env files
+**/.env
+**/.env.*
+!**/.env.example

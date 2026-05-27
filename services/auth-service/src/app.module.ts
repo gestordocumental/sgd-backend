@@ -6,9 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { Credential } from './auth/entities/credential.entity';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
+import { AppLogger, CorrelationMiddleware, MetricsModule } from '@sgd/common';
 
 
 @Module({
@@ -36,6 +34,10 @@ import { MetricsModule } from './common/metrics/metrics.module';
         synchronize: config.get('NODE_ENV') === 'development',
         retryAttempts: 5,
         retryDelay: 3000,
+        extra: {
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 10000,
+        },
       }),
     }),
 

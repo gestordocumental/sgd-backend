@@ -6,9 +6,7 @@ import {
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
 import { firstValueFrom } from "rxjs";
-import { AppLogger } from "../common/logger/app-logger.service";
-import { getCorrelationId } from "../common/correlation/correlation.context";
-import { CORRELATION_ID_HEADER } from "../common/middleware/correlation.middleware";
+import { AppLogger, getCorrelationId, CORRELATION_ID_HEADER } from '@sgd/common';
 
 @Injectable()
 export class UserClientService {
@@ -23,12 +21,12 @@ export class UserClientService {
     this.userServiceUrl =
       this.configService.getOrThrow<string>("USER_SERVICE_URL");
     this.internalToken =
-      this.configService.getOrThrow<string>("INTERNAL_TOKEN");
+      this.configService.getOrThrow<string>("INTERNAL_TOKEN_AUTH_USER");
   }
 
   async getUserCompanies(userId: string): Promise<string[]> {
     const correlationId = getCorrelationId();
-    const url = `${this.userServiceUrl}/api/users/${userId}/companies`;
+    const url = `${this.userServiceUrl}/api/v1/users/${userId}/companies`;
 
     this.logger.http({
       type: "internal-request",
@@ -71,9 +69,58 @@ export class UserClientService {
     }
   }
 
+  async getUserEffectivePermissions(
+    userId: string,
+    companyId: string,
+  ): Promise<{ module: string; action: string }[]> {
+    const correlationId = getCorrelationId();
+    const url = `${this.userServiceUrl}/api/v1/users/${userId}/effective-permissions?companyId=${companyId}`;
+
+    this.logger.http({
+      type: 'internal-request',
+      target: 'user-service',
+      url,
+      correlationId,
+      message: `→ [user-service] GET /api/users/${userId}/effective-permissions`,
+    });
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get<{ module: string; action: string }[]>(url, {
+          headers: {
+            'x-internal-token': this.internalToken,
+            [CORRELATION_ID_HEADER]: correlationId,
+          },
+        }),
+      );
+
+      this.logger.http({
+        type: 'internal-response',
+        target: 'user-service',
+        statusCode: 200,
+        correlationId,
+        message: `← [user-service] GET /api/users/${userId}/effective-permissions 200`,
+      });
+
+      return response.data;
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
+      this.logger.http({
+        type: 'internal-response',
+        target: 'user-service',
+        statusCode: status ?? 500,
+        correlationId,
+        message: `← [user-service] GET /api/users/${userId}/effective-permissions ${status ?? 500}: ${message}`,
+      });
+      // Non-fatal: return empty list so the token is still issued without permissions
+      return [];
+    }
+  }
+
   async getUserInfo(userId: string): Promise<{ isSuperAdmin: boolean }> {
     const correlationId = getCorrelationId();
-    const url = `${this.userServiceUrl}/api/users/${userId}`;
+    const url = `${this.userServiceUrl}/api/v1/users/${userId}`;
 
     this.logger.http({
       type: "internal-request",

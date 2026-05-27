@@ -5,6 +5,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { assertValidTransition } from './workflow-state-machine';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Workflow } from './entities/workflow.entity';
@@ -20,10 +21,10 @@ import {
 } from './entities/enums';
 import { CreateAdminCycleDto } from './dto/create-admin-cycle.dto';
 import { CompleteAdminStepDto } from './dto/complete-admin-step.dto';
+import { ForwardAdminStepDto } from './dto/forward-admin-step.dto';
 import { CloseWorkflowDto } from './dto/close-workflow.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
+import { KafkaProducerService, TOPICS, AppLogger } from '@sgd/common';
 
 @Injectable()
 export class WorkflowAdminCycleService {
@@ -41,6 +42,7 @@ export class WorkflowAdminCycleService {
     private readonly dataSource: DataSource,
     private readonly timelineService: WorkflowTimelineService,
     private readonly kafkaProducer: KafkaProducerService,
+    private readonly logger: AppLogger,
   ) {}
 
   // ── Crear ciclo administrativo ────────────────────────────────────────────────
@@ -53,12 +55,7 @@ export class WorkflowAdminCycleService {
     const workflow = await this.workflowRepo.findOneOrFail({ where: { id: workflowId } });
 
     // [RN-11] Solo si el workflow está en PENDING_REVIEW_CYCLE o AVAILABLE_FOR_FINAL_USERS
-    if (workflow.status !== WorkflowStatus.PENDING_REVIEW_CYCLE &&
-        workflow.status !== WorkflowStatus.AVAILABLE_FOR_FINAL_USERS) {
-      throw new ConflictException(
-        `Cannot create admin cycle: workflow status is ${workflow.status}`,
-      );
-    }
+    assertValidTransition(workflow.status, WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS);
 
     // [RN-12] No puede haber un ciclo activo
     if (workflow.activeAdminCycleId) {
@@ -92,14 +89,20 @@ export class WorkflowAdminCycleService {
 
     let savedCycle!: WorkflowAdminCycle;
 
+    this.logger.log(
+      `createCycle workflowId=${workflowId} steps=${dto.steps.length} ` +
+      `allowedOptionalReviewerIds=${JSON.stringify(dto.allowedOptionalReviewerIds ?? [])}`,
+    );
+
     await this.dataSource.transaction(async (manager) => {
       // Crear ciclo
       const cycle = manager.create(WorkflowAdminCycle, {
         workflowId,
         cycleNumber,
-        initiatedBy:      userId,
-        status:           AdminCycleStatus.IN_PROGRESS,
-        currentStepOrder: 1,
+        initiatedBy:                userId,
+        status:                     AdminCycleStatus.IN_PROGRESS,
+        currentStepOrder:           1,
+        allowedOptionalReviewerIds: dto.allowedOptionalReviewerIds ?? [],
       });
       savedCycle = await manager.save(WorkflowAdminCycle, cycle);
 
@@ -171,9 +174,7 @@ export class WorkflowAdminCycleService {
   ): Promise<WorkflowAdminStep> {
     const workflow = await this.workflowRepo.findOneOrFail({ where: { id: workflowId } });
 
-    if (workflow.status !== WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS) {
-      throw new ConflictException(`Cannot complete step: workflow status is ${workflow.status}`);
-    }
+    assertValidTransition(workflow.status, WorkflowStatus.AVAILABLE_FOR_FINAL_USERS);
 
     const cycle = await this.cycleRepo.findOne({
       where: { id: cycleId, workflowId },
@@ -338,6 +339,162 @@ export class WorkflowAdminCycleService {
     return this.stepRepo.findOneOrFail({ where: { id: stepId } });
   }
 
+  // ── Reenviar paso a revisor opcional ──────────────────────────────────────────
+
+  /**
+   * Un revisor obligatorio (mandatory) reenvía su paso a un revisor opcional
+   * del pool definido al crear el ciclo.
+   *
+   * Flujo:
+   *   1. Valida que el paso activo le pertenece al usuario y está PENDING.
+   *   2. Valida que el optionalReviewerId está en allowedOptionalReviewerIds del ciclo.
+   *   3. Incrementa el stepOrder de todos los pasos posteriores en +1.
+   *   4. Inserta un nuevo paso opcional con stepOrder = currentStep.stepOrder + 1.
+   *   5. Marca el paso actual como COMPLETED (forwarded).
+   *   6. Pone el nuevo paso en PENDING y actualiza cycle.currentStepOrder.
+   */
+  async forwardStep(
+    workflowId: string,
+    cycleId: string,
+    stepId: string,
+    userId: string,
+    dto: ForwardAdminStepDto,
+  ): Promise<WorkflowAdminStep> {
+    const workflow = await this.workflowRepo.findOneOrFail({ where: { id: workflowId } });
+
+    if (workflow.status !== WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS) {
+      throw new ConflictException(`Cannot forward step: workflow status is ${workflow.status}`);
+    }
+
+    const cycle = await this.cycleRepo.findOne({
+      where: { id: cycleId, workflowId },
+      relations: ['steps'],
+    });
+    if (!cycle) throw new NotFoundException('Admin cycle not found');
+    if (cycle.status !== AdminCycleStatus.IN_PROGRESS) {
+      throw new ConflictException('Admin cycle is not in progress');
+    }
+
+    const step = cycle.steps.find((s) => s.id === stepId);
+    if (!step) throw new NotFoundException('Admin step not found');
+
+    if (step.userId !== userId) {
+      throw new ForbiddenException('You are not assigned to this admin step');
+    }
+    if (step.status !== AdminStepStatus.PENDING) {
+      throw new ConflictException(`Step status is ${step.status}, cannot forward`);
+    }
+    if (step.isOptional) {
+      throw new BadRequestException('Optional reviewer steps cannot forward to another optional reviewer');
+    }
+
+    const allowedIds = cycle.allowedOptionalReviewerIds ?? [];
+    if (!allowedIds.includes(dto.optionalReviewerId)) {
+      throw new BadRequestException(
+        `User ${dto.optionalReviewerId} is not in the allowed optional reviewers list`,
+      );
+    }
+
+    let insertedStep!: WorkflowAdminStep;
+
+    await this.dataSource.transaction(async (manager) => {
+      // Guardar nota si viene
+      if (dto.notes?.trim()) {
+        await manager.save(WorkflowNote, {
+          workflowId,
+          cycleId,
+          adminStepId: stepId,
+          createdBy:   userId,
+          content:     dto.notes.trim(),
+        });
+      }
+
+      // Guardar adjuntos si vienen
+      if (dto.attachments?.length) {
+        const attachments = dto.attachments.map((a) => ({
+          workflowId,
+          cycleId,
+          stepId,
+          uploadedBy:    userId,
+          documentId:    a.storageKey,
+          storageKey:    a.storageKey,
+          originalName:  a.originalName,
+          mimeType:      a.mimeType,
+          fileSizeBytes: a.fileSizeBytes ?? null,
+        }));
+        await manager.save(WorkflowAdminAttachment, attachments);
+      }
+
+      const insertOrder = step.stepOrder + 1;
+
+      // Desplazar todos los pasos con stepOrder >= insertOrder en +1
+      // Usamos query builder para actualizar en bulk (evita violación de unique constraint)
+      await manager
+        .createQueryBuilder()
+        .update(WorkflowAdminStep)
+        .set({ stepOrder: () => '"step_order" + 1' })
+        .where('cycle_id = :cycleId AND step_order >= :insertOrder', { cycleId, insertOrder })
+        .execute();
+
+      // Insertar el nuevo paso opcional
+      insertedStep = await manager.save(WorkflowAdminStep, {
+        cycleId,
+        workflowId,
+        userId:            dto.optionalReviewerId,
+        stepOrder:         insertOrder,
+        status:            AdminStepStatus.PENDING,
+        isOptional:        true,
+        insertedByStepId:  stepId,
+      });
+
+      // Completar el paso actual
+      await manager.update(WorkflowAdminStep, stepId, {
+        status:      AdminStepStatus.COMPLETED,
+        completedAt: new Date(),
+      });
+
+      // Actualizar ciclo y workflow
+      await manager.update(WorkflowAdminCycle, cycleId, {
+        currentStepOrder: insertOrder,
+      });
+      await manager.update(Workflow, workflowId, {
+        currentAssignedUserId: dto.optionalReviewerId,
+      });
+
+      await this.timelineService.record({
+        workflowId,
+        orgId:        workflow.orgId,
+        eventType:    TimelineEventType.ADMIN_STEP_COMPLETED,
+        actorId:      userId,
+        targetUserId: dto.optionalReviewerId,
+        resourceName: workflow.title,
+        description:  `Paso administrativo ${step.stepOrder} reenviado a revisor opcional (usuario ${dto.optionalReviewerId}).`,
+        metadata: {
+          cycleId,
+          stepId,
+          stepOrder:         step.stepOrder,
+          optionalReviewerId: dto.optionalReviewerId,
+          insertedStepId:    insertedStep.id,
+          hasNotes:          !!dto.notes,
+          hasAttachments:    (dto.attachments?.length ?? 0) > 0,
+        },
+      }, manager);
+    });
+
+    this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
+      type:             'ADMIN_CYCLE_TASK',
+      recipientUserIds: [dto.optionalReviewerId],
+      orgId:            workflow.orgId,
+      workflowId,
+      workflowTitle:    workflow.title,
+      message:          `Has sido invitado como revisor opcional en el ciclo administrativo del workflow "${workflow.title}"`,
+      metadata:         { cycleId, stepOrder: step.stepOrder + 1 },
+      timestamp:        new Date().toISOString(),
+    });
+
+    return this.stepRepo.findOneOrFail({ where: { id: insertedStep.id } });
+  }
+
   // ── Omitir ciclo de revisión ──────────────────────────────────────────────────
 
   async skipReviewCycle(workflowId: string, userId: string): Promise<Workflow> {
@@ -413,14 +570,8 @@ export class WorkflowAdminCycleService {
   ): Promise<Workflow> {
     const workflow = await this.workflowRepo.findOneOrFail({ where: { id: workflowId } });
 
-    // [RN-14] No se puede cerrar si hay ciclo activo
-    if (workflow.status === WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS) {
-      throw new ConflictException('Cannot close workflow while an admin cycle is active');
-    }
-
-    if (workflow.status !== WorkflowStatus.AVAILABLE_FOR_FINAL_USERS) {
-      throw new ConflictException(`Cannot close: workflow status is ${workflow.status}`);
-    }
+    // [RN-14] Solo AVAILABLE_FOR_FINAL_USERS puede cerrarse; ADMIN_CYCLE_IN_PROGRESS y otros estados fallan aquí
+    assertValidTransition(workflow.status, WorkflowStatus.CLOSED);
 
     // [RN-16] Solo usuarios finales pueden cerrar
     const finalUserIds = workflow.finalUserIds ?? [];

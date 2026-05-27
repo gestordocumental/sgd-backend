@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { KafkaMessage } from 'kafkajs';
-import { correlationStorage } from '../correlation/correlation.context';
+import { correlationStorage } from '@sgd/common';
 
 /**
  * Run a function inside a correlation context derived from the Kafka message.
@@ -26,14 +26,5 @@ export function runWithCorrelation(
         ? raw
         : randomUUID();
 
-  return new Promise((resolve, reject) => {
-    correlationStorage.run({ correlationId, clientIp: null }, async () => {
-      try {
-        await fn();
-        resolve();
-      } catch (err) {
-        reject(err);
-      }
-    });
-  });
+  return correlationStorage.run({ correlationId, clientIp: null }, fn);
 }

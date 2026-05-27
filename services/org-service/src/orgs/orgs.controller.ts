@@ -6,11 +6,15 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  BadRequestException,
   UseGuards,
   ParseUUIDPipe,
+  ParseIntPipe,
+  DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { OrgsService } from './orgs.service';
@@ -23,7 +27,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Organizations')
 @ApiBearerAuth('JWT')
-@Controller('api/org')
+@Controller('api/v1/org')
 @UseGuards(OrgGuard)
 export class OrgsController {
   constructor(private readonly orgsService: OrgsService) {}
@@ -46,16 +50,33 @@ export class OrgsController {
     return OrgResponseDto.from(await this.orgsService.create(dto, createdBy));
   }
 
-  @ApiOperation({ summary: 'List all organizations (super admin only)' })
-  @ApiResponse({ status: 200, description: 'Organizations found', type: OrgResponseDto, isArray: true })
+  @ApiOperation({ summary: 'List all organizations (paginated, with server-side search and status filter)' })
+  @ApiResponse({ status: 200, description: 'Paginated organizations' })
   /**
    * List all organizations.
    * Super admin only.
    */
   @Get()
   @SuperAdminOnly()
-  async findAll(): Promise<OrgResponseDto[]> {
-    return (await this.orgsService.findAll()).map(OrgResponseDto.from);
+  async findAll(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ): Promise<{ data: OrgResponseDto[]; total: number }> {
+    if (page < 1) throw new BadRequestException('page must be >= 1');
+    if (limit < 1 || limit > 500) throw new BadRequestException('limit must be between 1 and 500');
+    if (status && !['active', 'inactive', 'deleted'].includes(status)) {
+      throw new BadRequestException('status must be one of: active, inactive, deleted');
+    }
+
+    const { data, total } = await this.orgsService.findAll({
+      page,
+      limit,
+      search,
+      status: status as 'active' | 'inactive' | 'deleted' | undefined,
+    });
+    return { data: data.map(OrgResponseDto.from), total };
   }
 
   @ApiOperation({ summary: 'Get organization by ID' })

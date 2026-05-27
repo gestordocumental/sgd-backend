@@ -1,6 +1,7 @@
 import { KafkaMessage } from 'kafkajs';
-import { getClientIp, getCorrelationId } from '../correlation/correlation.context';
-import { runWithCorrelation } from './kafka-consumer.util';
+import { getCorrelationId } from '@sgd/common';
+import { getClientIp } from '@sgd/common';
+import { runWithCorrelation } from '@sgd/common';
 
 describe('runWithCorrelation', () => {
   it('uses a buffer correlation id header while the handler runs', async () => {

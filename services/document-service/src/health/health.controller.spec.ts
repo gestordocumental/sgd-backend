@@ -58,9 +58,9 @@ describe('HealthController', () => {
       const ctrl = new HealthController(health as any, mongoose as any);
 
       // Intercept the indicator functions passed to health.check
-      health.check.mockImplementation(async (indicators: (() => any)[]) => {
+      health.check.mockImplementation(async (indicators: (() => Promise<any>)[]) => {
         // Execute the first (and only) indicator
-        indicators[0]();
+        await indicators[0]();
         return { status: 'ok' };
       });
 

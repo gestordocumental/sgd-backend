@@ -15,6 +15,9 @@ on:
   pull_request:
     branches: [dev, test, master]
 
+permissions:
+  contents: read
+
 jobs:
   # ── Tests unitarios por servicio ─────────────────────────────────────────
   test-services:
@@ -42,11 +45,19 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+          # El lockfile raíz cubre todo el workspace (packages/* y services/*)
+          cache-dependency-path: package-lock.json
 
-      - name: Instalar dependencias
-        working-directory: services/${{ matrix.service }}
+      - name: Instalar dependencias del workspace
+        # Instalar desde la raíz para que npm enlace correctamente @sgd/common
+        # (packages/common) como workspace local en todos los servicios.
         run: npm ci
+
+      - name: Compilar @sgd/common
+        # Los servicios importan desde packages/common/dist/, que no existe hasta
+        # que se compila. Sin este paso ts-jest lanza TS2307 en cualquier servicio
+        # que importe de @sgd/common.
+        run: npm run build:common
 
       - name: Ejecutar tests con cobertura (mínimo 85%)
         working-directory: services/${{ matrix.service }}
@@ -117,11 +128,13 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        working-directory: services/${{ matrix.service }}
+      - name: Install workspace dependencies
         run: npm ci
+
+      - name: Build @sgd/common
+        run: npm run build:common
 
       - name: TypeScript compile check
         working-directory: services/${{ matrix.service }}
@@ -130,7 +143,8 @@ jobs:
       - name: Docker build check
         uses: docker/build-push-action@v5
         with:
-          context: services/${{ matrix.service }}
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
           push: false           # Solo valida que la imagen construye, no la sube
 
   # ── Validar que el Dockerfile de Kong (Railway) compila ─────────────────

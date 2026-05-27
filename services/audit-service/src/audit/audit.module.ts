@@ -2,8 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ElasticsearchModule } from '@nestjs/elasticsearch';
 import { Kafka } from 'kafkajs';
-import { KAFKA_CLIENT } from '../common/kafka/kafka.constants';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { KAFKA_CLIENT, KafkaProducerService } from '@sgd/common';
+import { AppLogger } from '@sgd/common';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
 import { AuditConsumer } from './audit.consumer';
@@ -22,6 +22,7 @@ import { AuditConsumer } from './audit.consumer';
   providers: [
     AuditService,
     AuditConsumer,
+    KafkaProducerService,
     AppLogger,
     {
       provide: KAFKA_CLIENT,

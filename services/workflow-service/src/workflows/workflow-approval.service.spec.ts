@@ -15,9 +15,8 @@ import {
   TimelineEventType,
 } from './entities/enums';
 import { WorkflowTimelineService } from './workflow-timeline.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { AppLogger, KafkaProducerService } from '@sgd/common';
 import { UserClientService } from '../common/clients/user-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
 
 // ── Factories ─────────────────────────────────────────────────────────────────
 

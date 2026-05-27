@@ -1,11 +1,14 @@
 import { AuditService } from './audit.service';
 import { AuditLogEvent } from './dto/audit-log-event.dto';
 import { AuditQueryDto, AuditExportDto } from './dto/audit-query.dto';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
+
+type MockLogger = jest.Mocked<Pick<AppLogger, 'log' | 'warn' | 'error'>>;
 
 // ── mocks ──────────────────────────────────────────────────────────────────
 
-jest.mock('../common/correlation/correlation.context', () => ({
+jest.mock('@sgd/common', () => ({
+  ...jest.requireActual('@sgd/common'),
   getCorrelationId: jest.fn().mockReturnValue('http-corr-id'),
 }));
 
@@ -21,8 +24,8 @@ function makeEs() {
   };
 }
 
-function makeLogger(): jest.Mocked<AppLogger> {
-  return { log: jest.fn(), warn: jest.fn(), error: jest.fn() } as any;
+function makeLogger(): MockLogger {
+  return { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
 }
 
 // ── fixtures ───────────────────────────────────────────────────────────────
@@ -47,15 +50,15 @@ function makeHit(id: string, source: object) {
 describe('AuditService', () => {
   let service: AuditService;
   let es: ReturnType<typeof makeEs>;
-  let logger: jest.Mocked<AppLogger>;
+  let logger: MockLogger;
 
   beforeEach(() => {
     es      = makeEs();
     logger  = makeLogger();
-    service = new AuditService(es as any, logger);
+    service = new AuditService(es as any, logger as any);
     jest.clearAllMocks();
     // Reset the correlation mock to a known default
-    const ctx = require('../common/correlation/correlation.context');
+    const ctx = require('@sgd/common');
     ctx.getCorrelationId.mockReturnValue('http-corr-id');
   });
 
@@ -121,7 +124,7 @@ describe('AuditService', () => {
     });
 
     it('falls back to HTTP correlationId when event has none', async () => {
-      const ctx = require('../common/correlation/correlation.context');
+      const ctx = require('@sgd/common');
       ctx.getCorrelationId.mockReturnValue('http-corr-id');
 
       await service.index(validEvent);
@@ -131,7 +134,7 @@ describe('AuditService', () => {
     });
 
     it('sets correlationId to null when HTTP returns no-correlation-id sentinel', async () => {
-      const ctx = require('../common/correlation/correlation.context');
+      const ctx = require('@sgd/common');
       ctx.getCorrelationId.mockReturnValue('no-correlation-id');
 
       await service.index(validEvent);

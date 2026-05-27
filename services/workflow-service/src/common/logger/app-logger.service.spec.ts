@@ -1,4 +1,4 @@
-import { AppLogger } from './app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 describe('AppLogger', () => {
   let logger: AppLogger;

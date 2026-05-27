@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
 import { AuditQueryDto, AuditExportDto } from './dto/audit-query.dto';
-import { JwtPayload } from '../common/decorators/jwt-payload.decorator';
+import { JwtPayload } from '@sgd/common';
 
 const mockService: jest.Mocked<Pick<AuditService, 'query' | 'export' | 'findById'>> = {
   query:    jest.fn(),

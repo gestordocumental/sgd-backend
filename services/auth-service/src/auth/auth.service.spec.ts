@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   InternalServerErrorException,
@@ -13,6 +14,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { Credential, CredentialStatus } from './entities/credential.entity';
 import { UserClientService } from '../user-client/user-client.service';
+import { KafkaProducerService } from '@sgd/common';
 
 jest.mock('bcryptjs', () => ({
   hashSync: jest.fn().mockReturnValue('$2a$10$hashed'),
@@ -40,6 +42,7 @@ describe('AuthService', () => {
   let jwtService: Record<string, jest.Mock>;
   let redis: Record<string, jest.Mock>;
   let userClient: Record<string, jest.Mock>;
+  let kafkaProducer: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     credRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
@@ -50,10 +53,17 @@ describe('AuthService', () => {
     redis = {
       setex: jest.fn().mockResolvedValue('OK'),
       getdel: jest.fn(),
+      scan: jest.fn().mockResolvedValue(['0', []]),
+      del: jest.fn().mockResolvedValue(1),
+      set: jest.fn().mockResolvedValue('OK'),
     };
     userClient = {
       getUserInfo: jest.fn().mockResolvedValue({ isSuperAdmin: false }),
       getUserCompanies: jest.fn().mockResolvedValue(['some-org-id']),
+      getUserEffectivePermissions: jest.fn().mockResolvedValue([]),
+    };
+    kafkaProducer = {
+      emitSafe: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -77,6 +87,7 @@ describe('AuthService', () => {
         },
         { provide: 'REDIS_CLIENT', useValue: redis },
         { provide: UserClientService, useValue: userClient },
+        { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
     }).compile();
 
@@ -172,6 +183,14 @@ describe('AuthService', () => {
       await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
     });
 
+    it('throws UnauthorizedException when non-super-admin has no companies', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      userClient.getUserCompanies.mockResolvedValue([]);
+
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+    });
+
     it('throws UnauthorizedException when user profile not found in user-service (NotFoundException)', async () => {
       credRepo.findOne.mockResolvedValue(makeCredential());
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
@@ -258,6 +277,29 @@ describe('AuthService', () => {
       );
     });
 
+    it('recomputes permissions when refreshing a company-scoped token', async () => {
+      jwtService.verify.mockReturnValue({ ...validPayload, companyId: 'org-id' });
+      redis.getdel.mockResolvedValue('1');
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserCompanies.mockResolvedValue(['org-id']);
+      userClient.getUserEffectivePermissions.mockResolvedValue([
+        { module: 'documents', action: 'read' },
+        { module: 'workflows', action: 'manage' },
+      ]);
+
+      await service.refresh('valid.refresh.token');
+
+      expect(userClient.getUserEffectivePermissions).toHaveBeenCalledWith('user-id', 'org-id');
+      expect(jwtService.sign).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          companyId: 'org-id',
+          permissions: ['documents:read', 'workflows:manage'],
+        }),
+        expect.any(Object),
+      );
+    });
+
     it('throws UnauthorizedException when refresh token signature is invalid', async () => {
       jwtService.verify.mockImplementation(() => {
         throw new Error('invalid signature');
@@ -307,6 +349,24 @@ describe('AuthService', () => {
       await expect(service.refresh('valid.refresh.token')).rejects.toThrow(UnauthorizedException);
     });
 
+    it('rethrows non-NotFound errors from user-service during refresh', async () => {
+      jwtService.verify.mockReturnValue(validPayload);
+      redis.getdel.mockResolvedValue('1');
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserInfo.mockRejectedValue(new InternalServerErrorException('Connection refused'));
+
+      await expect(service.refresh('valid.refresh.token')).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('throws UnauthorizedException when refreshed non-super-admin has no companies', async () => {
+      jwtService.verify.mockReturnValue(validPayload);
+      redis.getdel.mockResolvedValue('1');
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserCompanies.mockResolvedValue([]);
+
+      await expect(service.refresh('valid.refresh.token')).rejects.toThrow(UnauthorizedException);
+    });
+
     it('stores new refresh token in Redis after successful rotation', async () => {
       jwtService.verify.mockReturnValue(validPayload);
       redis.getdel.mockResolvedValue('1');
@@ -343,6 +403,24 @@ describe('AuthService', () => {
       await service.disableCredential('unknown-id');
 
       expect(credRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('revokeAllRefreshTokens', () => {
+    it('deletes matching refresh tokens and writes super-admin revocation marker', async () => {
+      redis.scan
+        .mockResolvedValueOnce(['1', ['refresh:user-id:old-1']])
+        .mockResolvedValueOnce(['0', ['refresh:user-id:old-2', 'refresh:user-id:old-3']]);
+
+      await service.revokeAllRefreshTokens('user-id');
+
+      expect(redis.del).toHaveBeenNthCalledWith(1, 'refresh:user-id:old-1');
+      expect(redis.del).toHaveBeenNthCalledWith(
+        2,
+        'refresh:user-id:old-2',
+        'refresh:user-id:old-3',
+      );
+      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', 900);
     });
   });
 
@@ -399,6 +477,14 @@ describe('AuthService', () => {
     });
   });
 
+  describe('getMyCompanies', () => {
+    it('returns companies from user-client', async () => {
+      userClient.getUserCompanies.mockResolvedValue(['org-1', 'org-2']);
+
+      await expect(service.getMyCompanies('user-id')).resolves.toEqual(['org-1', 'org-2']);
+    });
+  });
+
   // ── switchCompany ─────────────────────────────────────────────────────────
 
   describe('switchCompany', () => {
@@ -423,6 +509,25 @@ describe('AuthService', () => {
       expect(jwtService.sign).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({ companyId: 'org-id' }),
+        expect.any(Object),
+      );
+    });
+
+    it('includes effective permissions in company-scoped token payload', async () => {
+      userClient.getUserCompanies.mockResolvedValue(['org-id']);
+      userClient.getUserEffectivePermissions.mockResolvedValue([
+        { module: 'documents', action: 'read' },
+        { module: 'workflows', action: 'manage' },
+      ]);
+      credRepo.findOne.mockResolvedValue(makeCredential());
+
+      await service.switchCompany('user-id', 'org-id');
+
+      expect(jwtService.sign).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          permissions: ['documents:read', 'workflows:manage'],
+        }),
         expect.any(Object),
       );
     });
@@ -454,6 +559,80 @@ describe('AuthService', () => {
         expect.not.objectContaining({ isSuperAdmin: expect.anything() }),
         expect.any(Object),
       );
+    });
+  });
+
+  describe('forgotPassword', () => {
+    it('returns ok without side effects when credential is missing', async () => {
+      credRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.forgotPassword('missing@test.com')).resolves.toEqual({ ok: true });
+
+      expect(redis.setex).not.toHaveBeenCalled();
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
+    });
+
+    it('returns ok without side effects when credential is disabled', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential({ status: CredentialStatus.DISABLED }));
+
+      await expect(service.forgotPassword('user@test.com')).resolves.toEqual({ ok: true });
+
+      expect(redis.setex).not.toHaveBeenCalled();
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
+    });
+
+    it('stores reset token and emits password reset event for active credential', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential());
+
+      await expect(service.forgotPassword('user@test.com')).resolves.toEqual({ ok: true });
+
+      expect(redis.setex).toHaveBeenCalledWith(
+        expect.stringMatching(/^pwd-reset:/),
+        3600,
+        'user-id',
+      );
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          email: 'user@test.com',
+          resetToken: expect.any(String),
+          expiresAt: expect.any(String),
+        }),
+      );
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('throws BadRequestException when reset token is missing from Redis', async () => {
+      redis.getdel.mockResolvedValue(null);
+
+      await expect(service.resetPassword('bad-token', 'new-password')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws BadRequestException when credential is missing', async () => {
+      redis.getdel.mockResolvedValue('user-id');
+      credRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.resetPassword('reset-token', 'new-password')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('updates password and revokes sessions for active credential', async () => {
+      const credential = makeCredential();
+      redis.getdel.mockResolvedValue('user-id');
+      credRepo.findOne.mockResolvedValue(credential);
+      credRepo.save.mockResolvedValue(credential);
+
+      await expect(service.resetPassword('reset-token', 'new-password')).resolves.toEqual({ ok: true });
+
+      expect(bcrypt.hash).toHaveBeenCalledWith('new-password', expect.any(Number));
+      expect(credRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ passwordHash: '$2a$10$hashed' }),
+      );
+      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', 900);
     });
   });
 });
