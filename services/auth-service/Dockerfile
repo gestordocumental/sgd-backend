@@ -23,6 +23,8 @@ RUN cd packages/common && npx tsc
 COPY services/auth-service/nest-cli.json ./services/auth-service/
 COPY services/auth-service/tsconfig*.json ./services/auth-service/
 COPY services/auth-service/src ./services/auth-service/src
+COPY services/auth-service/start.sh ./services/auth-service/start.sh
+RUN sed -i 's/\r//' services/auth-service/start.sh && chmod +x services/auth-service/start.sh
 
 WORKDIR /app/services/auth-service
 
@@ -51,8 +53,7 @@ COPY --from=builder /app/packages/common/dist ./packages/common/dist
 
 # Copy compiled auth-service
 COPY --from=builder /app/services/auth-service/dist ./services/auth-service/dist
-COPY services/auth-service/start.sh ./services/auth-service/start.sh
-RUN sed -i 's/\r//' services/auth-service/start.sh && chmod +x services/auth-service/start.sh
+COPY --from=builder /app/services/auth-service/start.sh ./services/auth-service/start.sh
 
 WORKDIR /app/services/auth-service
 

@@ -16,6 +16,8 @@ RUN cd packages/common && npx tsc
 COPY services/user-service/nest-cli.json ./services/user-service/
 COPY services/user-service/tsconfig*.json ./services/user-service/
 COPY services/user-service/src ./services/user-service/src
+COPY services/user-service/start.sh ./services/user-service/start.sh
+RUN sed -i 's/\r//' services/user-service/start.sh && chmod +x services/user-service/start.sh
 WORKDIR /app/services/user-service
 RUN npm run build
 
@@ -30,8 +32,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/packages/common/dist ./packages/common/dist
 COPY --from=builder /app/services/user-service/dist ./services/user-service/dist
-COPY services/user-service/start.sh ./services/user-service/start.sh
-RUN sed -i 's/\r//' services/user-service/start.sh && chmod +x services/user-service/start.sh
+COPY --from=builder /app/services/user-service/start.sh ./services/user-service/start.sh
 
 EXPOSE 3000
 

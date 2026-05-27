@@ -19,6 +19,8 @@ RUN cd packages/common && npx tsc
 COPY services/org-service/nest-cli.json ./services/org-service/
 COPY services/org-service/tsconfig*.json ./services/org-service/
 COPY services/org-service/src ./services/org-service/src
+COPY services/org-service/start.sh ./services/org-service/start.sh
+RUN sed -i 's/\r//' services/org-service/start.sh && chmod +x services/org-service/start.sh
 
 WORKDIR /app/services/org-service
 
@@ -42,8 +44,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/packages/common/dist ./packages/common/dist
 COPY --from=builder /app/services/org-service/dist ./services/org-service/dist
-COPY services/org-service/start.sh ./services/org-service/start.sh
-RUN sed -i 's/\r//' services/org-service/start.sh && chmod +x services/org-service/start.sh
+COPY --from=builder /app/services/org-service/start.sh ./services/org-service/start.sh
 
 WORKDIR /app/services/org-service
 

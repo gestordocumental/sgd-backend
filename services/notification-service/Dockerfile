@@ -19,6 +19,8 @@ RUN cd packages/common && npx tsc
 COPY services/notification-service/nest-cli.json ./services/notification-service/
 COPY services/notification-service/tsconfig*.json ./services/notification-service/
 COPY services/notification-service/src ./services/notification-service/src
+COPY services/notification-service/start.sh ./services/notification-service/start.sh
+RUN sed -i 's/\r//' services/notification-service/start.sh && chmod +x services/notification-service/start.sh
 
 WORKDIR /app/services/notification-service
 
@@ -42,8 +44,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/packages/common/dist ./packages/common/dist
 COPY --from=builder /app/services/notification-service/dist ./services/notification-service/dist
-COPY services/notification-service/start.sh ./services/notification-service/start.sh
-RUN sed -i 's/\r//' services/notification-service/start.sh && chmod +x services/notification-service/start.sh
+COPY --from=builder /app/services/notification-service/start.sh ./services/notification-service/start.sh
 
 WORKDIR /app/services/notification-service
 
