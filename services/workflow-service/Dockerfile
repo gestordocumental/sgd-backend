@@ -19,6 +19,8 @@ RUN cd packages/common && npx tsc
 COPY services/workflow-service/nest-cli.json ./services/workflow-service/
 COPY services/workflow-service/tsconfig*.json ./services/workflow-service/
 COPY services/workflow-service/src ./services/workflow-service/src
+COPY services/workflow-service/start.sh ./services/workflow-service/start.sh
+RUN sed -i 's/\r//' services/workflow-service/start.sh && chmod +x services/workflow-service/start.sh
 
 WORKDIR /app/services/workflow-service
 
@@ -42,8 +44,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/packages/common/dist ./packages/common/dist
 COPY --from=builder /app/services/workflow-service/dist ./services/workflow-service/dist
-COPY services/workflow-service/start.sh ./services/workflow-service/start.sh
-RUN sed -i 's/\r//' services/workflow-service/start.sh && chmod +x services/workflow-service/start.sh
+COPY --from=builder /app/services/workflow-service/start.sh ./services/workflow-service/start.sh
 
 WORKDIR /app/services/workflow-service
 

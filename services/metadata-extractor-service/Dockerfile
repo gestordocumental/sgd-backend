@@ -19,6 +19,8 @@ RUN cd packages/common && npx tsc
 COPY services/metadata-extractor-service/nest-cli.json ./services/metadata-extractor-service/
 COPY services/metadata-extractor-service/tsconfig*.json ./services/metadata-extractor-service/
 COPY services/metadata-extractor-service/src ./services/metadata-extractor-service/src
+COPY services/metadata-extractor-service/start.sh ./services/metadata-extractor-service/start.sh
+RUN sed -i 's/\r//' services/metadata-extractor-service/start.sh && chmod +x services/metadata-extractor-service/start.sh
 
 WORKDIR /app/services/metadata-extractor-service
 
@@ -39,8 +41,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/packages/common/dist ./packages/common/dist
 COPY --from=builder /app/services/metadata-extractor-service/dist ./services/metadata-extractor-service/dist
-COPY services/metadata-extractor-service/start.sh ./services/metadata-extractor-service/start.sh
-RUN sed -i 's/\r//' services/metadata-extractor-service/start.sh && chmod +x services/metadata-extractor-service/start.sh
+COPY --from=builder /app/services/metadata-extractor-service/start.sh ./services/metadata-extractor-service/start.sh
 
 WORKDIR /app/services/metadata-extractor-service
 
