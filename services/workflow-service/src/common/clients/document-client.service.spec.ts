@@ -1,0 +1,136 @@
+import { BadRequestException, GatewayTimeoutException, InternalServerErrorException } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { of, throwError, TimeoutError } from 'rxjs';
+import { AxiosResponse } from 'axios';
+import {
+  DocumentClientService,
+  TypologyPublicInfo,
+  ValidateDocumentResult,
+} from './document-client.service';
+import { AppLogger } from '../logger/app-logger.service';
+import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
+
+describe('DocumentClientService', () => {
+  const documentServiceUrl = 'http://document-service';
+  const internalToken = 'internal-token';
+  let httpService: jest.Mocked<Pick<HttpService, 'get' | 'post'>>;
+  let logger: jest.Mocked<Pick<AppLogger, 'http'>>;
+  let service: DocumentClientService;
+
+  beforeEach(() => {
+    httpService = {
+      get: jest.fn(),
+      post: jest.fn(),
+    };
+    logger = {
+      http: jest.fn(),
+    };
+
+    const config = {
+      getOrThrow: jest.fn((key: string) => {
+        if (key === 'DOCUMENT_SERVICE_URL') return documentServiceUrl;
+        if (key === 'INTERNAL_TOKEN') return internalToken;
+        throw new Error(`Unknown key: ${key}`);
+      }),
+      get: jest.fn().mockReturnValue(1000),
+    } as unknown as ConfigService;
+
+    service = new DocumentClientService(
+      httpService as unknown as HttpService,
+      config,
+      logger as unknown as AppLogger,
+    );
+  });
+
+  it('gets typology public info with internal headers', async () => {
+    const typology: TypologyPublicInfo = {
+      id: 'typology-1',
+      nombre: 'Contract',
+      codigo: 'CTR',
+      version: '1',
+      estructuraOrg: {
+        departamentoId: 'dept-1',
+        departamentoNombre: 'Legal',
+        areaId: null,
+        areaNombre: null,
+        cargoId: null,
+        cargoNombre: null,
+      },
+    };
+    httpService.get.mockReturnValue(of({ data: typology } as AxiosResponse<TypologyPublicInfo>));
+
+    await expect(service.getTypologyInfo('org 1', 'typology-1')).resolves.toBe(typology);
+
+    expect(httpService.get).toHaveBeenCalledWith(
+      `${documentServiceUrl}/internal/typologies/typology-1/public-info?orgId=org%201`,
+      {
+        headers: {
+          'x-internal-token': internalToken,
+          [CORRELATION_ID_HEADER]: 'no-correlation-id',
+        },
+      },
+    );
+    expect(logger.http).toHaveBeenCalledWith(expect.objectContaining({ type: 'internal-response', statusCode: 200 }));
+  });
+
+  it('validates a document for workflow creation', async () => {
+    const result: ValidateDocumentResult = {
+      isValid: true,
+      typology: { nombre: 'Contract', codigo: 'CTR', version: '1' },
+      document: {
+        extractedTitle: 'Contract',
+        extractedCode: 'CTR',
+        extractedVersion: '1',
+        storageKey: 'documents/doc-1.pdf',
+        originalName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 123,
+      },
+      discrepancies: [],
+    };
+    httpService.post.mockReturnValue(of({ data: result } as AxiosResponse<ValidateDocumentResult>));
+
+    await expect(service.validateDocument('typology-1', 'doc-1')).resolves.toBe(result);
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      `${documentServiceUrl}/internal/documents/validate-for-workflow`,
+      { typologyId: 'typology-1', documentId: 'doc-1' },
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'x-internal-token': internalToken }),
+      }),
+    );
+  });
+
+  it('maps 400 responses to BadRequestException', async () => {
+    httpService.get.mockReturnValue(
+      throwError(() => ({ response: { status: 400, data: { message: 'Invalid org' } } })),
+    );
+
+    await expect(service.getTypologyInfo('org-1', 'typology-1')).rejects.toThrow(BadRequestException);
+  });
+
+  it('maps 404 responses to BadRequestException with resource context', async () => {
+    httpService.post.mockReturnValue(
+      throwError(() => ({ response: { status: 404, data: { message: 'Missing document' } } })),
+    );
+
+    await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
+      'Resource not found in document-service: Missing document',
+    );
+  });
+
+  it('maps timeout errors to GatewayTimeoutException', async () => {
+    httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+
+    await expect(service.getTypologyInfo('org-1', 'typology-1')).rejects.toThrow(GatewayTimeoutException);
+  });
+
+  it('maps unknown errors to InternalServerErrorException', async () => {
+    httpService.post.mockReturnValue(throwError(() => new Error('network down')));
+
+    await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
+});

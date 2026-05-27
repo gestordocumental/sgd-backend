@@ -1,0 +1,228 @@
+_format_version: "3.0"
+_transform: true
+
+# ── Consumidor SGD ──────────────────────────────────────────────────────────
+# KONG_JWT_SECRET debe coincidir con JWT_SECRET de auth-service (.env)
+consumers:
+  - username: sgd-users
+    jwt_secrets:
+      - key: sgd-jwt-key
+        algorithm: HS256
+        secret: "${KONG_JWT_SECRET}"
+
+# ── Plugins globales ────────────────────────────────────────────────────────
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      headers: [Authorization, Content-Type, Accept, X-Company-Id, X-Correlation-Id]
+      exposed_headers: [X-Request-Id, X-Correlation-Id]
+      credentials: false   # false cuando origins es "*"
+      max_age: 3600
+
+# ── Servicios y Rutas ───────────────────────────────────────────────────────
+# Los microservicios corren en el host con npm run start:dev.
+# Kong (Docker) los alcanza via host.docker.internal.
+#
+#   auth-service      → host.docker.internal:3000
+#   user-service      → host.docker.internal:3001
+#   org-service       → host.docker.internal:3002
+#   document-service  → host.docker.internal:3003
+#   metadata-extractor→ host.docker.internal:3004
+
+services:
+
+  # ── Health check de Kong ────────────────────────────────────────────────
+  - name: health-service
+    url: http://127.0.0.1:8001
+    routes:
+      - name: health-route
+        paths:
+          - /health
+        methods: [GET]
+        strip_path: false
+    plugins:
+      - name: request-termination
+        config:
+          status_code: 200
+          message: "OK"
+
+  # ── Swagger docs (sin JWT) ──────────────────────────────────────────────
+  # Rutas regex (~) tienen mayor prioridad que prefix en Kong,
+  # evitando que las rutas con JWT intercepten los assets del Swagger UI.
+  - name: auth-docs
+    url: http://host.docker.internal:3000
+    routes:
+      - name: auth-docs-route
+        paths:
+          - /api/auth/docs
+        strip_path: false
+
+  - name: user-docs
+    url: http://host.docker.internal:3001
+    routes:
+      - name: user-docs-route
+        paths:
+          - /api/users/docs
+        strip_path: false
+
+  - name: org-docs
+    url: http://host.docker.internal:3002
+    routes:
+      - name: org-docs-route
+        paths:
+          - /api/org/docs
+        strip_path: false
+
+  - name: document-docs
+    url: http://host.docker.internal:3003
+    routes:
+      - name: document-docs-route
+        paths:
+          - /api/documents/docs
+        strip_path: false
+
+  - name: metadata-extractor-docs
+    url: http://host.docker.internal:3004
+    routes:
+      - name: metadata-extractor-docs-route
+        paths:
+          - /api/metadata-extractor/docs
+        strip_path: false
+
+  # ── auth-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
+  - name: auth-public
+    url: http://host.docker.internal:3000
+    routes:
+      - name: auth-login
+        paths:
+          - /api/auth/login
+          - /api/auth/refresh
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+          fault_tolerant: true
+
+  # ── auth-service: provision (token interno, sin JWT público) ──────────
+  - name: auth-provision
+    url: http://host.docker.internal:3000
+    routes:
+      - name: auth-provision-route
+        paths:
+          - /api/auth/credentials/provision
+        methods: [POST]
+        strip_path: false
+
+  # ── auth-service: rutas PROTEGIDAS (con JWT) ───────────────────────────
+  - name: auth-protected
+    url: http://host.docker.internal:3000
+    routes:
+      - name: auth-me
+        paths:
+          - /api/auth
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── org-service ────────────────────────────────────────────────────────
+  - name: org-service
+    url: http://host.docker.internal:3002
+    routes:
+      - name: org-routes
+        paths:
+          - /api/org
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── user-service: avatares estáticos (sin JWT) ─────────────────────────
+  - name: user-avatars
+    url: http://host.docker.internal:3001
+    routes:
+      - name: user-avatars-route
+        paths:
+          - /uploads/avatars
+        methods: [GET]
+        strip_path: false
+
+  # ── user-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
+  - name: user-service-public
+    url: http://host.docker.internal:3001
+    routes:
+      - name: complete-registration
+        paths:
+          - /api/users/complete-registration
+        methods: [POST]
+        strip_path: false
+
+  # ── user-service (con JWT) ─────────────────────────────────────────────
+  - name: user-service
+    url: http://host.docker.internal:3001
+    routes:
+      - name: user-routes
+        paths:
+          - /api/users
+          - /api/roles
+          - ~/api/permissions$
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── document-service (con JWT) ─────────────────────────────────────────
+  - name: document-service
+    url: http://host.docker.internal:3003
+    routes:
+      - name: document-routes
+        paths:
+          - /api/documents
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── workflow-service (con JWT) ─────────────────────────────────────────
+  - name: workflow-service
+    url: http://host.docker.internal:3005
+    routes:
+      - name: workflow-routes
+        paths:
+          - /api/workflows
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── notification-service ───────────────────────────────────────────────
+  - name: notification-service
+    url: http://host.docker.internal:3006
+    routes:
+      - name: notification-routes
+        paths:
+          - /api/notifications
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── audit-service: Swagger docs (sin JWT) ──────────────────────────────
+  - name: audit-docs
+    url: http://host.docker.internal:3007
+    routes:
+      - name: audit-docs-route
+        paths:
+          - /api/audit/docs
+        strip_path: false
+
+  # ── audit-service (con JWT) ─────────────────────────────────────────────
+  - name: audit-service
+    url: http://host.docker.internal:3007
+    routes:
+      - name: audit-routes
+        paths:
+          - /api/audit
+        strip_path: false
+    plugins:
+      - name: jwt

@@ -13,9 +13,84 @@ on:
   push:
     branches: [dev, test, master]
   pull_request:
-    branches: [test, master]
+    branches: [dev, test, master]
 
 jobs:
+  # ── Tests unitarios por servicio ─────────────────────────────────────────
+  test-services:
+    name: Test ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # Si falla uno, los otros siguen corriendo
+      matrix:
+        service:
+          - auth-service
+          - user-service
+          - org-service
+          - document-service
+          - metadata-extractor-service
+          - workflow-service
+          - notification-service
+          - audit-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Ejecutar tests con cobertura (mínimo 85%)
+        working-directory: services/${{ matrix.service }}
+        # test:cov ejecuta jest --coverage y falla si coverageThreshold no se cumple.
+        # --if-present: exit 0 si el script no está definido (servicios sin tests aún).
+        run: npm run test:cov --if-present
+
+      - name: Auditoría de dependencias vulnerables
+        working-directory: services/${{ matrix.service }}
+        # Falla si hay vulnerabilidades de severidad alta o crítica.
+        run: npm audit --audit-level=high
+
+  # ── Tests unitarios del frontend ─────────────────────────────────────────
+  test-frontend:
+    name: Test Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout backend repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout frontend repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/sgd-frontend
+          path: frontend-repo
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend-repo/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend-repo
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: frontend-repo
+        run: npm run test --if-present
+
   # ── Validar que cada Dockerfile compila sin errores ─────────────────────
   build-services:
     name: Build ${{ matrix.service }}
@@ -25,13 +100,13 @@ jobs:
       matrix:
         service:
           - auth-service
-          # Agregar aquí cuando se creen los demás servicios:
-          # - user-service
-          # - org-service
-          # - document-service
-          # - workflow-service
-          # - notification-service
-          # - audit-service
+          - user-service
+          - org-service
+          - document-service
+          - metadata-extractor-service
+          - workflow-service
+          - notification-service
+          - audit-service
 
     steps:
       - name: Checkout
@@ -72,17 +147,39 @@ jobs:
           context: railway/api-gateway
           push: false
 
+  # ── Detección de secretos expuestos en el código ────────────────────────
+  security-scan:
+    name: Security — Secrets Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # Necesario para escanear todo el historial
+          persist-credentials: false
+
+      - name: Detect exposed secrets (TruffleHog)
+        uses: trufflesecurity/trufflehog@v3.95.3
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
   # ── Resumen de CI — requerido por branch protection rules ───────────────
   ci-success:
     name: CI OK
     runs-on: ubuntu-latest
-    needs: [build-services, build-api-gateway]
+    needs: [build-services, build-api-gateway, test-services, test-frontend, security-scan]
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
-          if [[ "${{ needs.build-services.result }}" != "success" || \
-                "${{ needs.build-api-gateway.result }}" != "success" ]]; then
+          if [[ "${{ needs.build-services.result }}"   != "success" || \
+                "${{ needs.build-api-gateway.result }}" != "success" || \
+                "${{ needs.test-services.result }}"    != "success" || \
+                "${{ needs.test-frontend.result }}"     != "success" || \
+                "${{ needs.security-scan.result }}"    != "success" ]]; then
             echo "CI failed"
             exit 1
           fi

@@ -6,10 +6,13 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-COPY nest-cli.json tsconfig.json ./
+COPY nest-cli.json tsconfig.json tsconfig.build.json tsconfig.migrations.json ./
 COPY src ./src
 
 RUN npm run build
+
+# Compila data-source y migraciones (no forman parte del árbol de módulos de NestJS)
+RUN npx tsc -p tsconfig.migrations.json
 
 # ── Stage 2: production ───────────────────────────────────────────────────────
 FROM node:20-alpine
@@ -23,9 +26,11 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY start.sh ./start.sh
+RUN sed -i 's/\r//' start.sh && chmod +x start.sh
 
 EXPOSE 3000
 
 USER node
 
-CMD ["node", "dist/main"]
+CMD ["sh", "start.sh"]

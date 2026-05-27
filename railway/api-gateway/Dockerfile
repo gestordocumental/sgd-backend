@@ -3,15 +3,9 @@
 # Las variables ${KONG_JWT_SECRET} y ${FRONTEND_URL} se resuelven
 # en runtime via envsubst (ver entrypoint.sh).
 
-FROM kong:3.4-ubuntu
+FROM kong:3.4
 
 USER root
-
-# gettext-base provee envsubst (no incluido en la imagen base de Kong)
-# Necesario para sustituir variables de entorno en kong.yaml al arrancar
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends gettext-base && \
-    rm -rf /var/lib/apt/lists/*
 
 COPY kong.yaml /etc/kong/kong.yaml.template
 COPY entrypoint.sh /entrypoint.sh

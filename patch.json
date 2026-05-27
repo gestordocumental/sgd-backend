@@ -1,0 +1,1 @@
+﻿{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"sgd-local-worker2"}}}}}

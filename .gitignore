@@ -3,6 +3,7 @@
 **/dist/
 **/build/
 **/.npm
+**/.npm-cache/
 **/*.tsbuildinfo
 **/.pnp
 **/.pnp.js
@@ -33,6 +34,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+# Local settings contain personal paths and expanded permissions — never commit.
+.claude/settings.local.json
 
 # ── IDEs ──────────────────────────────────────────────────────────────────────
 .vscode/
@@ -75,3 +80,4 @@ docker-compose.override.yml
 **/*.local
 **/*.tmp
 **/*.bak
+*.pdf

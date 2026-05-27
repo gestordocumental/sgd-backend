@@ -1,0 +1,18 @@
+import 'dotenv/config';
+import { DataSource } from 'typeorm';
+import { Org } from './orgs/entities/org.entity';
+import { Departamento } from './org-structure/entities/departamento.entity';
+import { Area } from './org-structure/entities/area.entity';
+import { Cargo } from './org-structure/entities/cargo.entity';
+
+export const AppDataSource = new DataSource({
+  type: 'postgres',
+  host: process.env.DB_HOST ?? 'localhost',
+  port: Number(process.env.DB_PORT ?? 5432),
+  username: process.env.DB_USERNAME ?? 'postgres',
+  password: process.env.DB_PASSWORD ?? '',
+  database: process.env.DB_NAME ?? 'org_db',
+  entities: [Org, Departamento, Area, Cargo],
+  migrations: [__dirname + '/migrations/*.js'],
+  synchronize: false,
+});

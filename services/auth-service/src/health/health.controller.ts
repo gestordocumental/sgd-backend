@@ -1,12 +1,14 @@
 import { Controller, Get, Inject } from '@nestjs/common';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   HealthCheck,
   HealthCheckService,
-  TypeOrmHealthIndicator,
   HealthIndicatorResult,
+  TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
 import { Redis } from 'ioredis';
 
+@ApiTags('Health')
 @Controller('health')
 export class HealthController {
   constructor(
@@ -15,19 +17,37 @@ export class HealthController {
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
-  // startupProbe: ¿arrancó el proceso? Sí si llegamos aquí.
+  @ApiOperation({ summary: 'Startup probe' })
+  @ApiOkResponse({ schema: { example: { status: 'ok', service: 'auth-service' } } })
   @Get('startup')
   startup() {
     return { status: 'ok', service: 'auth-service' };
   }
 
-  // livenessProbe: ¿está vivo el proceso? (no deadlocked)
+  @ApiOperation({ summary: 'Liveness probe' })
+  @ApiOkResponse({ schema: { example: { status: 'ok', service: 'auth-service' } } })
   @Get('live')
   live() {
     return { status: 'ok', service: 'auth-service' };
   }
 
-  // readinessProbe: ¿puede atender tráfico? Requiere DB y Redis operativos.
+  @ApiOperation({ summary: 'Readiness probe' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        status: 'ok',
+        info: {
+          postgresql: { status: 'up' },
+          redis: { status: 'up' },
+        },
+        error: {},
+        details: {
+          postgresql: { status: 'up' },
+          redis: { status: 'up' },
+        },
+      },
+    },
+  })
   @Get('ready')
   @HealthCheck()
   async ready() {
