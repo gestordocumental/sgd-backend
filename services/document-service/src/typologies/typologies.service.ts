@@ -77,7 +77,7 @@ export class TypologiesService {
       resourceName:  params.resourceName ?? null,
       correlationId: getCorrelationId(),
       ip:            getClientIp(),
-      metadata:      params.metadata,
+      metadata:      params.metadata ?? null,
       timestamp:     new Date().toISOString(),
     });
   }

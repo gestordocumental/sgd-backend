@@ -1,13 +1,26 @@
+# Build context must be the monorepo root:
+#   docker build -f services/workflow-service/Dockerfile .
+
 # ── Stage 1: build ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
+COPY packages/common/package.json ./packages/common/
+COPY services/workflow-service/package*.json ./services/workflow-service/
+
 RUN npm ci
 
-COPY nest-cli.json tsconfig.json tsconfig.migrations.json ./
-COPY src ./src
+COPY packages/common/tsconfig.json ./packages/common/
+COPY packages/common/src ./packages/common/src
+RUN cd packages/common && npx tsc
+
+COPY services/workflow-service/nest-cli.json ./services/workflow-service/
+COPY services/workflow-service/tsconfig*.json ./services/workflow-service/
+COPY services/workflow-service/src ./services/workflow-service/src
+
+WORKDIR /app/services/workflow-service
 
 RUN npm run build
 
@@ -21,13 +34,18 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Solo las dependencias de producción
 COPY package*.json ./
+COPY packages/common/package.json ./packages/common/
+COPY services/workflow-service/package*.json ./services/workflow-service/
+
 RUN npm ci --omit=dev
 
-COPY --from=builder /app/dist ./dist
-COPY start.sh ./start.sh
-RUN sed -i 's/\r//' start.sh && chmod +x start.sh
+COPY --from=builder /app/packages/common/dist ./packages/common/dist
+COPY --from=builder /app/services/workflow-service/dist ./services/workflow-service/dist
+COPY services/workflow-service/start.sh ./services/workflow-service/start.sh
+RUN sed -i 's/\r//' services/workflow-service/start.sh && chmod +x services/workflow-service/start.sh
+
+WORKDIR /app/services/workflow-service
 
 EXPOSE 3005
 

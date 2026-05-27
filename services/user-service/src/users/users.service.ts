@@ -66,7 +66,7 @@ export class UsersService {
       resourceId:   params.resourceId,
       resourceName: params.resourceName ?? null,
       ip:           getClientIp(),
-      metadata:     params.metadata,
+      metadata:     params.metadata ?? null,
       timestamp:    new Date().toISOString(),
     });
   }

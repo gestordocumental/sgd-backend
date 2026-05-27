@@ -143,7 +143,8 @@ jobs:
       - name: Docker build check
         uses: docker/build-push-action@v5
         with:
-          context: services/${{ matrix.service }}
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
           push: false           # Solo valida que la imagen construye, no la sube
 
   # ── Validar que el Dockerfile de Kong (Railway) compila ─────────────────

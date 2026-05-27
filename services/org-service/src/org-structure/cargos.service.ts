@@ -36,7 +36,7 @@ export class CargosService {
       resourceId:   params.resourceId,
       resourceName: params.resourceName ?? null,
       ip:           (correlationStorage.getStore()?.['clientIp'] as string | undefined) ?? null,
-      metadata:     params.metadata,
+      metadata:     params.metadata ?? null,
       timestamp:    new Date().toISOString(),
     });
   }

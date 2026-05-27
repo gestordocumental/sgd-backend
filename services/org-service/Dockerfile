@@ -1,13 +1,26 @@
+# Build context must be the monorepo root:
+#   docker build -f services/org-service/Dockerfile .
+
 # ── Stage 1: build ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
+COPY packages/common/package.json ./packages/common/
+COPY services/org-service/package*.json ./services/org-service/
+
 RUN npm ci
 
-COPY nest-cli.json tsconfig.json tsconfig.build.json tsconfig.migrations.json ./
-COPY src ./src
+COPY packages/common/tsconfig.json ./packages/common/
+COPY packages/common/src ./packages/common/src
+RUN cd packages/common && npx tsc
+
+COPY services/org-service/nest-cli.json ./services/org-service/
+COPY services/org-service/tsconfig*.json ./services/org-service/
+COPY services/org-service/src ./services/org-service/src
+
+WORKDIR /app/services/org-service
 
 RUN npm run build
 
@@ -21,13 +34,18 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Solo las dependencias de producción
 COPY package*.json ./
+COPY packages/common/package.json ./packages/common/
+COPY services/org-service/package*.json ./services/org-service/
+
 RUN npm ci --omit=dev
 
-COPY --from=builder /app/dist ./dist
-COPY start.sh ./start.sh
-RUN sed -i 's/\r//' start.sh && chmod +x start.sh
+COPY --from=builder /app/packages/common/dist ./packages/common/dist
+COPY --from=builder /app/services/org-service/dist ./services/org-service/dist
+COPY services/org-service/start.sh ./services/org-service/start.sh
+RUN sed -i 's/\r//' services/org-service/start.sh && chmod +x services/org-service/start.sh
+
+WORKDIR /app/services/org-service
 
 EXPOSE 3002
 

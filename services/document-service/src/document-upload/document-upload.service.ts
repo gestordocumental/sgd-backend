@@ -73,7 +73,7 @@ export class DocumentUploadService {
       correlationId:         getCorrelationId(),
       businessCorrelationId: params.resourceId,
       ip:            getClientIp(),
-      metadata:      params.metadata,
+      metadata:      params.metadata ?? null,
       timestamp:     new Date().toISOString(),
     });
   }
