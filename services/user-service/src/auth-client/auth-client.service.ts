@@ -32,14 +32,14 @@ export class AuthClientService {
 
   async provisionCredentials(payload: ProvisionPayload): Promise<void> {
     const correlationId = getCorrelationId();
-    const url = `${this.authServiceUrl}/api/auth/credentials/provision`;
+    const url = `${this.authServiceUrl}/api/v1/auth/credentials/provision`;
 
     this.logger.http({
       type: "internal-request",
       target: "auth-service",
       url,
       correlationId,
-      message: `→ [auth-service] POST /api/auth/credentials/provision`,
+      message: `→ [auth-service] POST /api/v1/auth/credentials/provision`,
     });
 
     try {
@@ -59,7 +59,7 @@ export class AuthClientService {
         target: "auth-service",
         statusCode: response.status,
         correlationId,
-        message: `← [auth-service] POST /api/auth/credentials/provision ${response.status}`,
+        message: `← [auth-service] POST /api/v1/auth/credentials/provision ${response.status}`,
       });
     } catch (error) {
       const axiosError = error as {
@@ -77,7 +77,7 @@ export class AuthClientService {
         target: "auth-service",
         statusCode: status ?? 500,
         correlationId,
-        message: `← [auth-service] POST /api/auth/credentials/provision ${status ?? 500}: ${message}`,
+        message: `← [auth-service] POST /api/v1/auth/credentials/provision ${status ?? 500}: ${message}`,
       });
 
       if (status && status >= 400 && status < 500) {
@@ -91,15 +91,15 @@ export class AuthClientService {
   }
 
   async disableCredentials(userId: string): Promise<void> {
-    await this.internalPatch(`/api/auth/credentials/${userId}/disable`);
+    await this.internalPatch(`/api/v1/auth/credentials/${userId}/disable`);
   }
 
   async enableCredentials(userId: string): Promise<void> {
-    await this.internalPatch(`/api/auth/credentials/${userId}/enable`);
+    await this.internalPatch(`/api/v1/auth/credentials/${userId}/enable`);
   }
 
   async revokeAllTokens(userId: string): Promise<void> {
-    await this.internalPatch(`/api/auth/credentials/${userId}/revoke-tokens`);
+    await this.internalPatch(`/api/v1/auth/credentials/${userId}/revoke-tokens`);
   }
 
   private async internalPatch(path: string): Promise<void> {

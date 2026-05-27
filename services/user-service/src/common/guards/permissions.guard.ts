@@ -140,7 +140,7 @@ export class PermissionsGuard implements CanActivate {
 
       if (!userId) throw new UnauthorizedException('Token has no sub claim');
       if (!companyId) {
-        throw new ForbiddenException('Token has no companyId — call POST /api/auth/switch-company first');
+        throw new ForbiddenException('Token has no companyId — call POST /api/v1/auth/switch-company first');
       }
 
       const permissions = await this.resolvePermissions(userId, companyId);

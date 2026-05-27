@@ -53,7 +53,7 @@ describe('AuthController', () => {
 
   // ── provisionCredentials ──────────────────────────────────────────────────
 
-  describe('POST /api/auth/credentials/provision', () => {
+  describe('POST /api/v1/auth/credentials/provision', () => {
     const dto = { userId: 'user-id', email: 'user@test.com', password: 'pass1234' };
 
     it('provisions credentials when internal token is valid', async () => {
@@ -87,7 +87,7 @@ describe('AuthController', () => {
 
   // ── disableCredential ─────────────────────────────────────────────────────
 
-  describe('PATCH /api/auth/credentials/:userId/disable', () => {
+  describe('PATCH /api/v1/auth/credentials/:userId/disable', () => {
     it('disables credential when internal token is valid', async () => {
       await controller.disableCredential(INTERNAL_TOKEN, 'user-id');
 
@@ -102,7 +102,7 @@ describe('AuthController', () => {
     });
   });
 
-  describe('PATCH /api/auth/credentials/:userId/revoke-tokens', () => {
+  describe('PATCH /api/v1/auth/credentials/:userId/revoke-tokens', () => {
     it('revokes all refresh tokens when internal token is valid', async () => {
       await controller.revokeAllRefreshTokens(INTERNAL_TOKEN, 'user-id');
 
@@ -119,7 +119,7 @@ describe('AuthController', () => {
 
   // ── enableCredential ──────────────────────────────────────────────────────
 
-  describe('PATCH /api/auth/credentials/:userId/enable', () => {
+  describe('PATCH /api/v1/auth/credentials/:userId/enable', () => {
     it('enables credential when internal token is valid', async () => {
       await controller.enableCredential(INTERNAL_TOKEN, 'user-id');
 
@@ -136,7 +136,7 @@ describe('AuthController', () => {
 
   // ── login ─────────────────────────────────────────────────────────────────
 
-  describe('POST /api/auth/login', () => {
+  describe('POST /api/v1/auth/login', () => {
     it('delegates to authService.login and returns token pair', async () => {
       const dto = { email: 'user@test.com', password: 'pass1234' };
 
@@ -174,7 +174,7 @@ describe('AuthController', () => {
 
   // ── refresh ───────────────────────────────────────────────────────────────
 
-  describe('POST /api/auth/refresh', () => {
+  describe('POST /api/v1/auth/refresh', () => {
     it('delegates to authService.refresh and returns new token pair', async () => {
       const result = await controller.refresh(undefined, { refreshToken: 'old.refresh.jwt' });
 
@@ -209,7 +209,7 @@ describe('AuthController', () => {
     });
   });
 
-  describe('POST /api/auth/forgot-password', () => {
+  describe('POST /api/v1/auth/forgot-password', () => {
     it('delegates forgot-password by email', async () => {
       await expect(controller.forgotPassword({ email: 'user@test.com' })).resolves.toEqual({ ok: true });
 
@@ -217,7 +217,7 @@ describe('AuthController', () => {
     });
   });
 
-  describe('POST /api/auth/reset-password', () => {
+  describe('POST /api/v1/auth/reset-password', () => {
     it('delegates reset-password with token and new password', async () => {
       await expect(
         controller.resetPassword({ token: 'reset-token', newPassword: 'new-password' }),
@@ -229,7 +229,7 @@ describe('AuthController', () => {
 
   // ── me ────────────────────────────────────────────────────────────────────
 
-  describe('GET /api/auth/me', () => {
+  describe('GET /api/v1/auth/me', () => {
     it('returns user info from valid access token', () => {
       authService.verifyAccessToken.mockReturnValue({ sub: 'user-id', email: 'user@test.com' });
 
@@ -271,7 +271,7 @@ describe('AuthController', () => {
 
   // ── getMyCompanies ────────────────────────────────────────────────────────
 
-  describe('GET /api/auth/me/companies', () => {
+  describe('GET /api/v1/auth/me/companies', () => {
     it('returns list of companies for the authenticated user', async () => {
       authService.verifyAccessToken.mockReturnValue({ sub: 'user-id' });
 
@@ -284,7 +284,7 @@ describe('AuthController', () => {
 
   // ── switchCompany ─────────────────────────────────────────────────────────
 
-  describe('POST /api/auth/switch-company', () => {
+  describe('POST /api/v1/auth/switch-company', () => {
     it('returns scoped token pair for a valid company', async () => {
       authService.verifyAccessToken.mockReturnValue({ sub: 'user-id' });
 

@@ -83,7 +83,7 @@ describe('AuthClientService', () => {
       await service.provisionCredentials(payload);
 
       expect(httpService.post).toHaveBeenCalledWith(
-        `${AUTH_URL}/api/auth/credentials/provision`,
+        `${AUTH_URL}/api/v1/auth/credentials/provision`,
         payload,
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -143,7 +143,7 @@ describe('AuthClientService', () => {
       await service.disableCredentials('user-uuid-1');
 
       expect(httpService.patch).toHaveBeenCalledWith(
-        `${AUTH_URL}/api/auth/credentials/user-uuid-1/disable`,
+        `${AUTH_URL}/api/v1/auth/credentials/user-uuid-1/disable`,
         {},
         expect.objectContaining({
           headers: expect.objectContaining({ 'x-internal-token': INTERNAL_TOKEN }),
@@ -177,7 +177,7 @@ describe('AuthClientService', () => {
       await service.enableCredentials('user-uuid-1');
 
       expect(httpService.patch).toHaveBeenCalledWith(
-        `${AUTH_URL}/api/auth/credentials/user-uuid-1/enable`,
+        `${AUTH_URL}/api/v1/auth/credentials/user-uuid-1/enable`,
         {},
         expect.objectContaining({
           headers: expect.objectContaining({ 'x-internal-token': INTERNAL_TOKEN }),

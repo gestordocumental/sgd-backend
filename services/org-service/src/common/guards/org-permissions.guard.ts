@@ -59,7 +59,7 @@ export class OrgPermissionsGuard implements CanActivate {
     if (!userId) throw new UnauthorizedException('Token has no sub claim');
     if (!companyId) {
       throw new ForbiddenException(
-        'Token has no companyId — call POST /api/auth/switch-company first',
+        'Token has no companyId — call POST /api/v1/auth/switch-company first',
       );
     }
 
