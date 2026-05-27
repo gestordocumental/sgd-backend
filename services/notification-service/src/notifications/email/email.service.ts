@@ -81,7 +81,7 @@ export class EmailService {
       return;
     }
 
-    const resetUrl   = `${this.frontendUrl}/reset-password?token=${opts.resetToken}`;
+    const resetUrl   = `${this.frontendUrl}/reset-password?token=${encodeURIComponent(opts.resetToken)}`;
     const expiresDate = new Date(opts.expiresAt).toLocaleString('es-CO', {
       timeZone:  'America/Bogota',
       dateStyle: 'long',
@@ -139,9 +139,9 @@ export class EmailService {
   }
 
   private async sendEmail(opts: { to: string; subject: string; html: string }): Promise<string | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
       const response = await fetch(RESEND_API_URL, {
         method: 'POST',
         signal: controller.signal,
@@ -151,7 +151,6 @@ export class EmailService {
         },
         body: JSON.stringify({ from: this.from, to: opts.to, subject: opts.subject, html: opts.html }),
       });
-      clearTimeout(timeout);
 
       const body = await response.json() as { id?: string; message?: string; name?: string };
 
@@ -162,6 +161,8 @@ export class EmailService {
     } catch (err) {
       const cause = err instanceof Error ? ((err as any).cause ?? err) : err;
       return `${err instanceof Error ? err.message : String(err)} | cause: ${cause instanceof Error ? cause.message : JSON.stringify(cause)}`;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

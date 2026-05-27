@@ -61,7 +61,13 @@ export class PermissionsGuard implements CanActivate {
   ): Promise<{ module: string; action: string }[]> {
     const key = `perms:${userId}:${companyId}`;
     const cached = await this.redis.get(key);
-    if (cached) return JSON.parse(cached) as { module: string; action: string }[];
+    if (cached) {
+      try {
+        return JSON.parse(cached) as { module: string; action: string }[];
+      } catch {
+        await this.redis.del(key);
+      }
+    }
 
     const userOrgRoles = await this.userOrgRoleRepo.find({
       where: { userId, orgId: companyId },
@@ -77,7 +83,11 @@ export class PermissionsGuard implements CanActivate {
         uor.role?.permissions?.map((p) => ({ module: p.module as string, action: p.action as string })) ?? [],
     );
 
-    await this.redis.set(key, JSON.stringify(permissions), 'EX', CACHE_TTL_SECONDS);
+    try {
+      await this.redis.set(key, JSON.stringify(permissions), 'EX', CACHE_TTL_SECONDS);
+    } catch {
+      // Cache write failure must not block an already-authorized request
+    }
     return permissions;
   }
 

@@ -302,6 +302,24 @@ export class WorkflowsService {
       .take(100)
       .getMany();
 
+    // 5. Workflows creados por el usuario (el creador siempre ve sus propios workflows
+    //    una vez que están disponibles o en ciclo de aprobación)
+    const createdByUserWorkflows = await this.workflowRepo
+      .createQueryBuilder('w')
+      .leftJoinAndSelect('w.approvalSteps', 'steps')
+      .where('w.org_id = :orgId', { orgId })
+      .andWhere('w.created_by = :userId', { userId })
+      .andWhere('w.status IN (:...creatorStatuses)', {
+        creatorStatuses: [
+          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+          WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+        ],
+      })
+      .andWhere('w.deleted_at IS NULL')
+      .orderBy('w.updatedAt', 'DESC')
+      .take(100)
+      .getMany();
+
     // Combinar y deduplicar por id
     const merged = new Map<string, Workflow>();
     for (const w of [
@@ -309,6 +327,7 @@ export class WorkflowsService {
       ...optionalReviewerWorkflows,
       ...allowedOptionalWorkflows,
       ...pastOptionalReviewerWorkflows,
+      ...createdByUserWorkflows,
     ]) {
       merged.set(w.id, w);
     }
@@ -319,6 +338,7 @@ export class WorkflowsService {
       `optionalStep=${optionalReviewerWorkflows.length} ` +
       `allowedOptional=${allowedOptionalWorkflows.length} ` +
       `pastOptional=${pastOptionalReviewerWorkflows.length} ` +
+      `createdBy=${createdByUserWorkflows.length} ` +
       `total=${merged.size}`,
     );
 

@@ -5,7 +5,7 @@ import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import { verify, JsonWebTokenError } from 'jsonwebtoken';
-import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+import { AUTH_KEY, AuthMeta } from '@sgd/common';
 
 /**
  * Verify a JWT using HS256 and return its decoded payload.

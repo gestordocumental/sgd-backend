@@ -127,7 +127,7 @@ services:
           policy: local
           fault_tolerant: true
 
-  # ── auth-service: reset-password (sin JWT) ─────────────────────────────
+  # ── auth-service: reset-password (sin JWT, con rate-limit) ──────────────
   - name: auth-reset-password
     url: http://auth-service.railway.internal:3000
     routes:
@@ -136,6 +136,12 @@ services:
           - /api/v1/auth/reset-password
         methods: [POST]
         strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+          fault_tolerant: true
 
   # ── auth-service: provision (token interno, sin JWT público) ──────────
   - name: auth-provision
@@ -217,9 +223,19 @@ services:
     plugins:
       - name: jwt
 
-  # ── notification-service: SSE stream (JWT via query param) ────────────
-  # EventSource (SSE) cannot set custom headers, so the token is passed
-  # as ?token=<jwt>. Kong's JWT plugin must be told to read uri_param_names.
+  # ── notification-service: ticket efímero para SSE (JWT en header) ───────
+  - name: notification-sse-ticket
+    url: http://notification-service.railway.internal:3000
+    routes:
+      - name: notification-sse-ticket-route
+        paths:
+          - /api/v1/notifications/stream/ticket
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── notification-service: SSE stream (autenticado por ticket efímero) ───
   - name: notification-sse
     url: http://notification-service.railway.internal:3000
     routes:
@@ -229,9 +245,11 @@ services:
         methods: [GET]
         strip_path: false
     plugins:
-      - name: jwt
+      - name: rate-limiting
         config:
-          uri_param_names: [token]
+          minute: 30
+          policy: local
+          fault_tolerant: true
 
   # ── notification-service: resto de rutas (JWT en header) ───────────────
   - name: notification-service

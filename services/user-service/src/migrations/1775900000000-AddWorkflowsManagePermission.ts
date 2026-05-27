@@ -5,7 +5,7 @@ export class AddWorkflowsManagePermission1775900000000 implements MigrationInter
     // 1. Insert WORKFLOWS:MANAGE permission
     await queryRunner.query(`
       INSERT INTO permissions (id, module, action, description)
-      VALUES (gen_random_uuid(), 'WORKFLOWS', 'MANAGE', 'View all organization workflows')
+      VALUES (gen_random_uuid(), 'WORKFLOWS', 'MANAGE', 'Manage organization workflows')
       ON CONFLICT (module, action) DO NOTHING
     `);
 

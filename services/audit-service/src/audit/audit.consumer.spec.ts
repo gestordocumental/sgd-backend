@@ -100,11 +100,16 @@ describe('AuditConsumer', () => {
     );
   });
 
-  it('creates consumer with connection-level retry config', () => {
+  it('creates consumer with connection-level retry config', async () => {
     const mockKafka = { consumer: jest.fn().mockReturnValue(mockKafkaConsumer) };
-    new AuditConsumer(mockKafka as any, config as any, auditService as any, logger as any, mockProducer as any);
-    // Verify retry config is passed on the next bootstrap (already called once in beforeEach)
-    expect(mockKafkaConsumer.connect).toHaveBeenCalled();
+    const c = new AuditConsumer(mockKafka as any, config as any, auditService as any, logger as any, mockProducer as any);
+    await c.onApplicationBootstrap();
+    expect(mockKafka.consumer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupId: expect.any(String),
+        retry: expect.any(Object),
+      }),
+    );
   });
 
   it('uses the configured consumer group id', () => {

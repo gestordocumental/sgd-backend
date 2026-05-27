@@ -49,7 +49,7 @@ import { PermissionModule, PermissionAction } from "../roles/entities/permission
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT')
-@Controller("api/users")
+@Controller("api/v1/users")
 @UseGuards(PermissionsGuard)
 export class UsersController {
   constructor(

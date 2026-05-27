@@ -296,6 +296,36 @@ describe('TypologiesService', () => {
     });
   });
 
+  // ── findByIdPublic ────────────────────────────────────────────────────────
+
+  describe('findByIdPublic()', () => {
+    it('returns a typology by ID', async () => {
+      const doc = makeDoc();
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      const result = await service.findByIdPublic('org-1', doc.id);
+
+      expect(result).toBe(doc);
+    });
+
+    it('throws BadRequestException for invalid ObjectId', async () => {
+      const { Model } = makeModel();
+      const service = makeService(Model);
+
+      await expect(service.findByIdPublic('org-1', 'not-an-id')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when typology does not exist', async () => {
+      const { Model } = makeModel();
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+
+      const service = makeService(Model);
+      const validId = makeId();
+      await expect(service.findByIdPublic('org-1', validId)).rejects.toThrow(NotFoundException);
+    });
+  });
+
   // ── findHistory ───────────────────────────────────────────────────────────
 
   describe('findHistory()', () => {

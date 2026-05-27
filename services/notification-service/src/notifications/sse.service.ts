@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Subject, Observable, fromEvent } from 'rxjs';
+import { Subject, ReplaySubject, Observable, fromEvent } from 'rxjs';
 import { takeUntil, take } from 'rxjs/operators';
 import { MessageEvent } from '@nestjs/common';
 import { IncomingMessage } from 'http';
@@ -7,14 +7,14 @@ import { IncomingMessage } from 'http';
 @Injectable()
 export class SseService implements OnModuleDestroy {
   /** userId → set of active SSE subjects */
-  private readonly clients = new Map<string, Set<Subject<MessageEvent>>>();
+  private readonly clients = new Map<string, Set<ReplaySubject<MessageEvent>>>();
 
   /**
    * Register a new SSE connection for a user.
    * Automatically removes the connection when the HTTP request closes.
    */
   connect(userId: string, req: IncomingMessage): Observable<MessageEvent> {
-    const subject = new Subject<MessageEvent>();
+    const subject = new ReplaySubject<MessageEvent>(1);
 
     if (!this.clients.has(userId)) {
       this.clients.set(userId, new Set());
@@ -50,7 +50,7 @@ export class SseService implements OnModuleDestroy {
     return this.clients.size;
   }
 
-  private removeClient(userId: string, subject: Subject<MessageEvent>): void {
+  private removeClient(userId: string, subject: ReplaySubject<MessageEvent>): void {
     const subjects = this.clients.get(userId);
     if (!subjects) return;
     subjects.delete(subject);

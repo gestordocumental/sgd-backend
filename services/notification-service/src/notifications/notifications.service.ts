@@ -78,7 +78,20 @@ export class NotificationsService {
 
     // Push SSE event to connected users so they get instant updates without polling
     for (const userId of uniqueRecipientUserIds) {
-      this.sseService.emit(userId, { type, title, message, workflowId: workflowId ?? null, workflowTitle: workflowTitle ?? null });
+      try {
+        this.sseService.emit(userId, {
+          type,
+          title,
+          message,
+          workflowId:    workflowId ?? null,
+          workflowTitle: workflowTitle ?? null,
+        });
+      } catch (err: unknown) {
+        this.logger.warn(
+          `SSE emit failed for user ${userId}: ${err instanceof Error ? err.message : String(err)}`,
+          'NotificationsService',
+        );
+      }
     }
 
     // Enviar emails — obtener datos de usuario de forma paralela

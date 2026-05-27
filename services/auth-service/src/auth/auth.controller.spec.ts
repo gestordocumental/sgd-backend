@@ -11,6 +11,7 @@ const INTERNAL_TOKEN = 'my-super-secret-internal-token';
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: Record<string, jest.Mock>;
+  let configService: { getOrThrow: jest.Mock };
 
   beforeEach(async () => {
     authService = {
@@ -27,15 +28,17 @@ describe('AuthController', () => {
       verifyAccessToken: jest.fn().mockReturnValue({ sub: 'user-id', email: 'user@test.com' }),
     };
 
+    configService = {
+      getOrThrow: jest.fn().mockReturnValue(INTERNAL_TOKEN),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
       providers: [
         { provide: AuthService, useValue: authService },
         {
           provide: ConfigService,
-          useValue: {
-            getOrThrow: jest.fn().mockReturnValue(INTERNAL_TOKEN),
-          },
+          useValue: configService,
         },
       ],
     })
@@ -71,6 +74,14 @@ describe('AuthController', () => {
     it('throws UnauthorizedException when internal token is missing (empty string)', () => {
       expect(() => controller.provisionCredentials('', dto))
         .toThrow(UnauthorizedException);
+    });
+
+    it('throws when the expected internal token is blank', () => {
+      configService.getOrThrow.mockReturnValue('   ');
+
+      expect(() => controller.provisionCredentials('', dto))
+        .toThrow('INTERNAL_TOKEN_USER_AUTH must be a non-empty string');
+      expect(authService.provisionCredentials).not.toHaveBeenCalled();
     });
   });
 

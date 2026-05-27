@@ -20,6 +20,7 @@ import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
 import { KafkaProducerService, TOPICS } from "@sgd/common";
+import { parseDurationToSeconds } from "./utils/parse-duration";
 
 // Refresh token TTL in Redis (must match JWT_REFRESH_EXPIRATION: 12h)
 const REFRESH_TTL_SECONDS = 12 * 60 * 60;
@@ -152,7 +153,7 @@ export class AuthService {
 
   /**
    * Refresh token rotation.
-   * Preserves companyId and isSuperAdmin from the existing token if present.
+   * Preserves companyId and recalculates scoped claims from user-service.
    */
   async refresh(refreshToken: string) {
     let payload: any;
@@ -205,8 +206,19 @@ export class AuthService {
       throw new UnauthorizedException("Scope revoked");
     }
 
+    let permissions: string[] | undefined;
+    if (payload.companyId) {
+      const rawPermissions =
+        await this.userClientService.getUserEffectivePermissions(
+          credential.userId,
+          payload.companyId,
+        );
+      permissions = rawPermissions.map((p) => `${p.module}:${p.action}`);
+    }
+
     return this.generateTokenPair(credential, {
       companyId: payload.companyId,
+      permissions,
       // Only include isSuperAdmin for global (non-company) tokens.
       // Company-scoped tokens must not carry isSuperAdmin so the user
       // is limited to their company role permissions in that context.
@@ -244,8 +256,9 @@ export class AuthService {
     // Mark the user as super-admin-revoked for the duration of the access-token TTL.
     // The JWT guard reads this key to block super-admin requests even while the
     // existing token is still cryptographically valid.
-    const ttl = this.configService.get<string>('JWT_EXPIRATION') ?? '300s';
-    const ttlSeconds = Number.parseInt(ttl.replace(/[^0-9]/g, ''), 10) || 300;
+    const ttlSeconds = parseDurationToSeconds(
+      this.configService.get<string>('JWT_EXPIRATION') ?? '300s',
+    );
     await this.redis.set(`sa-revoked:${userId}`, '1', 'EX', ttlSeconds);
   }
 

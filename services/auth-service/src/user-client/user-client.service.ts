@@ -26,7 +26,7 @@ export class UserClientService {
 
   async getUserCompanies(userId: string): Promise<string[]> {
     const correlationId = getCorrelationId();
-    const url = `${this.userServiceUrl}/api/users/${userId}/companies`;
+    const url = `${this.userServiceUrl}/api/v1/users/${userId}/companies`;
 
     this.logger.http({
       type: "internal-request",
@@ -74,7 +74,7 @@ export class UserClientService {
     companyId: string,
   ): Promise<{ module: string; action: string }[]> {
     const correlationId = getCorrelationId();
-    const url = `${this.userServiceUrl}/api/users/${userId}/effective-permissions?companyId=${companyId}`;
+    const url = `${this.userServiceUrl}/api/v1/users/${userId}/effective-permissions?companyId=${companyId}`;
 
     this.logger.http({
       type: 'internal-request',
@@ -120,7 +120,7 @@ export class UserClientService {
 
   async getUserInfo(userId: string): Promise<{ isSuperAdmin: boolean }> {
     const correlationId = getCorrelationId();
-    const url = `${this.userServiceUrl}/api/users/${userId}`;
+    const url = `${this.userServiceUrl}/api/v1/users/${userId}`;
 
     this.logger.http({
       type: "internal-request",

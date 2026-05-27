@@ -169,7 +169,7 @@ export class OrgsService {
   private async revokeOrgAccess(orgId: string): Promise<void> {
     const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
     const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER');
-    const url = `${userServiceUrl}/api/users/internal/orgs/${orgId}/users`;
+    const url = `${userServiceUrl}/api/v1/users/internal/orgs/${orgId}/users`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5_000);
     try {

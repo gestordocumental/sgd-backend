@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { take } from 'rxjs/operators';
+import { skip, take } from 'rxjs/operators';
 import { SseService } from './sse.service';
 
 function makeReq(): EventEmitter {
@@ -19,7 +19,7 @@ describe('SseService', () => {
 
     expect(service.connectedUsers).toBe(1);
 
-    stream$.pipe(take(1)).subscribe({
+    stream$.pipe(skip(1), take(1)).subscribe({
       next: (event) => {
         expect(event).toEqual({
           data: { notificationId: 'notif-1' },
@@ -36,7 +36,7 @@ describe('SseService', () => {
     const req = makeReq();
     const stream$ = service.connect('user-1', req as any);
 
-    stream$.pipe(take(1)).subscribe({
+    stream$.pipe(skip(1), take(1)).subscribe({
       next: (event) => {
         expect(event).toEqual({ data: { orgId: 'org-1' }, type: 'session-revoked' });
         done();

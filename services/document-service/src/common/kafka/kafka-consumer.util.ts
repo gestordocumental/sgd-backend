@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { KafkaMessage } from 'kafkajs';
-import { correlationStorage } from '../correlation/correlation.context';
+import { correlationStorage } from '@sgd/common';
 
 /**
  * Run a function inside a correlation context derived from the Kafka message.

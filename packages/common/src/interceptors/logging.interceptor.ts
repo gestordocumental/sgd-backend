@@ -43,10 +43,11 @@ export class LoggingInterceptor implements NestInterceptor {
             duration / 1000,
           );
         },
-        error: (err) => {
+        error: (err: unknown) => {
           const duration = Date.now() - startedAt;
+          const nestErr = err as { getStatus?: () => number; status?: number } | undefined;
           const statusCode =
-            typeof err?.getStatus === 'function' ? err.getStatus() : (err?.status ?? 500);
+            typeof nestErr?.getStatus === 'function' ? nestErr.getStatus() : (nestErr?.status ?? 500);
           this.logger.http({
             type: 'response',
             method,

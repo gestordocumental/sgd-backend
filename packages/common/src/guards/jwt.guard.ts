@@ -48,7 +48,6 @@ export class JwtGuard implements CanActivate {
     const request = ctx.switchToHttp().getRequest<{
       headers: Record<string, string>;
       params: Record<string, string>;
-      query?: Record<string, string>;
       user?: Record<string, unknown>;
     }>();
 
@@ -79,9 +78,7 @@ export class JwtGuard implements CanActivate {
       )) return true;
     }
 
-    // SSE connections cannot set headers, so accept token from query param as fallback
-    const queryToken = request.query?.['token'];
-    const auth = request.headers['authorization'] ?? (queryToken ? `Bearer ${queryToken}` : undefined);
+    const auth = request.headers['authorization'];
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
 
     const payload = verifyAndDecodeJwt(

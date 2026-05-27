@@ -128,6 +128,49 @@ describe('DocumentUploadController', () => {
     });
   });
 
+  describe('extractUserId helper (via upload)', () => {
+    it('extracts sub from a valid Bearer JWT and passes it as actorId', async () => {
+      const service = makeService();
+      const ctrl    = new DocumentUploadController(service as any);
+      const sub     = 'user-abc-123';
+      const payloadB64 = Buffer.from(JSON.stringify({ sub })).toString('base64url');
+      const fakeJwt    = `Bearer header.${payloadB64}.sig`;
+
+      await ctrl.upload(fakeJwt, 'org-1', 'typo-id-1', makeFile());
+
+      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', expect.any(Object), undefined, sub);
+    });
+
+    it('passes undefined actorId when JWT payload has no sub field', async () => {
+      const service = makeService();
+      const ctrl    = new DocumentUploadController(service as any);
+      const payloadB64 = Buffer.from(JSON.stringify({ role: 'admin' })).toString('base64url');
+      const fakeJwt    = `Bearer header.${payloadB64}.sig`;
+
+      await ctrl.upload(fakeJwt, 'org-1', 'typo-id-1', makeFile());
+
+      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', expect.any(Object), undefined, undefined);
+    });
+
+    it('passes undefined actorId when Bearer token is malformed (catch path)', async () => {
+      const service = makeService();
+      const ctrl    = new DocumentUploadController(service as any);
+
+      await ctrl.upload('Bearer only_one_segment', 'org-1', 'typo-id-1', makeFile());
+
+      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', expect.any(Object), undefined, undefined);
+    });
+
+    it('passes undefined actorId for non-Bearer authorization header', async () => {
+      const service = makeService();
+      const ctrl    = new DocumentUploadController(service as any);
+
+      await ctrl.upload('Basic dXNlcjpwYXNz', 'org-1', 'typo-id-1', makeFile());
+
+      expect(service.upload).toHaveBeenCalledWith('org-1', 'typo-id-1', expect.any(Object), undefined, undefined);
+    });
+  });
+
   describe('createNewVersion()', () => {
     it('delegates to service.createNewVersion with correct params', async () => {
       const service = makeService();

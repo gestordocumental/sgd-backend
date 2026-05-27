@@ -25,6 +25,6 @@ module.exports = {
     '^@sgd/common$': '<rootDir>/../../../packages/common/src/index.ts',
     '^@sgd/common/(.*)$': '<rootDir>/../../../packages/common/src/$1',
   },
-  coverageThreshold: { global: { statements: 80, lines: 80 } },
+  coverageThreshold: { global: { statements: 85, lines: 85 } },
   forceExit: true,
 };

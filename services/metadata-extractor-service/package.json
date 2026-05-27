@@ -11,7 +11,7 @@
     "test:cov": "jest --coverage"
   },
   "dependencies": {
-    "@sgd/common": "*",
+    "@sgd/common": "workspace:*",
     "@aws-sdk/client-s3": "^3.600.0",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",

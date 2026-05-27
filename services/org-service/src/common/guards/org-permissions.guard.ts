@@ -69,7 +69,7 @@ export class OrgPermissionsGuard implements CanActivate {
     const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
     const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER');
     const url =
-      `${userServiceUrl}/api/permissions/check` +
+      `${userServiceUrl}/api/v1/permissions/check` +
       `?userId=${encodeURIComponent(userId)}` +
       `&orgId=${encodeURIComponent(companyId)}` +
       `&module=${encodeURIComponent(required.module)}` +

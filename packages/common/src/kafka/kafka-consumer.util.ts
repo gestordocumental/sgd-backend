@@ -82,7 +82,7 @@ export async function withDlt(
           await params.producer.emitToDlt(params.topic, params.message);
         } catch (dltErr) {
           params.logger.error(
-            `[kafka] Failed to publish to DLT for topic "${params.topic}": ${dltErr instanceof Error ? dltErr.message : String(dltErr)}`,
+            `[kafka:dlt-failure] Message permanently lost — failed to publish to DLT for topic "${params.topic}": ${dltErr instanceof Error ? dltErr.message : String(dltErr)}`,
             dltErr instanceof Error ? dltErr.stack : undefined,
             params.context,
           );

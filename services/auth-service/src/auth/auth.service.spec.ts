@@ -277,6 +277,29 @@ describe('AuthService', () => {
       );
     });
 
+    it('recomputes permissions when refreshing a company-scoped token', async () => {
+      jwtService.verify.mockReturnValue({ ...validPayload, companyId: 'org-id' });
+      redis.getdel.mockResolvedValue('1');
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserCompanies.mockResolvedValue(['org-id']);
+      userClient.getUserEffectivePermissions.mockResolvedValue([
+        { module: 'documents', action: 'read' },
+        { module: 'workflows', action: 'manage' },
+      ]);
+
+      await service.refresh('valid.refresh.token');
+
+      expect(userClient.getUserEffectivePermissions).toHaveBeenCalledWith('user-id', 'org-id');
+      expect(jwtService.sign).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          companyId: 'org-id',
+          permissions: ['documents:read', 'workflows:manage'],
+        }),
+        expect.any(Object),
+      );
+    });
+
     it('throws UnauthorizedException when refresh token signature is invalid', async () => {
       jwtService.verify.mockImplementation(() => {
         throw new Error('invalid signature');
@@ -397,7 +420,7 @@ describe('AuthService', () => {
         'refresh:user-id:old-2',
         'refresh:user-id:old-3',
       );
-      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', 15);
+      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', 900);
     });
   });
 
@@ -609,7 +632,7 @@ describe('AuthService', () => {
       expect(credRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ passwordHash: '$2a$10$hashed' }),
       );
-      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', 15);
+      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', 900);
     });
   });
 });

@@ -48,7 +48,7 @@ export class UserClientService {
     try {
       const result = await this.cb.fire(() =>
         firstValueFrom(
-          this.http.get<UserInfo>(`${this.baseUrl}/api/users/${userId}`, {
+          this.http.get<UserInfo>(`${this.baseUrl}/api/v1/users/${userId}`, {
             timeout: 3000,
             headers: {
               'x-internal-token': this.internalToken,

@@ -122,7 +122,7 @@ describe('OrgPermissionsGuard', () => {
     ).resolves.toBe(true);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://user-service/api/permissions/check?userId=user-1&orgId=org-1&module=ORG_STRUCTURE&action=READ',
+      'http://user-service/api/v1/permissions/check?userId=user-1&orgId=org-1&module=ORG_STRUCTURE&action=READ',
       expect.objectContaining({
         headers: { 'x-internal-token': 'internal-secret' },
       }),

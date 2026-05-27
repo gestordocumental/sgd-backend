@@ -39,7 +39,13 @@ export class AuthController {
 
   private validateInternalToken(internalToken: string): void {
     // Only user-service is allowed to call auth-service internal endpoints.
-    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN_USER_AUTH'));
+    const rawExpected = this.configService
+      .getOrThrow<string>('INTERNAL_TOKEN_USER_AUTH')
+      .trim();
+    if (!rawExpected) {
+      throw new Error('INTERNAL_TOKEN_USER_AUTH must be a non-empty string');
+    }
+    const expected = Buffer.from(rawExpected);
     const provided = Buffer.from(internalToken ?? '');
     const isValid =
       provided.length === expected.length &&
@@ -203,6 +209,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Reset password using the token received by email' })
   @ApiResponse({ status: 200, description: 'Password changed successfully' })
   @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
+  @UseGuards(ThrottlerGuard)
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   resetPassword(@Body() dto: ResetPasswordDto) {

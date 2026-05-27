@@ -79,7 +79,7 @@ describe('UserClientService', () => {
       await service.getUserInfo('abc-123');
 
       expect(httpService.get).toHaveBeenCalledWith(
-        'http://user-service/api/users/abc-123',
+        'http://user-service/api/v1/users/abc-123',
         expect.objectContaining({
           headers: expect.objectContaining({ 'x-internal-token': 'test-internal-token' }),
         }),
@@ -140,7 +140,7 @@ describe('UserClientService', () => {
       await service.getUserCompanies('abc-123');
 
       expect(httpService.get).toHaveBeenCalledWith(
-        'http://user-service/api/users/abc-123/companies',
+        'http://user-service/api/v1/users/abc-123/companies',
         expect.objectContaining({
           headers: expect.objectContaining({ 'x-internal-token': 'test-internal-token' }),
         }),
@@ -189,7 +189,7 @@ describe('UserClientService', () => {
       await service.getUserEffectivePermissions('abc-123', 'org-456');
 
       expect(httpService.get).toHaveBeenCalledWith(
-        'http://user-service/api/users/abc-123/effective-permissions?companyId=org-456',
+        'http://user-service/api/v1/users/abc-123/effective-permissions?companyId=org-456',
         expect.objectContaining({
           headers: expect.objectContaining({
             'x-internal-token': 'test-internal-token',
