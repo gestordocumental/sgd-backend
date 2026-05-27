@@ -11,7 +11,7 @@
     "test:cov": "jest --coverage"
   },
   "dependencies": {
-    "@sgd/common": "workspace:*",
+    "@sgd/common": "*",
     "@elastic/elasticsearch": "^8.13.0",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",

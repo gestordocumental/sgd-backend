@@ -19,7 +19,7 @@
     "start:migrate": "npm run migration:run && npm run start:prod"
   },
   "dependencies": {
-    "@sgd/common": "workspace:*",
+    "@sgd/common": "*",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",
