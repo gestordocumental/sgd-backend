@@ -1,4 +1,3 @@
-import { UnauthorizedException } from '@nestjs/common';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { JwtPayload } from '@sgd/common';
@@ -18,40 +17,34 @@ describe('NotificationsController', () => {
   let ctrl:             NotificationsController;
   let service:          jest.Mocked<NotificationsService>;
   let sseService:       { connect: jest.Mock };
-  let sseTicketService: { create: jest.Mock; consume: jest.Mock };
+  let sseTicketService: { create: jest.Mock; validate: jest.Mock; revoke: jest.Mock };
 
   beforeEach(() => {
     service          = makeService();
     sseService       = { connect: jest.fn() };
-    sseTicketService = { create: jest.fn(), consume: jest.fn() };
+    sseTicketService = { create: jest.fn(), validate: jest.fn(), revoke: jest.fn() };
     ctrl = new NotificationsController(service, sseService as any, sseTicketService as any);
   });
 
   // ─── issueTicket ────────────────────────────────────────────────────────────
 
-  it('issueTicket() calls create with user.sub and returns ticket + expiresIn:30', () => {
-    sseTicketService.create.mockReturnValue('ticket-uuid');
-    expect(ctrl.issueTicket(user)).toEqual({ ticket: 'ticket-uuid', expiresIn: 30 });
+  it('issueTicket() calls create with user.sub and returns ticket + expiresIn:30', async () => {
+    sseTicketService.create.mockResolvedValue('ticket-uuid');
+    await expect(ctrl.issueTicket(user)).resolves.toEqual({ ticket: 'ticket-uuid', expiresIn: 30 });
     expect(sseTicketService.create).toHaveBeenCalledWith('user-1');
   });
 
   // ─── stream ─────────────────────────────────────────────────────────────────
+  // stream() is now synchronous — ticket validation is handled by SseTicketGuard
+  // before the handler runs. The handler only reads req.sseUserId.
 
-  it('stream() connects when ticket is valid', () => {
-    const req        = {} as any;
+  it('stream() calls sseService.connect with req.sseUserId', () => {
     const observable = {} as any;
-    sseTicketService.consume.mockReturnValue('user-1');
+    const req        = { sseUserId: 'user-1' } as any;
     sseService.connect.mockReturnValue(observable);
 
-    expect(ctrl.stream('valid-ticket', req)).toBe(observable);
-    expect(sseTicketService.consume).toHaveBeenCalledWith('valid-ticket');
+    expect(ctrl.stream(req)).toBe(observable);
     expect(sseService.connect).toHaveBeenCalledWith('user-1', req);
-  });
-
-  it('stream() throws UnauthorizedException when ticket is invalid or expired', () => {
-    sseTicketService.consume.mockReturnValue(null);
-    expect(() => ctrl.stream('bad-ticket', {} as any)).toThrow(UnauthorizedException);
-    expect(sseService.connect).not.toHaveBeenCalled();
   });
 
   // ─── list ───────────────────────────────────────────────────────────────────

@@ -41,7 +41,6 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
     overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
   avatarUrl: null,
   isSuperAdmin: false,
-  isOptionalReviewer: false,
   twoFactorEnabled: false,
   orgRoles: [],
   createdAt: new Date('2024-01-01'),
@@ -57,6 +56,7 @@ const makeUor = (overrides: Partial<UserOrgRole> = {}): UserOrgRole => ({
   roleId: 'role-uuid-1',
   assignedBy: 'admin-uuid',
   removedAt: null,
+  isOptionalReviewer: false,
   user: null as any,
   role: null as any,
   createdAt: new Date('2024-01-01'),
@@ -712,6 +712,56 @@ describe('UsersService', () => {
 
       await expect(service.removeFromOrg('bad-id', 'org-uuid-1')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+  });
+
+  // ─── setOptionalReviewer ──────────────────────────────────────────────────
+
+  describe('setOptionalReviewer', () => {
+    it('throws NotFoundException when user is not a member of the org', async () => {
+      uorRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setOptionalReviewer('user-uuid-1', 'org-uuid-1', true),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(uorRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('updates isOptionalReviewer without emitting audit when actorId is absent', async () => {
+      const uor = makeUor({ isOptionalReviewer: false });
+      uorRepo.findOne.mockResolvedValue(uor);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.setOptionalReviewer('user-uuid-1', 'org-uuid-1', true);
+
+      expect(uorRepo.update).toHaveBeenCalledWith(
+        { userId: 'user-uuid-1', orgId: 'org-uuid-1', removedAt: IsNull() },
+        { isOptionalReviewer: true },
+      );
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
+    });
+
+    it('emits audit log when actorId is provided', async () => {
+      const user = makeUser();
+      const uor = makeUor({ isOptionalReviewer: false });
+
+      uorRepo.findOne.mockResolvedValue(uor);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await service.setOptionalReviewer('user-uuid-1', 'org-uuid-1', true, 'actor-uuid');
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          action: 'USER_OPTIONAL_REVIEWER_CHANGED',
+          resourceId: 'user-uuid-1',
+          metadata: {
+            changes: { isOptionalReviewer: { from: false, to: true } },
+          },
+        }),
       );
     });
   });

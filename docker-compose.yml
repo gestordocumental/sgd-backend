@@ -59,7 +59,9 @@ services:
       - sgd-local
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Redis — Auth Service (tokens) + User Service (invitation tokens) + Notification Service (cola)
+  # Redis — Auth Service (JWT/refresh tokens) · User Service (invitation tokens)
+  #         Notification Service (SSE tickets efímeros, 30 s TTL)
+  # Sin contraseña en local. Conectar desde host vía localhost:6379.
   # ─────────────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2-alpine

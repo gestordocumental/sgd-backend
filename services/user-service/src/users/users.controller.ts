@@ -40,6 +40,7 @@ import { UserResponseDto } from "./dto/user-response.dto";
 import { UserWithOrgRolesDto } from "./dto/user-with-org-roles.dto";
 import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
+import { SetOptionalReviewerDto } from "./dto/set-optional-reviewer.dto";
 import { RequireSuperAdmin } from "../common/decorators/require-super-admin.decorator";
 import { CurrentUserId } from "../common/decorators/current-user-id.decorator";
 import { JwtPayloadParam, JwtPayload } from '@sgd/common';
@@ -161,8 +162,8 @@ export class UsersController {
   ): Promise<{ data: UserWithOrgRolesDto[]; total: number }> {
     const { data, total } = await this.usersService.findByOrg(orgId, page, limit);
     return {
-      data: data.map(({ user, roles, orgRemovedAt }) =>
-        UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt),
+      data: data.map(({ user, roles, orgRemovedAt, isOptionalReviewer }) =>
+        UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt, isOptionalReviewer),
       ),
       total,
     };
@@ -401,5 +402,25 @@ export class UsersController {
     @Param("orgId") orgId: string,
   ): Promise<void> {
     return this.usersService.removeFromOrg(id, orgId, caller.sub);
+  }
+
+  @ApiOperation({ summary: 'Set or clear the optional-reviewer flag for a user in a specific org' })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'User ID' })
+  @ApiParam({ name: 'orgId', format: 'uuid', description: 'Organization ID' })
+  @ApiResponse({ status: 204, description: 'Flag updated' })
+  @ApiResponse({ status: 404, description: 'User is not a member of this org' })
+  @Patch(":id/orgs/:orgId/optional-reviewer")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  setOptionalReviewer(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("orgId", ParseUUIDPipe) orgId: string,
+    @Body() dto: SetOptionalReviewerDto,
+  ): Promise<void> {
+    if (!caller.isSuperAdmin && caller.companyId !== orgId) {
+      throw new ForbiddenException('You can only update users in your own organization');
+    }
+    return this.usersService.setOptionalReviewer(id, orgId, dto.value, caller.sub);
   }
 }

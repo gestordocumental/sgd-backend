@@ -39,6 +39,11 @@ export class UserOrgRole {
   @Column({ name: 'removed_at', type: 'timestamptz', nullable: true, default: null })
   removedAt!: Date | null;
 
+  // Per-org flag: true when this user is available as an optional reviewer
+  // in admin workflow cycles for THIS organization only.
+  @Column({ name: 'is_optional_reviewer', type: 'boolean', default: false })
+  isOptionalReviewer!: boolean;
+
   @ManyToOne(() => User, (user) => user.orgRoles, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user!: User;

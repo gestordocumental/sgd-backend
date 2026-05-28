@@ -38,9 +38,6 @@ export class UserResponseDto {
   @ApiProperty()
   isSuperAdmin!: boolean;
 
-  @ApiProperty()
-  isOptionalReviewer!: boolean;
-
   @ApiPropertyOptional({ type: String, nullable: true })
   avatarUrl!: string | null;
 
@@ -67,7 +64,6 @@ export class UserResponseDto {
     dto.registrationStatus = user.registrationStatus;
     dto.isActive = user.isActive;
     dto.isSuperAdmin = user.isSuperAdmin;
-    dto.isOptionalReviewer = user.isOptionalReviewer;
     dto.avatarUrl = user.avatarUrl ?? null;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;

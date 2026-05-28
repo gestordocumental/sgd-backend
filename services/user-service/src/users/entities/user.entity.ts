@@ -71,10 +71,6 @@ export class User {
   @Column({ name: 'is_super_admin', type: 'boolean', default: false })
   isSuperAdmin!: boolean;
 
-  /** Marca al usuario como revisor opcional disponible en ciclos administrativos de workflows. */
-  @Column({ name: 'is_optional_reviewer', type: 'boolean', default: false })
-  isOptionalReviewer!: boolean;
-
   // Can be toggled by the user or forced by super admin
   @Column({ name: 'two_factor_enabled', type: 'boolean', default: false })
   twoFactorEnabled!: boolean;

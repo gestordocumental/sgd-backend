@@ -9,7 +9,7 @@ import {
   Req,
   Sse,
   MessageEvent,
-  UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -26,6 +26,9 @@ import { SseService } from './sse.service';
 import { SseTicketService } from './sse-ticket.service';
 import { ListNotificationsDto } from './dto/list-notifications.dto';
 import { NotificationResponseDto, PaginatedNotificationsDto } from './dto/notification-response.dto';
+import type { Request } from 'express';
+import { SseTicketGuard } from './sse-ticket.guard';
+import { TICKET_TTL_SECONDS } from './sse-ticket.service';
 import { Auth, JwtPayloadParam, JwtPayload } from '@sgd/common';
 
 @ApiTags('Notifications')
@@ -39,33 +42,31 @@ export class NotificationsController {
   ) {}
 
   /**
-   * Issues a short-lived (30s), one-time-use ticket.
-   * The client must exchange it immediately for an SSE connection via GET /stream?ticket=<uuid>.
+   * Issues a short-lived (30s) ticket stored in Redis.
+   * The client opens an SSE connection via GET /stream?ticket=<uuid>.
    * Keeping the full JWT out of the URL prevents it from appearing in server/proxy access logs.
    */
   @ApiOperation({ summary: 'Obtener ticket efímero para conectar al stream SSE' })
   @ApiOkResponse({ schema: { example: { ticket: 'uuid', expiresIn: 30 } } })
   @Auth()
   @Post('stream/ticket')
-  issueTicket(@JwtPayloadParam() user: JwtPayload): { ticket: string; expiresIn: number } {
-    return { ticket: this.sseTicketService.create(user.sub), expiresIn: 30 };
+  async issueTicket(@JwtPayloadParam() user: JwtPayload): Promise<{ ticket: string; expiresIn: number }> {
+    const ticket = await this.sseTicketService.create(user.sub);
+    return { ticket, expiresIn: TICKET_TTL_SECONDS };
   }
 
   /**
-   * SSE stream — authenticated via short-lived ticket, not a JWT in the query string.
-   * No @Auth() here: JwtGuard skips routes without AUTH_KEY metadata.
-   * Ticket validation is the sole auth mechanism for this endpoint.
+   * SSE stream — ticket validated by SseTicketGuard BEFORE NestJS sets SSE headers.
+   * This is critical: once @Sse() flushes the 200 OK headers, a 401 can no longer
+   * be sent. The guard validates against Redis and writes userId onto the request,
+   * so this handler stays fully synchronous.
    */
   @ApiOperation({ summary: 'Stream SSE de notificaciones en tiempo real' })
   @ApiQuery({ name: 'ticket', description: 'Ticket efímero obtenido de POST /stream/ticket' })
+  @UseGuards(SseTicketGuard)
   @Sse('stream')
-  stream(
-    @Query('ticket') ticket: string,
-    @Req() req: IncomingMessage,
-  ): Observable<MessageEvent> {
-    const userId = this.sseTicketService.consume(ticket);
-    if (!userId) throw new UnauthorizedException('Invalid or expired SSE ticket');
-    return this.sseService.connect(userId, req);
+  stream(@Req() req: Request & { sseUserId: string }): Observable<MessageEvent> {
+    return this.sseService.connect(req.sseUserId, req as unknown as IncomingMessage);
   }
 
   @ApiOperation({ summary: 'Listar notificaciones del usuario autenticado' })

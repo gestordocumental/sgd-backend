@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { PassThrough } from 'stream';
 import { WorkflowFilesService } from './workflow-files.service';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ function makeStorage() {
   return {
     upload:               jest.fn().mockResolvedValue(undefined),
     getSignedDownloadUrl: jest.fn().mockResolvedValue({ url: 'https://signed.url', expiresAt: new Date() }),
+    downloadBuffer:       jest.fn().mockResolvedValue(Buffer.from('file content')),
   };
 }
 
@@ -186,6 +188,103 @@ describe('WorkflowFilesService', () => {
       const key     = 'org/org-1/workflow-uploads/file.pdf';
 
       await expect(service.getSignedUrl('org-1', key)).rejects.toThrow('Storage unavailable');
+    });
+  });
+
+  // ── downloadZip() ─────────────────────────────────────────────────────────
+
+  describe('downloadZip()', () => {
+    it('throws BadRequestException when entries array is empty', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      await expect(service.downloadZip('org-1', [], 'Report')).rejects.toThrow(BadRequestException);
+      expect(storage.downloadBuffer).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when a storageKey does not belong to the org', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      await expect(
+        service.downloadZip('org-1', [
+          { storageKey: 'org/org-other/workflow-uploads/file.pdf', zipPath: 'file.pdf' },
+        ], 'Report'),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(storage.downloadBuffer).not.toHaveBeenCalled();
+    });
+
+    it('returns a PassThrough stream and filename for valid entries', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      const result = await service.downloadZip(
+        'org-1',
+        [{ storageKey: 'org/org-1/workflow-uploads/file.pdf', zipPath: 'docs/file.pdf' }],
+        'My Report',
+      );
+
+      expect(result.filename).toBe('My Report.zip');
+      expect(result.stream).toBeInstanceOf(PassThrough);
+      expect(storage.downloadBuffer).toHaveBeenCalledWith('org/org-1/workflow-uploads/file.pdf');
+    });
+
+    it('downloads all files concurrently when multiple entries are provided', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+      const entries = [
+        { storageKey: 'org/org-1/workflow-uploads/a.pdf', zipPath: 'a.pdf' },
+        { storageKey: 'org/org-1/workflow-uploads/b.pdf', zipPath: 'b.pdf' },
+      ];
+
+      await service.downloadZip('org-1', entries, 'Bundle');
+
+      expect(storage.downloadBuffer).toHaveBeenCalledTimes(2);
+      expect(storage.downloadBuffer).toHaveBeenCalledWith('org/org-1/workflow-uploads/a.pdf');
+      expect(storage.downloadBuffer).toHaveBeenCalledWith('org/org-1/workflow-uploads/b.pdf');
+    });
+
+    it('sanitizes special characters in the title for the filename', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      const result = await service.downloadZip(
+        'org-1',
+        [{ storageKey: 'org/org-1/workflow-uploads/f.pdf', zipPath: 'f.pdf' }],
+        'Report: "Test" / 2025',
+      );
+
+      expect(result.filename).not.toContain(':');
+      expect(result.filename).not.toContain('"');
+      expect(result.filename).not.toContain('/');
+      expect(result.filename).toMatch(/\.zip$/);
+    });
+
+    it('throws BadRequestException for a path traversal zipPath', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      await expect(
+        service.downloadZip(
+          'org-1',
+          [{ storageKey: 'org/org-1/workflow-uploads/f.pdf', zipPath: '../../../etc/passwd' }],
+          'Safe',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException for a Windows-style path traversal zipPath', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      await expect(
+        service.downloadZip(
+          'org-1',
+          [{ storageKey: 'org/org-1/workflow-uploads/f.pdf', zipPath: '..\\..\\etc\\passwd' }],
+          'Safe',
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

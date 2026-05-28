@@ -37,7 +37,9 @@ export class AuditService implements OnModuleInit {
               resourceType:  { type: 'keyword' },
               resourceId:    { type: 'keyword' },
               resourceName:  { type: 'keyword' },
-              correlationId: { type: 'keyword' },
+              // text + .keyword sub-field: text allows full-text search if needed,
+              // .keyword allows exact-match term queries on the full UUID value.
+              correlationId: { type: 'text', fields: { keyword: { type: 'keyword', ignore_above: 256 } } },
               ip:            { type: 'keyword' },
               metadata:      { type: 'object', enabled: false },
               timestamp:     { type: 'date' },
@@ -110,12 +112,25 @@ export class AuditService implements OnModuleInit {
       must.push({ term: { orgId: dto.orgId } });
     }
 
-    if (dto.actorId)       must.push({ term: { actorId:       dto.actorId } });
-    if (dto.resourceType)  must.push({ term: { resourceType:  dto.resourceType } });
-    if (dto.resourceId)    must.push({ term: { resourceId:    dto.resourceId } });
-    if (dto.action)        must.push({ term: { action:        dto.action } });
-    if (dto.service)       must.push({ term: { service:       dto.service } });
-    if (dto.correlationId) must.push({ term: { correlationId: dto.correlationId } });
+    if (dto.actorId)       must.push({ term: { actorId:                    dto.actorId } });
+    if (dto.resourceType)  must.push({ term: { resourceType:              dto.resourceType } });
+    if (dto.resourceId)    must.push({ term: { resourceId:                dto.resourceId } });
+    if (dto.action)        must.push({ term: { action:                    dto.action } });
+    if (dto.service)       must.push({ term: { service:                   dto.service } });
+    // Support both the new mapping (correlationId.keyword sub-field) and legacy
+    // indexes where correlationId was mapped as a plain keyword, until a reindex
+    // completes. Both branches produce an exact-match term query.
+    if (dto.correlationId) {
+      must.push({
+        bool: {
+          should: [
+            { term: { 'correlationId.keyword': dto.correlationId } },
+            { term: { correlationId: dto.correlationId } },
+          ],
+          minimum_should_match: 1,
+        },
+      });
+    }
 
     if (dto.from || dto.to) {
       const range: Record<string, string> = {};

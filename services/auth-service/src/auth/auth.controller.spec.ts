@@ -182,7 +182,7 @@ describe('AuthController', () => {
       expect(result).toHaveProperty('accessToken');
     });
 
-    it('prefers refresh token from cookie over request body', async () => {
+    it('prefers refresh token from body over cookie', async () => {
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
 
       const result = await controller.refresh(
@@ -191,7 +191,7 @@ describe('AuthController', () => {
         res as any,
       );
 
-      expect(authService.refresh).toHaveBeenCalledWith('cookie.refresh.jwt');
+      expect(authService.refresh).toHaveBeenCalledWith('body.refresh.jwt');
       expect(result).toHaveProperty('refreshToken', 'refresh.jwt');
       expect(res.cookie).toHaveBeenCalled();
     });
@@ -200,12 +200,20 @@ describe('AuthController', () => {
       await expect(controller.refresh(undefined, {})).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws UnauthorizedException when refresh cookie is malformed', async () => {
+    it('throws UnauthorizedException when refresh cookie is malformed and body is empty', async () => {
       await expect(
-        controller.refresh('sgd_refresh_token=%E0%A4%A', { refreshToken: 'body.refresh.jwt' }),
+        controller.refresh('sgd_refresh_token=%E0%A4%A', {}),
       ).rejects.toThrow(UnauthorizedException);
 
       expect(authService.refresh).not.toHaveBeenCalled();
+    });
+
+    it('ignores a malformed refresh cookie when body.refreshToken is present', async () => {
+      await expect(
+        controller.refresh('sgd_refresh_token=%E0%A4%A', { refreshToken: 'body.refresh.jwt' }),
+      ).resolves.toHaveProperty('accessToken');
+
+      expect(authService.refresh).toHaveBeenCalledWith('body.refresh.jwt');
     });
   });
 

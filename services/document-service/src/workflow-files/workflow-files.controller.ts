@@ -4,6 +4,8 @@ import {
   Controller,
   Param,
   Post,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -17,12 +19,15 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtGuard, OrgMember } from '@sgd/common';
 import { MAX_FILE_SIZE } from '../document-upload/document-upload.constants';
 import { WorkflowFilesService } from './workflow-files.service';
 import { WorkflowFileUploadResponseDto } from './dto/workflow-file-upload-response.dto';
+import { DownloadZipDto } from './dto/download-zip.dto';
 
 const WORKFLOW_MIME_WHITELIST = new Set([
   'application/pdf',
@@ -81,5 +86,19 @@ export class WorkflowFilesController {
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     if (!storageKey) throw new BadRequestException('storageKey es requerido');
     return this.service.getSignedUrl(orgId, storageKey);
+  }
+
+  @ApiOperation({ summary: 'Descargar múltiples archivos del workflow como un ZIP' })
+  @ApiProduces('application/zip')
+  @Post('download-zip')
+  async downloadZip(
+    @Param('orgId') orgId: string,
+    @Body() body: DownloadZipDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { stream, filename } = await this.service.downloadZip(orgId, body.files, body.title);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return new StreamableFile(stream);
   }
 }

@@ -11,7 +11,6 @@
     "test:cov": "jest --coverage"
   },
   "dependencies": {
-    "@sgd/common": "*",
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0",
     "@nestjs/axios": "^4.0.1",
@@ -23,6 +22,8 @@
     "@nestjs/swagger": "^11.4.3",
     "@nestjs/terminus": "^11.0.0",
     "@sentry/node": "^10.53.1",
+    "@sgd/common": "*",
+    "archiver": "^5.3.2",
     "axios": "^1.7.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
@@ -44,6 +45,7 @@
     "@nestjs/cli": "^11.0.21",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.1.21",
+    "@types/archiver": "^7.0.0",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.14",
     "@types/jsonwebtoken": "^9.0.10",

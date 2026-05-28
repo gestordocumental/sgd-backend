@@ -29,7 +29,6 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   registrationStatus: overrides.registrationStatus ?? RegistrationStatus.ACTIVE,
   avatarUrl: null,
   isSuperAdmin: false,
-  isOptionalReviewer: false,
   twoFactorEnabled: false,
   orgRoles: [],
   createdAt: new Date('2024-01-01'),
@@ -45,6 +44,7 @@ const makeUor = (overrides: Partial<UserOrgRole> = {}): UserOrgRole => ({
   roleId: 'role-uuid-1',
   assignedBy: 'admin-uuid',
   removedAt: null,
+  isOptionalReviewer: false,
   user: null as any,
   role: null as any,
   createdAt: new Date('2024-01-01'),
@@ -82,6 +82,7 @@ describe('UsersController', () => {
             assignOrg: jest.fn(),
             getOrgRoles: jest.fn(),
             removeFromOrg: jest.fn(),
+            setOptionalReviewer: jest.fn(),
             completeRegistration: jest.fn(),
             resendInvitation: jest.fn(),
           },
@@ -223,7 +224,7 @@ describe('UsersController', () => {
       const user = makeUser();
       const roles = [{ roleId: 'role-uuid-1', roleName: 'ADMIN' }];
 
-      usersService.findByOrg.mockResolvedValue({ data: [{ user, roles, orgRemovedAt: null }], total: 1 });
+      usersService.findByOrg.mockResolvedValue({ data: [{ user, roles, orgRemovedAt: null, isOptionalReviewer: false }], total: 1 });
 
       const result = await controller.findByOrg('org-uuid-1', 1, 500);
 
@@ -232,6 +233,7 @@ describe('UsersController', () => {
       expect(result.data).toHaveLength(1);
       result.data.forEach((r) => expect(r).toBeInstanceOf(UserWithOrgRolesDto));
       expect(result.data[0].roles).toEqual(roles);
+      expect(result.data[0].isOptionalReviewer).toBe(false);
     });
 
     it('returns empty data array and total=0 when no users belong to the org', async () => {

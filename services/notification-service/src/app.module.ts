@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
+import { RedisModule } from './common/redis/redis.module';
 import { CorrelationMiddleware, AppLogger, MetricsModule, JwtGuard } from '@sgd/common';
 import { Notification } from './notifications/entities/notification.entity';
 
@@ -38,6 +39,7 @@ import { Notification } from './notifications/entities/notification.entity';
       },
     }),
 
+    RedisModule,
     NotificationsModule,
     HealthModule,
     MetricsModule,
