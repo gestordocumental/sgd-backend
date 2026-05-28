@@ -51,16 +51,25 @@ export class MoveIsOptionalReviewerToUserOrgRoles1776100000000 implements Migrat
       ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "is_optional_reviewer" BOOLEAN NOT NULL DEFAULT FALSE
     `);
-    await queryRunner.query(`
-      UPDATE "users" u
-      SET "is_optional_reviewer" = src.has_optional_reviewer
-      FROM (
-        SELECT user_id, BOOL_OR(is_optional_reviewer) AS has_optional_reviewer
-        FROM "user_org_roles"
-        GROUP BY user_id
-      ) src
-      WHERE src.user_id = u.id
+    const [orgRoleCheck] = await queryRunner.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name  = 'user_org_roles'
+          AND column_name = 'is_optional_reviewer'
+      ) AS "exists"
     `);
+    if (orgRoleCheck?.exists) {
+      await queryRunner.query(`
+        UPDATE "users" u
+        SET "is_optional_reviewer" = src.has_optional_reviewer
+        FROM (
+          SELECT user_id, BOOL_OR(is_optional_reviewer) AS has_optional_reviewer
+          FROM "user_org_roles"
+          GROUP BY user_id
+        ) src
+        WHERE src.user_id = u.id
+      `);
+    }
     await queryRunner.query(`
       ALTER TABLE "user_org_roles" DROP COLUMN IF EXISTS "is_optional_reviewer"
     `);
