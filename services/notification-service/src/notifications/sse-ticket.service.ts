@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type Redis from 'ioredis';
 
-const TICKET_TTL_SECONDS = 30;
+export const TICKET_TTL_SECONDS = 30;
 
 /**
  * Manages short-lived SSE authentication tickets stored in Redis.

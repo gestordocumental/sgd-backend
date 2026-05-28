@@ -28,6 +28,7 @@ import { ListNotificationsDto } from './dto/list-notifications.dto';
 import { NotificationResponseDto, PaginatedNotificationsDto } from './dto/notification-response.dto';
 import type { Request } from 'express';
 import { SseTicketGuard } from './sse-ticket.guard';
+import { TICKET_TTL_SECONDS } from './sse-ticket.service';
 import { Auth, JwtPayloadParam, JwtPayload } from '@sgd/common';
 
 @ApiTags('Notifications')
@@ -51,7 +52,7 @@ export class NotificationsController {
   @Post('stream/ticket')
   async issueTicket(@JwtPayloadParam() user: JwtPayload): Promise<{ ticket: string; expiresIn: number }> {
     const ticket = await this.sseTicketService.create(user.sub);
-    return { ticket, expiresIn: 30 };
+    return { ticket, expiresIn: TICKET_TTL_SECONDS };
   }
 
   /**

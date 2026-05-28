@@ -716,6 +716,56 @@ describe('UsersService', () => {
     });
   });
 
+  // ─── setOptionalReviewer ──────────────────────────────────────────────────
+
+  describe('setOptionalReviewer', () => {
+    it('throws NotFoundException when user is not a member of the org', async () => {
+      uorRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setOptionalReviewer('user-uuid-1', 'org-uuid-1', true),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(uorRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('updates isOptionalReviewer without emitting audit when actorId is absent', async () => {
+      const uor = makeUor({ isOptionalReviewer: false });
+      uorRepo.findOne.mockResolvedValue(uor);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.setOptionalReviewer('user-uuid-1', 'org-uuid-1', true);
+
+      expect(uorRepo.update).toHaveBeenCalledWith(
+        { userId: 'user-uuid-1', orgId: 'org-uuid-1' },
+        { isOptionalReviewer: true },
+      );
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
+    });
+
+    it('emits audit log when actorId is provided', async () => {
+      const user = makeUser();
+      const uor = makeUor({ isOptionalReviewer: false });
+
+      uorRepo.findOne.mockResolvedValue(uor);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await service.setOptionalReviewer('user-uuid-1', 'org-uuid-1', true, 'actor-uuid');
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          action: 'USER_OPTIONAL_REVIEWER_CHANGED',
+          resourceId: 'user-uuid-1',
+          metadata: {
+            changes: { isOptionalReviewer: { from: false, to: true } },
+          },
+        }),
+      );
+    });
+  });
+
   // ─── findByOrg ────────────────────────────────────────────────────────────
 
   describe('findByOrg', () => {

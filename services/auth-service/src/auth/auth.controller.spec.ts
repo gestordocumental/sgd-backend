@@ -207,6 +207,14 @@ describe('AuthController', () => {
 
       expect(authService.refresh).not.toHaveBeenCalled();
     });
+
+    it('ignores a malformed refresh cookie when body.refreshToken is present', async () => {
+      await expect(
+        controller.refresh('sgd_refresh_token=%E0%A4%A', { refreshToken: 'body.refresh.jwt' }),
+      ).resolves.toHaveProperty('accessToken');
+
+      expect(authService.refresh).toHaveBeenCalledWith('body.refresh.jwt');
+    });
   });
 
   describe('POST /api/v1/auth/forgot-password', () => {

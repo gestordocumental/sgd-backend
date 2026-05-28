@@ -233,6 +233,7 @@ describe('UsersController', () => {
       expect(result.data).toHaveLength(1);
       result.data.forEach((r) => expect(r).toBeInstanceOf(UserWithOrgRolesDto));
       expect(result.data[0].roles).toEqual(roles);
+      expect(result.data[0].isOptionalReviewer).toBe(false);
     });
 
     it('returns empty data array and total=0 when no users belong to the org', async () => {
