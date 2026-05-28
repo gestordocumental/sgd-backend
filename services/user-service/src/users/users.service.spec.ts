@@ -737,7 +737,7 @@ describe('UsersService', () => {
       await service.setOptionalReviewer('user-uuid-1', 'org-uuid-1', true);
 
       expect(uorRepo.update).toHaveBeenCalledWith(
-        { userId: 'user-uuid-1', orgId: 'org-uuid-1' },
+        { userId: 'user-uuid-1', orgId: 'org-uuid-1', removedAt: IsNull() },
         { isOptionalReviewer: true },
       );
       expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
