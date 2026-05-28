@@ -8,15 +8,28 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  */
 export class MoveIsOptionalReviewerToUserOrgRoles1776100000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Add the org-scoped column to user_org_roles
+    // Add the org-scoped column to user_org_roles (defaults to FALSE for new rows)
     await queryRunner.query(`
       ALTER TABLE "user_org_roles"
       ADD COLUMN IF NOT EXISTS "is_optional_reviewer" BOOLEAN NOT NULL DEFAULT FALSE
     `);
 
-    // Remove the now-incorrect global column from users.
-    // Data is intentionally NOT migrated: the old flag was wrong (global) so
-    // there is no meaningful per-org value to preserve.
+    // Propagate the old global flag into every org membership of each user.
+    // A user marked as optional reviewer globally is set as such across all
+    // their current org roles — the admin can narrow it down post-migration.
+    // Skipped safely when the column doesn't exist (first-time install).
+    await queryRunner.query(`
+      UPDATE "user_org_roles" uor
+      SET "is_optional_reviewer" = u."is_optional_reviewer"
+      FROM "users" u
+      WHERE u.id = uor.user_id
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'is_optional_reviewer'
+        )
+    `);
+
+    // Drop the now-superseded global column from users
     await queryRunner.query(`
       ALTER TABLE "users" DROP COLUMN IF EXISTS "is_optional_reviewer"
     `);

@@ -261,17 +261,30 @@ describe('WorkflowFilesService', () => {
       expect(result.filename).toMatch(/\.zip$/);
     });
 
-    it('strips path traversal sequences from zipPath', async () => {
+    it('throws BadRequestException for a path traversal zipPath', async () => {
       const storage = makeStorage();
       const service = new WorkflowFilesService(storage as any);
 
-      const result = await service.downloadZip(
-        'org-1',
-        [{ storageKey: 'org/org-1/workflow-uploads/f.pdf', zipPath: '../../../etc/passwd' }],
-        'Safe',
-      );
+      await expect(
+        service.downloadZip(
+          'org-1',
+          [{ storageKey: 'org/org-1/workflow-uploads/f.pdf', zipPath: '../../../etc/passwd' }],
+          'Safe',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
 
-      expect(result.stream).toBeInstanceOf(PassThrough);
+    it('throws BadRequestException for a Windows-style path traversal zipPath', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      await expect(
+        service.downloadZip(
+          'org-1',
+          [{ storageKey: 'org/org-1/workflow-uploads/f.pdf', zipPath: '..\\..\\etc\\passwd' }],
+          'Safe',
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

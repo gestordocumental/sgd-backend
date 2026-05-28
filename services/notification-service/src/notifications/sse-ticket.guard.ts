@@ -23,8 +23,8 @@ export class SseTicketGuard implements CanActivate {
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<Request & { sseUserId?: string }>();
-    const ticket = req.query['ticket'] as string | undefined;
-
+    const rawTicket = req.query['ticket'];
+    const ticket = typeof rawTicket === 'string' ? rawTicket.trim() : '';
     if (!ticket) throw new UnauthorizedException('Missing SSE ticket');
 
     const userId = await this.sseTicketService.validate(ticket);

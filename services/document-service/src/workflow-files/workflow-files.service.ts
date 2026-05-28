@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { PassThrough } from 'stream';
+import { posix as pathPosix } from 'path';
 import archiver = require('archiver');
 import { v4 as uuidv4 } from 'uuid';
 import { StorageService } from '../common/storage/storage.service';
@@ -72,11 +73,6 @@ export class WorkflowFilesService {
       }
     }
 
-    // Download all files from R2 concurrently
-    const buffers = await Promise.all(
-      entries.map(({ storageKey }) => this.storage.downloadBuffer(storageKey)),
-    );
-
     const safeTitle = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
     const filename = `${safeTitle}.zip`;
 
@@ -85,10 +81,20 @@ export class WorkflowFilesService {
     archive.pipe(pass);
     archive.on('error', (err) => pass.destroy(err));
 
-    for (let i = 0; i < entries.length; i++) {
-      // Prevent path traversal: strip leading slashes and ".." segments
-      const safePath = entries[i].zipPath.replace(/\.\./g, '').replace(/^\/+/, '');
-      archive.append(buffers[i], { name: `${safeTitle}/${safePath}` });
+    // Download sequentially to avoid materialising all buffers in memory at once.
+    // With large batches (up to 100 files × multi-MB each) a concurrent Promise.all
+    // could exhaust the process heap before the first byte is written to the archive.
+    for (const entry of entries) {
+      const fileBuffer = await this.storage.downloadBuffer(entry.storageKey);
+      // Normalise to POSIX, collapse consecutive slashes/dots, strip leading slash.
+      // Reject paths that escape the archive root after normalisation.
+      const normalized = pathPosix
+        .normalize(entry.zipPath.replace(/\\/g, '/'))
+        .replace(/^\/+/, '');
+      if (!normalized || normalized === '.' || normalized.startsWith('..')) {
+        throw new BadRequestException('zipPath inválido');
+      }
+      archive.append(fileBuffer, { name: `${safeTitle}/${normalized}` });
     }
 
     void archive.finalize();

@@ -418,6 +418,9 @@ export class UsersController {
     @Param("orgId", ParseUUIDPipe) orgId: string,
     @Body() dto: SetOptionalReviewerDto,
   ): Promise<void> {
+    if (!caller.isSuperAdmin && caller.companyId !== orgId) {
+      throw new ForbiddenException('You can only update users in your own organization');
+    }
     return this.usersService.setOptionalReviewer(id, orgId, dto.value, caller.sub);
   }
 }

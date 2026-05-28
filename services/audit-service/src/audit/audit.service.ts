@@ -117,9 +117,20 @@ export class AuditService implements OnModuleInit {
     if (dto.resourceId)    must.push({ term: { resourceId:                dto.resourceId } });
     if (dto.action)        must.push({ term: { action:                    dto.action } });
     if (dto.service)       must.push({ term: { service:                   dto.service } });
-    // correlationId is auto-mapped as `text` in Elasticsearch (split into tokens).
-    // Use the `.keyword` sub-field for exact-match semantics on the full UUID.
-    if (dto.correlationId) must.push({ term: { 'correlationId.keyword':  dto.correlationId } });
+    // Support both the new mapping (correlationId.keyword sub-field) and legacy
+    // indexes where correlationId was mapped as a plain keyword, until a reindex
+    // completes. Both branches produce an exact-match term query.
+    if (dto.correlationId) {
+      must.push({
+        bool: {
+          should: [
+            { term: { 'correlationId.keyword': dto.correlationId } },
+            { term: { correlationId: dto.correlationId } },
+          ],
+          minimum_should_match: 1,
+        },
+      });
+    }
 
     if (dto.from || dto.to) {
       const range: Record<string, string> = {};

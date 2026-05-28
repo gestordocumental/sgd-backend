@@ -580,12 +580,17 @@ export class UsersService {
     value: boolean,
     actorId?: string,
   ): Promise<void> {
-    const existing = await this.userOrgRoleRepository.findOne({ where: { userId, orgId } });
+    const existing = await this.userOrgRoleRepository.findOne({
+      where: { userId, orgId, removedAt: IsNull() },
+    });
     if (!existing) {
       throw new NotFoundException(`User ${userId} is not a member of org ${orgId}`);
     }
     const previousValue = existing.isOptionalReviewer;
-    await this.userOrgRoleRepository.update({ userId, orgId }, { isOptionalReviewer: value });
+    await this.userOrgRoleRepository.update(
+      { userId, orgId, removedAt: IsNull() },
+      { isOptionalReviewer: value },
+    );
     if (actorId) {
       const user = await this.findOne(userId);
       this.emitAuditLog({
