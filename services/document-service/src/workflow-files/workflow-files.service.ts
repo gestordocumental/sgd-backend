@@ -73,31 +73,46 @@ export class WorkflowFilesService {
       }
     }
 
-    const safeTitle = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+    const safeTitle = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
+    if (!safeTitle || safeTitle === '.' || safeTitle === '..') {
+      throw new BadRequestException('Título inválido');
+    }
     const filename = `${safeTitle}.zip`;
 
-    const archive = archiver('zip', { zlib: { level: 5 } });
-    const pass = new PassThrough();
-    archive.pipe(pass);
-    archive.on('error', (err) => pass.destroy(err));
-
-    // Download sequentially to avoid materialising all buffers in memory at once.
-    // With large batches (up to 100 files × multi-MB each) a concurrent Promise.all
-    // could exhaust the process heap before the first byte is written to the archive.
-    for (const entry of entries) {
-      const fileBuffer = await this.storage.downloadBuffer(entry.storageKey);
-      // Normalise to POSIX, collapse consecutive slashes/dots, strip leading slash.
-      // Reject paths that escape the archive root after normalisation.
+    // Validate all zipPaths eagerly before touching R2 or creating the archive,
+    // so callers get a clean 400 instead of a half-written broken stream.
+    const normalizedPaths = entries.map((entry) => {
       const normalized = pathPosix
         .normalize(entry.zipPath.replace(/\\/g, '/'))
         .replace(/^\/+/, '');
       if (!normalized || normalized === '.' || normalized.startsWith('..')) {
         throw new BadRequestException('zipPath inválido');
       }
-      archive.append(fileBuffer, { name: `${safeTitle}/${normalized}` });
-    }
+      return normalized;
+    });
 
-    void archive.finalize();
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    const pass = new PassThrough();
+    archive.pipe(pass);
+    archive.on('error', (err) => pass.destroy(err));
+
+    // Return the stream immediately so the HTTP response can start draining it
+    // while entries are still being downloaded from R2. Without this, archiver's
+    // internal buffers fill up and back-pressure stalls the downloads.
+    // Downloads are sequential to avoid materialising all buffers in memory at once.
+    void (async () => {
+      try {
+        for (let i = 0; i < entries.length; i++) {
+          const fileBuffer = await this.storage.downloadBuffer(entries[i].storageKey);
+          archive.append(fileBuffer, { name: `${safeTitle}/${normalizedPaths[i]}` });
+        }
+        await archive.finalize();
+      } catch (err) {
+        archive.abort();
+        pass.destroy(err instanceof Error ? err : new Error(String(err)));
+      }
+    })();
+
     return { stream: pass, filename };
   }
 }
