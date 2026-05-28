@@ -9,6 +9,7 @@ import { NotificationsService } from './notifications.service';
 import { NotificationsConsumer } from './notifications.consumer';
 import { SseService } from './sse.service';
 import { SseTicketService } from './sse-ticket.service';
+import { SseTicketGuard } from './sse-ticket.guard';
 import { EmailService } from './email/email.service';
 import { UserClientService } from './user-client/user-client.service';
 import { OrgClientService } from './org-client/org-client.service';
@@ -27,6 +28,7 @@ import { AppLogger, KAFKA_CLIENT, KafkaProducerService } from '@sgd/common';
     KafkaProducerService,
     SseService,
     SseTicketService,
+    SseTicketGuard,
     EmailService,
     UserClientService,
     OrgClientService,

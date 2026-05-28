@@ -516,7 +516,7 @@ export class UsersService {
     orgId: string,
     page = 1,
     limit = 500,
-  ): Promise<{ data: { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null }[]; total: number }> {
+  ): Promise<{ data: { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null; isOptionalReviewer: boolean }[]; total: number }> {
     const safePage  = Math.max(1, page);
     const safeLimit = Math.min(Math.max(1, limit), 500);
     const skip = (safePage - 1) * safeLimit;
@@ -536,11 +536,18 @@ export class UsersService {
     // the org via the delete button. Users with roleId=null but removedAt=null
     // simply have no role assigned. Globally soft-deleted users carry a non-null
     // deletedAt on the user entity.
-    const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null }>();
+    // isOptionalReviewer is taken from the user_org_roles record (per-org) — NOT
+    // from the user entity, which no longer carries this field.
+    const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null; isOptionalReviewer: boolean }>();
     for (const r of orgRoles) {
       if (!r.user) continue;
       if (!byUser.has(r.userId)) {
-        byUser.set(r.userId, { user: r.user, roles: [], orgRemovedAt: r.removedAt });
+        byUser.set(r.userId, {
+          user: r.user,
+          roles: [],
+          orgRemovedAt: r.removedAt,
+          isOptionalReviewer: r.isOptionalReviewer,
+        });
       }
       if (r.roleId !== null && r.role !== null) {
         byUser.get(r.userId)!.roles.push({ roleId: r.roleId, roleName: r.role.name });
@@ -555,12 +562,41 @@ export class UsersService {
     });
     for (const sa of superAdmins) {
       if (!byUser.has(sa.id)) {
-        byUser.set(sa.id, { user: sa, roles: [], orgRemovedAt: null });
+        byUser.set(sa.id, { user: sa, roles: [], orgRemovedAt: null, isOptionalReviewer: false });
       }
     }
 
     const all = Array.from(byUser.values());
     return { data: all.slice(skip, skip + safeLimit), total: all.length };
+  }
+
+  /**
+   * Sets or clears the optional-reviewer flag for a user in a specific org.
+   * The flag lives on user_org_roles (not users) so it is scoped per org.
+   */
+  async setOptionalReviewer(
+    userId: string,
+    orgId: string,
+    value: boolean,
+    actorId?: string,
+  ): Promise<void> {
+    const existing = await this.userOrgRoleRepository.findOne({ where: { userId, orgId } });
+    if (!existing) {
+      throw new NotFoundException(`User ${userId} is not a member of org ${orgId}`);
+    }
+    const previousValue = existing.isOptionalReviewer;
+    await this.userOrgRoleRepository.update({ userId, orgId }, { isOptionalReviewer: value });
+    if (actorId) {
+      const user = await this.findOne(userId);
+      this.emitAuditLog({
+        actorId,
+        orgId,
+        action: 'USER_OPTIONAL_REVIEWER_CHANGED',
+        resourceId: userId,
+        resourceName: UsersService.userDisplayName(user),
+        metadata: { changes: { isOptionalReviewer: { from: previousValue, to: value } } },
+      });
+    }
   }
 
   async getOrgRoles(userId: string): Promise<UserOrgRole[]> {

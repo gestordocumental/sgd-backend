@@ -37,7 +37,9 @@ export class AuditService implements OnModuleInit {
               resourceType:  { type: 'keyword' },
               resourceId:    { type: 'keyword' },
               resourceName:  { type: 'keyword' },
-              correlationId: { type: 'keyword' },
+              // text + .keyword sub-field: text allows full-text search if needed,
+              // .keyword allows exact-match term queries on the full UUID value.
+              correlationId: { type: 'text', fields: { keyword: { type: 'keyword', ignore_above: 256 } } },
               ip:            { type: 'keyword' },
               metadata:      { type: 'object', enabled: false },
               timestamp:     { type: 'date' },
@@ -110,12 +112,14 @@ export class AuditService implements OnModuleInit {
       must.push({ term: { orgId: dto.orgId } });
     }
 
-    if (dto.actorId)       must.push({ term: { actorId:       dto.actorId } });
-    if (dto.resourceType)  must.push({ term: { resourceType:  dto.resourceType } });
-    if (dto.resourceId)    must.push({ term: { resourceId:    dto.resourceId } });
-    if (dto.action)        must.push({ term: { action:        dto.action } });
-    if (dto.service)       must.push({ term: { service:       dto.service } });
-    if (dto.correlationId) must.push({ term: { correlationId: dto.correlationId } });
+    if (dto.actorId)       must.push({ term: { actorId:                    dto.actorId } });
+    if (dto.resourceType)  must.push({ term: { resourceType:              dto.resourceType } });
+    if (dto.resourceId)    must.push({ term: { resourceId:                dto.resourceId } });
+    if (dto.action)        must.push({ term: { action:                    dto.action } });
+    if (dto.service)       must.push({ term: { service:                   dto.service } });
+    // correlationId is auto-mapped as `text` in Elasticsearch (split into tokens).
+    // Use the `.keyword` sub-field for exact-match semantics on the full UUID.
+    if (dto.correlationId) must.push({ term: { 'correlationId.keyword':  dto.correlationId } });
 
     if (dto.from || dto.to) {
       const range: Record<string, string> = {};

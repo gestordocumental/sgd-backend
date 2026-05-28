@@ -86,6 +86,16 @@ export class StorageService implements OnModuleInit {
     this.logger.log(`Deleted: ${key}`, 'StorageService');
   }
 
+  async downloadBuffer(key: string): Promise<Buffer> {
+    const { Body } = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!Body) throw new Error(`Empty body for key: ${key}`);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
   async exists(key: string): Promise<boolean> {
     try {
       await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));

@@ -1,49 +1,44 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import type Redis from 'ioredis';
 
-const TICKET_TTL_MS = 30_000;
+const TICKET_TTL_SECONDS = 30;
 
-interface TicketEntry {
-  userId: string;
-  expiresAt: number;
-}
-
+/**
+ * Manages short-lived SSE authentication tickets stored in Redis.
+ *
+ * Design decisions:
+ * - Stored in Redis (not in-memory) so tickets survive service restarts and
+ *   work correctly across multiple instances in Railway.
+ * - Tickets are NOT deleted on first use. They expire after TICKET_TTL_SECONDS.
+ *   This allows EventSource's built-in auto-reconnect (which reuses the same URL)
+ *   to succeed within the 30-second window, preventing the repeated 401 loop that
+ *   occurred with one-time-use tickets.
+ * - After 30 s the ticket expires and any auto-reconnect will get 401, at which
+ *   point the frontend hook detects the error and fetches a fresh ticket.
+ */
 @Injectable()
-export class SseTicketService implements OnModuleDestroy {
-  private readonly tickets = new Map<string, TicketEntry>();
-  private readonly cleanupInterval: ReturnType<typeof setInterval>;
+export class SseTicketService {
+  constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
 
-  constructor() {
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
-  }
-
-  /** Issues a single-use ticket valid for 30 seconds. */
-  create(userId: string): string {
+  /** Issues a ticket valid for TICKET_TTL_SECONDS seconds. */
+  async create(userId: string): Promise<string> {
     const ticket = randomUUID();
-    this.tickets.set(ticket, { userId, expiresAt: Date.now() + TICKET_TTL_MS });
+    await this.redis.setex(`sse-ticket:${ticket}`, TICKET_TTL_SECONDS, userId);
     return ticket;
   }
 
   /**
-   * Validates and atomically consumes a ticket.
-   * Returns the associated userId, or null if the ticket is unknown/expired.
+   * Validates a ticket and returns the associated userId, or null if the ticket
+   * is unknown or expired.  The ticket is NOT deleted so EventSource can
+   * reconnect with the same URL within the TTL window.
    */
-  consume(ticket: string): string | null {
-    const entry = this.tickets.get(ticket);
-    if (!entry) return null;
-    this.tickets.delete(ticket);
-    if (Date.now() > entry.expiresAt) return null;
-    return entry.userId;
+  async validate(ticket: string): Promise<string | null> {
+    return this.redis.get(`sse-ticket:${ticket}`);
   }
 
-  onModuleDestroy(): void {
-    clearInterval(this.cleanupInterval);
-  }
-
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.tickets.entries()) {
-      if (now > entry.expiresAt) this.tickets.delete(key);
-    }
+  /** Explicitly revoke a ticket before it expires (e.g., on clean disconnect). */
+  async revoke(ticket: string): Promise<void> {
+    await this.redis.del(`sse-ticket:${ticket}`);
   }
 }

@@ -176,20 +176,23 @@ export class AuthController {
     @Body() body: { refreshToken?: string },
     @Res({ passthrough: true }) res?: Response,
   ) {
-    // Prefer the httpOnly cookie (more secure); fall back to the body token for
-    // cross-origin clients that cannot send cookies without withCredentials.
+    // When the body carries an explicit refreshToken, use it unconditionally.
+    // This allows exitCompany() on the frontend to restore the global
+    // super-admin context by sending the stored global refresh token in the
+    // body, even when the httpOnly cookie currently holds a company-scoped
+    // token (which would otherwise shadow it).
+    // Both paths validate the token via Redis GETDEL + JWT signature, so the
+    // security posture is identical.
     let refreshToken: string;
-    try {
-      refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
-    } catch (err) {
-      // Only fall back to body token when cookie is simply absent.
-      // A malformed cookie likely indicates tampering — reject immediately.
-      if (err instanceof UnauthorizedException && err.message === 'Missing refresh cookie') {
-        if (!body?.refreshToken) {
+    if (body?.refreshToken) {
+      refreshToken = body.refreshToken;
+    } else {
+      try {
+        refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
+      } catch (err) {
+        if (err instanceof UnauthorizedException && err.message === 'Missing refresh cookie') {
           throw new UnauthorizedException('Missing refresh token');
         }
-        refreshToken = body.refreshToken;
-      } else {
         throw err;
       }
     }
