@@ -25,6 +25,8 @@ describe('AuthController', () => {
       resetPassword: jest.fn().mockResolvedValue({ ok: true }),
       getMyCompanies: jest.fn().mockResolvedValue(['org-id']),
       switchCompany: jest.fn().mockResolvedValue({ accessToken: 'scoped.jwt', refreshToken: 'refresh.jwt' }),
+      saveGlobalContext: jest.fn().mockResolvedValue(undefined),
+      exitCompanyContext: jest.fn().mockResolvedValue({ accessToken: 'global.jwt', refreshToken: 'global-refresh.jwt' }),
       verifyAccessToken: jest.fn().mockReturnValue({ sub: 'user-id', email: 'user@test.com' }),
     };
 
@@ -137,17 +139,18 @@ describe('AuthController', () => {
   // ── login ─────────────────────────────────────────────────────────────────
 
   describe('POST /api/v1/auth/login', () => {
-    it('delegates to authService.login and returns token pair', async () => {
+    it('delegates to authService.login and returns only the access token in the body', async () => {
       const dto = { email: 'user@test.com', password: 'pass1234' };
 
       const result = await controller.login(dto);
 
       expect(authService.login).toHaveBeenCalledWith(dto);
       expect(result).toHaveProperty('accessToken');
-      expect(result).toHaveProperty('refreshToken');
+      // refreshToken must NOT appear in the body — it lives in the httpOnly cookie only
+      expect(result).not.toHaveProperty('refreshToken');
     });
 
-    it('sets refresh token cookie when response is provided', async () => {
+    it('sets refresh token cookie and returns only accessToken in body', async () => {
       const dto = { email: 'user@test.com', password: 'pass1234' };
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
       const originalEnv = process.env.NODE_ENV;
@@ -155,7 +158,7 @@ describe('AuthController', () => {
 
       const result = await controller.login(dto, res as any);
 
-      expect(result).toEqual({ accessToken: 'access.jwt', refreshToken: 'refresh.jwt' });
+      expect(result).toEqual({ accessToken: 'access.jwt' });
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
         'refresh.jwt',
@@ -175,45 +178,45 @@ describe('AuthController', () => {
   // ── refresh ───────────────────────────────────────────────────────────────
 
   describe('POST /api/v1/auth/refresh', () => {
-    it('delegates to authService.refresh and returns new token pair', async () => {
-      const result = await controller.refresh(undefined, { refreshToken: 'old.refresh.jwt' });
+    it('reads refresh token from cookie and delegates to authService.refresh', async () => {
+      const result = await controller.refresh('sgd_refresh_token=old.refresh.jwt');
 
       expect(authService.refresh).toHaveBeenCalledWith('old.refresh.jwt');
       expect(result).toHaveProperty('accessToken');
+      expect(result).not.toHaveProperty('refreshToken');
     });
 
-    it('prefers refresh token from body over cookie', async () => {
+    it('sets refresh token cookie when response is provided', async () => {
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
 
-      const result = await controller.refresh(
-        'other=value; sgd_refresh_token=cookie.refresh.jwt',
-        { refreshToken: 'body.refresh.jwt' },
-        res as any,
+      const result = await controller.refresh('sgd_refresh_token=old.refresh.jwt', res as any);
+
+      expect(authService.refresh).toHaveBeenCalledWith('old.refresh.jwt');
+      expect(result).toEqual({ accessToken: 'access.jwt' });
+      expect(res.cookie).toHaveBeenCalledWith(
+        'sgd_refresh_token',
+        'refresh.jwt',
+        expect.any(Object),
       );
-
-      expect(authService.refresh).toHaveBeenCalledWith('body.refresh.jwt');
-      expect(result).toHaveProperty('refreshToken', 'refresh.jwt');
-      expect(res.cookie).toHaveBeenCalled();
     });
 
-    it('throws UnauthorizedException when refresh token is missing from cookie and body', async () => {
-      await expect(controller.refresh(undefined, {})).rejects.toThrow(UnauthorizedException);
+    it('throws UnauthorizedException when no refresh cookie is present', async () => {
+      await expect(controller.refresh(undefined)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws UnauthorizedException when refresh cookie is malformed and body is empty', async () => {
+    it('throws UnauthorizedException when refresh cookie is malformed (invalid URI encoding)', async () => {
       await expect(
-        controller.refresh('sgd_refresh_token=%E0%A4%A', {}),
+        controller.refresh('sgd_refresh_token=%E0%A4%A'),
       ).rejects.toThrow(UnauthorizedException);
 
       expect(authService.refresh).not.toHaveBeenCalled();
     });
 
-    it('ignores a malformed refresh cookie when body.refreshToken is present', async () => {
-      await expect(
-        controller.refresh('sgd_refresh_token=%E0%A4%A', { refreshToken: 'body.refresh.jwt' }),
-      ).resolves.toHaveProperty('accessToken');
+    it('URL-decodes the refresh token value from the cookie before passing to the service', async () => {
+      const encoded = encodeURIComponent('valid.refresh.jwt');
+      await controller.refresh(`sgd_refresh_token=${encoded}`);
 
-      expect(authService.refresh).toHaveBeenCalledWith('body.refresh.jwt');
+      expect(authService.refresh).toHaveBeenCalledWith('valid.refresh.jwt');
     });
   });
 
@@ -293,26 +296,33 @@ describe('AuthController', () => {
   // ── switchCompany ─────────────────────────────────────────────────────────
 
   describe('POST /api/v1/auth/switch-company', () => {
-    it('returns scoped token pair for a valid company', async () => {
+    it('returns scoped access token (no refreshToken in body) for a valid company', async () => {
       authService.verifyAccessToken.mockReturnValue({ sub: 'user-id' });
 
-      const result = await controller.switchCompany('Bearer valid.token', { companyId: 'org-id' });
+      const result = await controller.switchCompany(
+        'Bearer valid.token',
+        undefined,
+        { companyId: 'org-id' },
+      );
 
       expect(authService.switchCompany).toHaveBeenCalledWith('user-id', 'org-id');
       expect(result).toHaveProperty('accessToken');
+      expect(result).not.toHaveProperty('refreshToken');
     });
 
-    it('sets refresh cookie for scoped token response', async () => {
+    it('persists global context and sets refresh cookie when switching company', async () => {
       authService.verifyAccessToken.mockReturnValue({ sub: 'user-id' });
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
 
       const result = await controller.switchCompany(
         'Bearer valid.token',
+        'sgd_refresh_token=global.refresh.jwt',
         { companyId: 'org-id' },
         res as any,
       );
 
-      expect(result).toEqual({ accessToken: 'scoped.jwt', refreshToken: 'refresh.jwt' });
+      expect(authService.saveGlobalContext).toHaveBeenCalledWith('user-id', 'global.refresh.jwt');
+      expect(result).toEqual({ accessToken: 'scoped.jwt' });
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
         'refresh.jwt',
@@ -320,13 +330,65 @@ describe('AuthController', () => {
       );
     });
 
+    it('skips saveGlobalContext silently when no cookie is present', async () => {
+      authService.verifyAccessToken.mockReturnValue({ sub: 'user-id' });
+
+      await controller.switchCompany(
+        'Bearer valid.token',
+        undefined,
+        { companyId: 'org-id' },
+      );
+
+      // saveGlobalContext must not be called when no cookie is available
+      expect(authService.saveGlobalContext).not.toHaveBeenCalled();
+      expect(authService.switchCompany).toHaveBeenCalledWith('user-id', 'org-id');
+    });
+
     it('propagates NotFoundException when user does not belong to company', async () => {
       authService.verifyAccessToken.mockReturnValue({ sub: 'user-id' });
       authService.switchCompany.mockRejectedValue(new NotFoundException('User does not belong to company'));
 
       await expect(
-        controller.switchCompany('Bearer valid.token', { companyId: 'org-id' }),
+        controller.switchCompany('Bearer valid.token', undefined, { companyId: 'org-id' }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── exitCompany ───────────────────────────────────────────────────────────
+
+  describe('POST /api/v1/auth/exit-company', () => {
+    it('restores global super-admin context and returns only accessToken in body', async () => {
+      const result = await controller.exitCompany('sgd_refresh_token=company.refresh.jwt');
+
+      expect(authService.exitCompanyContext).toHaveBeenCalledWith('company.refresh.jwt');
+      expect(result).toEqual({ accessToken: 'global.jwt' });
+      expect(result).not.toHaveProperty('refreshToken');
+    });
+
+    it('sets the new global refresh token as httpOnly cookie', async () => {
+      const res = { cookie: jest.fn(), setHeader: jest.fn() };
+
+      await controller.exitCompany('sgd_refresh_token=company.refresh.jwt', res as any);
+
+      expect(res.cookie).toHaveBeenCalledWith(
+        'sgd_refresh_token',
+        'global-refresh.jwt',
+        expect.any(Object),
+      );
+    });
+
+    it('throws UnauthorizedException when no refresh cookie is present', async () => {
+      await expect(controller.exitCompany(undefined)).rejects.toThrow(UnauthorizedException);
+
+      expect(authService.exitCompanyContext).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when refresh cookie is malformed', async () => {
+      await expect(
+        controller.exitCompany('sgd_refresh_token=%E0%A4%A'),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(authService.exitCompanyContext).not.toHaveBeenCalled();
     });
   });
 });

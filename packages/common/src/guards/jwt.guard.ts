@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import { verify, JsonWebTokenError } from 'jsonwebtoken';
 import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+import { INTERNAL_TOKEN_KEYS_META } from '../decorators/internal-token.decorator';
 
 /** Injection token for an optional super-admin revocation checker.
  *  Provide a function `(userId: string) => Promise<boolean>` that returns
@@ -52,11 +53,18 @@ export class JwtGuard implements CanActivate {
     }>();
 
     // Internal service-to-service calls bypass JWT validation.
-    // All known directional token env vars are checked; each service defines only
-    // the subset relevant to its callers, so undefined keys are simply skipped.
+    // When @AllowInternalTokens(...keys) is present, only those specific env-var
+    // keys are accepted — preventing a compromised service's token from being
+    // used against endpoints it was not meant to call.
+    // Without the decorator, falls back to checking all configured tokens
+    // (backward compat for endpoints that haven't opted in yet).
     const internalToken = request.headers['x-internal-token'];
     if (internalToken) {
-      const knownKeys = [
+      const declaredKeys = this.reflector.getAllAndOverride<string[] | undefined>(
+        INTERNAL_TOKEN_KEYS_META,
+        [ctx.getHandler(), ctx.getClass()],
+      );
+      const keysToCheck = declaredKeys ?? [
         'INTERNAL_TOKEN_AUTH_USER',
         'INTERNAL_TOKEN_USER_AUTH',
         'INTERNAL_TOKEN_NOTIF_USER',
@@ -66,7 +74,7 @@ export class JwtGuard implements CanActivate {
         'INTERNAL_TOKEN_DOC_ORG',
         'INTERNAL_TOKEN_ORG_USER',
       ];
-      const allowed = knownKeys
+      const allowed = keysToCheck
         .map((k) => this.configService.get<string>(k))
         .filter((t): t is string => !!t)
         .map((t) => Buffer.from(t));

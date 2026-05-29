@@ -341,6 +341,46 @@ describe('WorkflowApprovalService', () => {
       );
       expect(eventTypes).toContain(TimelineEventType.STEP_REJECTED);
     });
+
+    it('notifies the workflow creator when rejected', async () => {
+      const { service, workflowRepo, kafkaProducer } = buildService();
+      const wf = pendingWorkflow();
+      workflowRepo.findOne.mockResolvedValue(wf);
+      workflowRepo.findOneOrFail.mockResolvedValue(wf);
+
+      await service.reject('wf-1', 'approver-1', { observations: 'motivo de rechazo' });
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        'notification.send',
+        expect.objectContaining({
+          type: 'WORKFLOW_REJECTED',
+          recipientUserIds: expect.arrayContaining(['creator-1']),
+        }),
+      );
+    });
+
+    it('also notifies final users when the workflow has finalUserIds', async () => {
+      const { service, workflowRepo, kafkaProducer } = buildService();
+      const wf = makeWorkflow({
+        status: WorkflowStatus.PENDING_APPROVAL,
+        currentApprovalStepOrder: 1,
+        currentAssignedUserId: 'approver-1',
+        approvalSteps: [makeStep({ status: ApprovalStepStatus.PENDING })],
+        finalUserIds: ['final-user-1', 'final-user-2'],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      workflowRepo.findOneOrFail.mockResolvedValue(wf);
+
+      await service.reject('wf-1', 'approver-1', { observations: 'motivo de rechazo' });
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        'notification.send',
+        expect.objectContaining({
+          type: 'WORKFLOW_REJECTED',
+          recipientUserIds: expect.arrayContaining(['creator-1', 'final-user-1', 'final-user-2']),
+        }),
+      );
+    });
   });
 
   // ── resubmit ─────────────────────────────────────────────────────────────────

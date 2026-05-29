@@ -6,7 +6,7 @@ import { AuthService } from "./auth.service";
 import { Credential } from "./entities/credential.entity";
 import { UserClientModule } from "../user-client/user-client.module";
 import { CredentialSeeder } from "./credential.seeder";
-import { KafkaModule } from "@sgd/common";
+import { AppLogger, KafkaModule } from "@sgd/common";
 
 @Module({
   imports: [
@@ -17,6 +17,6 @@ import { KafkaModule } from "@sgd/common";
     KafkaModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, CredentialSeeder],
+  providers: [AuthService, CredentialSeeder, AppLogger],
 })
 export class AuthModule {}

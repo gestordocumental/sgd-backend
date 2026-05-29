@@ -1,0 +1,94 @@
+version: 2
+
+updates:
+  # ── GitHub Actions ─────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "ci"]
+
+  # ── Workspace root (eslint, typescript, etc.) ──────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies"]
+    ignore:
+      # Major version bumps require manual validation
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ── @sgd/common ────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/packages/common"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "common"]
+
+  # ── auth-service ────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/auth-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "auth-service"]
+
+  # ── user-service ────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/user-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "user-service"]
+
+  # ── org-service ─────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/org-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "org-service"]
+
+  # ── document-service ────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/document-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "document-service"]
+
+  # ── workflow-service ─────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/workflow-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "workflow-service"]
+
+  # ── notification-service ────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/notification-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "notification-service"]
+
+  # ── audit-service ────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/audit-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "audit-service"]
+
+  # ── metadata-extractor-service ───────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/services/metadata-extractor-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "metadata-extractor-service"]

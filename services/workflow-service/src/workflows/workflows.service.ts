@@ -217,13 +217,19 @@ export class WorkflowsService {
     const orgId  = user.companyId!;
 
     // 1. Workflows donde el usuario es usuario final
+    // REJECTED se incluye para que el usuario final pueda ver flujos que le
+    // fueron notificados pero que quedaron rechazados antes de llegar a él.
     const finalUserWorkflows = await this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
       .where('w.org_id = :orgId', { orgId })
       .andWhere(':userId = ANY(w.final_user_ids)', { userId })
       .andWhere('w.status IN (:...statuses)', {
-        statuses: [WorkflowStatus.AVAILABLE_FOR_FINAL_USERS, WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS],
+        statuses: [
+          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+          WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+          WorkflowStatus.REJECTED,
+        ],
       })
       .andWhere('w.deleted_at IS NULL')
       .orderBy('w.updatedAt', 'DESC')
@@ -303,7 +309,8 @@ export class WorkflowsService {
       .getMany();
 
     // 5. Workflows creados por el usuario (el creador siempre ve sus propios workflows
-    //    una vez que están disponibles o en ciclo de aprobación)
+    //    en cualquier estado activo o terminal relevante para él, incluyendo rechazados
+    //    y devueltos para que pueda ver el resultado sin necesitar WORKFLOWS:MANAGE).
     const createdByUserWorkflows = await this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
@@ -313,6 +320,8 @@ export class WorkflowsService {
         creatorStatuses: [
           WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
           WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+          WorkflowStatus.REJECTED,
+          WorkflowStatus.RETURNED_TO_CREATOR,
         ],
       })
       .andWhere('w.deleted_at IS NULL')
