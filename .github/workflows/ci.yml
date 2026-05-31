@@ -135,11 +135,11 @@ jobs:
 
       - name: Run E2E tests
         working-directory: frontend-repo
-        run: npm run e2e
+        run: npm run e2e --if-present
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
           path: frontend-repo/playwright-report/

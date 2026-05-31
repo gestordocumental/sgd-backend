@@ -921,7 +921,9 @@ describe('UsersService', () => {
       usersRepo.findBy.mockResolvedValue(users);
 
       const result = await service.findManyByIds([users[0].id]);
-      expect(usersRepo.findBy).toHaveBeenCalled();
+      expect(usersRepo.findBy).toHaveBeenCalledWith(
+        expect.objectContaining({ id: expect.anything() }),
+      );
       expect(result).toEqual(users);
     });
   });
@@ -1009,7 +1011,9 @@ describe('UsersService', () => {
 
       await service.update(user.id, { departamentoId: 'new-dept' }, 'actor-uuid', 'org-uuid-1');
 
-      expect(orgClient.resolveNamesById).toHaveBeenCalled();
+      const [calledOrgId, calledDeptId] = orgClient.resolveNamesById.mock.calls[0] ?? [];
+      expect(calledOrgId).toBe('org-uuid-1');
+      expect(calledDeptId).toBe('new-dept');
       expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ action: 'USER_UPDATED' }),
@@ -1095,6 +1099,10 @@ describe('UsersService', () => {
 
       await service.removeAllFromOrg('org-uuid-1');
 
+      expect(qb.where).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ orgId: 'org-uuid-1' }),
+      );
       expect(qb.execute).toHaveBeenCalled();
     });
   });
@@ -1142,7 +1150,9 @@ describe('UsersService', () => {
       usersRepo.save.mockResolvedValue(user);
       authClient.provisionCredentials.mockRejectedValue(new BadRequestException('weak password'));
 
-      await expect(service.completeRegistration(dto)).rejects.toThrow('Invalid registration data');
+      const p = service.completeRegistration(dto);
+      await expect(p).rejects.toBeInstanceOf(HttpException);
+      await expect(p).rejects.toThrow('Invalid registration data');
     });
 
     it('wraps a 5xx HttpException as InternalServerErrorException', async () => {
@@ -1154,9 +1164,9 @@ describe('UsersService', () => {
         new InternalServerErrorException('auth-service fail'),
       );
 
-      await expect(service.completeRegistration(dto)).rejects.toThrow(
-        'Error creating access credentials',
-      );
+      const p = service.completeRegistration(dto);
+      await expect(p).rejects.toBeInstanceOf(InternalServerErrorException);
+      await expect(p).rejects.toThrow('Error creating access credentials');
     });
   });
 
