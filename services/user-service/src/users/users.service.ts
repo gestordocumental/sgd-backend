@@ -176,9 +176,10 @@ export class UsersService {
       throw new ConflictException("User has already completed registration");
     }
 
-    if (callerOrgId && !user.isSuperAdmin) {
-      // Super admins have no per-org UserOrgRole; the membership check is skipped
-      // for them. For regular users the check ensures org scope is respected.
+    if (callerOrgId) {
+      // Org-scoped callers must always prove membership regardless of the target
+      // user's role. Platform/super-admin callers pass callerOrgId = undefined,
+      // so this block is only reached by org-scoped actors.
       const membership = await this.userOrgRoleRepository.findOne({
         where: { userId: user.id, orgId: callerOrgId },
       });
