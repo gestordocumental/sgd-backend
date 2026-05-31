@@ -8,6 +8,13 @@ const js       = require('@eslint/js');
 
 /** @type {import('eslint').Linter.Config[]} */
 module.exports = [
+  // ── Lint options ─────────────────────────────────────────────────────────
+  {
+    linterOptions: {
+      reportUnusedDisableDirectives: false,
+    },
+  },
+
   // ── Global ignores ────────────────────────────────────────────────────────
   {
     ignores: [
@@ -53,6 +60,25 @@ module.exports = [
       // ── NestJS patterns ──────────────────────────────────────────────────
       '@typescript-eslint/no-empty-function':    'off',
       '@typescript-eslint/no-empty-interface':   'off',
+
+      // `import X = require('...')` is the correct TypeScript idiom for
+      // CJS-only packages (e.g. opossum) that have no ESM export.
+      '@typescript-eslint/no-require-imports':   'off',
+    },
+  },
+
+  // ── Test file overrides ───────────────────────────────────────────────────
+  // Spec files legitimately use `any` for mocks, call helpers via expressions,
+  // and import CJS modules — relax the strictest rules only for test code.
+  {
+    files: ['**/*.spec.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any':       'off',
+      '@typescript-eslint/no-unused-vars':        'off',
+      '@typescript-eslint/no-require-imports':    'off',
+      '@typescript-eslint/no-unused-expressions': 'off',
+      'security/detect-object-injection':         'off',
+      'security/detect-non-literal-require':      'off',
     },
   },
 ];

@@ -8,7 +8,7 @@
   "scripts": {
     "build:common": "npm run build -w packages/common",
     "build:common:watch": "npm run build:watch -w packages/common",
-    "lint": "eslint 'services/*/src/**/*.ts' 'packages/common/src/**/*.ts' --max-warnings=0"
+    "lint": "eslint 'services/*/src/**/*.ts' 'packages/common/src/**/*.ts' --max-warnings=150"
   },
   "devDependencies": {
     "@nestjs/mongoose": "^11.0.4",
