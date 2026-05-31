@@ -24,7 +24,8 @@ import { ForbiddenException, NotFoundException, UnauthorizedException } from '@n
 import { randomUUID } from 'crypto';
 import { AuthService } from './auth.service';
 import { Credential } from './entities/credential.entity';
-import { AppLogger } from '@sgd/common';
+import { AppLogger, KafkaProducerService } from '@sgd/common';
+import { UserClientService } from '../user-client/user-client.service';
 
 // ── Connection helpers ────────────────────────────────────────────────────────
 
@@ -103,7 +104,7 @@ describe('AuthService — integration', () => {
         },
         // UserClientService is HTTP-only; mock it with realistic responses
         {
-          provide: 'UserClientService',
+          provide: UserClientService,
           useValue: {
             getUserInfo:                jest.fn().mockResolvedValue({ isSuperAdmin: false }),
             getUserCompanies:           jest.fn().mockResolvedValue(['org-test-1']),
@@ -111,7 +112,7 @@ describe('AuthService — integration', () => {
           },
         },
         {
-          provide: 'KafkaProducerService',
+          provide: KafkaProducerService,
           useValue: { emitSafe: jest.fn() },
         },
         {
@@ -133,7 +134,7 @@ describe('AuthService — integration', () => {
   beforeEach(async () => {
     // Clear Redis and DB between tests for isolation
     await redis.flushdb();
-    await dataSource.getRepository(Credential).delete({});
+    await dataSource.getRepository(Credential).clear();
   });
 
   // ── provisionCredentials ──────────────────────────────────────────────────

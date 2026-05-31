@@ -375,7 +375,7 @@ export class WorkflowApprovalService {
 
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'WORKFLOW_REJECTED',
-      recipientUserIds: [workflow.createdBy, ...(workflow.finalUserIds ?? [])],
+      recipientUserIds: [...new Set([workflow.createdBy, ...(workflow.finalUserIds ?? [])])],
       orgId:            workflow.orgId,
       workflowId,
       workflowTitle:    workflow.title,

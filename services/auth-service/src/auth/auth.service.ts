@@ -83,7 +83,7 @@ export class AuthService {
       43200, // fallback: 12 h
     );
 
-    const rawRounds = this.configService.get<string>('this.bcryptRounds');
+    const rawRounds = this.configService.get<string>('BCRYPT_ROUNDS');
     const parsed = rawRounds !== undefined && rawRounds !== null
       ? Number.parseInt(rawRounds, 10)
       : DEFAULT_BCRYPT_ROUNDS;
@@ -370,7 +370,12 @@ export class AuthService {
    * Called by the switch-company endpoint before issuing the company-scoped pair.
    */
   async saveGlobalContext(userId: string, globalRefreshToken: string): Promise<void> {
-    await this.redis.setex(`sa-global-rt:${userId}`, this.refreshTtlSeconds, globalRefreshToken);
+    await this.redis.set(
+      `sa-global-rt:${userId}`,
+      globalRefreshToken,
+      'EX', this.refreshTtlSeconds,
+      'NX',
+    );
   }
 
   /**

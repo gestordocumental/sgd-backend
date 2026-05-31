@@ -12,6 +12,7 @@ import { DepartamentosController } from './departamentos.controller';
 import { AreasController } from './areas.controller';
 import { CargosController } from './cargos.controller';
 import { OrgCargosController } from './org-cargos.controller';
+import { OrgAreasController } from './org-areas.controller';
 import { DeptCargosController } from './dept-cargos.controller';
 import { BulkStructureController } from './bulk-structure.controller';
 import { InternalStructureController } from './internal-structure.controller';
@@ -26,6 +27,7 @@ import { InternalGuard } from '../common/guards/internal.guard';
     AreasController,
     CargosController,
     OrgCargosController,
+    OrgAreasController,
     DeptCargosController,
     BulkStructureController,
     InternalStructureController,
