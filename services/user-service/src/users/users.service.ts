@@ -346,7 +346,7 @@ export class UsersService {
         const newDeptId  = saved.departamentoId;
         const newAreaId  = saved.areaId  ?? undefined;
         const newCargoId = saved.cargoId ?? undefined;
-        const oldDeptId  = before['departamentoId'] as string | undefined;
+        const oldDeptId  = (before['departamentoId'] as string | undefined) ?? saved.departamentoId ?? undefined;
         const oldAreaId  = before['areaId']  as string | null | undefined;
         const oldCargoId = before['cargoId'] as string | null | undefined;
 
