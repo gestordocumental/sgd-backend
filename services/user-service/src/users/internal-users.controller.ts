@@ -26,21 +26,7 @@ export class InternalUsersController {
     private readonly configService: ConfigService,
   ) {}
 
-  /**
-   * Validates x-internal-token against every known caller of user-service.
-   * Each token is specific to one (caller → user-service) direction:
-   *   INTERNAL_TOKEN_AUTH_USER     — auth-service
-   *   INTERNAL_TOKEN_NOTIF_USER    — notification-service
-   *   INTERNAL_TOKEN_WORKFLOW_USER — workflow-service
-   *   INTERNAL_TOKEN_ORG_USER      — org-service
-   */
-  private verifyToken(token: string | undefined): void {
-    const keys = [
-      'INTERNAL_TOKEN_AUTH_USER',
-      'INTERNAL_TOKEN_NOTIF_USER',
-      'INTERNAL_TOKEN_WORKFLOW_USER',
-      'INTERNAL_TOKEN_ORG_USER',
-    ];
+  private verifyToken(token: string | undefined, keys: string[]): void {
     const allowed = keys
       .map((k) => this.configService.get<string>(k))
       .filter((t): t is string => !!t)
@@ -61,7 +47,8 @@ export class InternalUsersController {
     @Headers('x-internal-token') token: string | undefined,
     @Body() body: { ids: string[] },
   ) {
-    this.verifyToken(token);
+    // Only notification-service is authorized to call this endpoint
+    this.verifyToken(token, ['INTERNAL_TOKEN_NOTIF_USER']);
     if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
       throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
     }
@@ -83,7 +70,8 @@ export class InternalUsersController {
     @Headers('x-internal-token') token: string | undefined,
     @Body() dto: ByPositionDto,
   ) {
-    this.verifyToken(token);
+    // Only workflow-service is authorized to call this endpoint
+    this.verifyToken(token, ['INTERNAL_TOKEN_WORKFLOW_USER']);
     const { orgId, cargoId, departamentoId } = dto;
     const filters: { cargoId?: string; areaId?: string | null; departamentoId?: string } = { cargoId, departamentoId };
     if (dto.areaId !== undefined) filters.areaId = dto.areaId;

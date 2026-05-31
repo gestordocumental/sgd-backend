@@ -124,6 +124,7 @@ function parseCellsFromXml(xml: string): string[] {
     while ((pMatch = pRegex.exec(cellXml)) !== null) {
       const pXml = pMatch[0];
       const runs: string[] = [];
+      // eslint-disable-next-line security/detect-unsafe-regex
       const tRegex = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g;
       let tMatch: RegExpExecArray | null;
 

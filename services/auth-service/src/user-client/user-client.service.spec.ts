@@ -199,22 +199,26 @@ describe('UserClientService', () => {
       );
     });
 
-    it('returns empty permissions when user-service returns an error', async () => {
+    it('throws InternalServerErrorException when user-service returns an error', async () => {
       httpService.get.mockReturnValue(
         throwError(() => ({
           response: { status: 503, data: { message: 'Service Unavailable' } },
         })),
       );
 
-      await expect(service.getUserEffectivePermissions('user-id', 'org-id')).resolves.toEqual([]);
+      await expect(service.getUserEffectivePermissions('user-id', 'org-id')).rejects.toThrow(
+        InternalServerErrorException,
+      );
     });
 
-    it('returns empty permissions on network failure', async () => {
+    it('throws InternalServerErrorException on network failure', async () => {
       httpService.get.mockReturnValue(
         throwError(() => ({ message: 'ECONNRESET' })),
       );
 
-      await expect(service.getUserEffectivePermissions('user-id', 'org-id')).resolves.toEqual([]);
+      await expect(service.getUserEffectivePermissions('user-id', 'org-id')).rejects.toThrow(
+        InternalServerErrorException,
+      );
     });
   });
 });

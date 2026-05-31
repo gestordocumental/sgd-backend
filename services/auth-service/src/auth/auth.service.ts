@@ -6,11 +6,11 @@ import {
   ForbiddenException,
   NotFoundException,
   BadRequestException,
-  Logger,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { JwtService } from "@nestjs/jwt";
+import type { StringValue } from "ms";
 import { ConfigService } from "@nestjs/config";
 import * as bcrypt from "bcryptjs";
 import { randomUUID, randomBytes } from "crypto";
@@ -19,31 +19,29 @@ import { Credential, CredentialStatus } from "./entities/credential.entity";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
-import { KafkaProducerService, TOPICS } from "@sgd/common";
+import { AppLogger, KafkaProducerService, TOPICS } from "@sgd/common";
 import { parseDurationToSeconds } from "./utils/parse-duration";
-
-// Refresh token TTL in Redis (must match JWT_REFRESH_EXPIRATION: 12h)
-const REFRESH_TTL_SECONDS = 12 * 60 * 60;
 
 // Password reset token TTL: 1 hour
 const RESET_TOKEN_TTL_SECONDS = 60 * 60;
 
-// bcrypt cost factor — read from env so it can be tuned per environment.
-// Default 12 gives ~250ms on modern hardware which is OWASP-recommended.
+// Default bcrypt cost factor: ~250ms on modern hardware (OWASP-recommended).
+// Acceptable range: 10–14. Values outside range fall back to default.
 const DEFAULT_BCRYPT_ROUNDS = 12;
-const parsedRounds = Number.parseInt(
-  process.env['BCRYPT_ROUNDS'] ?? String(DEFAULT_BCRYPT_ROUNDS),
-  10,
-);
-const BCRYPT_ROUNDS =
-  Number.isInteger(parsedRounds) && parsedRounds >= 10 && parsedRounds <= 14
-    ? parsedRounds
-    : DEFAULT_BCRYPT_ROUNDS;
 
-// Dummy hash used when the user is not found — ensures bcrypt.compare always
-// runs so response time doesn't reveal whether an email exists in the system.
-// Generated at startup with the same cost factor as real hashes to keep timings comparable.
-const DUMMY_HASH = bcrypt.hashSync('__invalid_password__', BCRYPT_ROUNDS);
+// Exponential lockout: after reaching each threshold of consecutive failures the
+// account is locked for the corresponding duration.  Stages are evaluated
+// highest-first so 15+ failures always gets the 1h lockout.
+const LOCKOUT_STAGES = [
+  { threshold:  5, durationMs:  5 * 60 * 1000 },   //  5 failures →  5 min
+  { threshold: 10, durationMs: 15 * 60 * 1000 },   // 10 failures → 15 min
+  { threshold: 15, durationMs: 60 * 60 * 1000 },   // 15 failures →  1 h
+] as const;
+// Counter auto-expires after 24 h of inactivity to prevent stale keys.
+const FAILURE_COUNTER_TTL_SECONDS = 24 * 60 * 60;
+// Short-lived cache for user-service data used in the login/refresh hot path.
+// Allows auth to continue serving tokens for up to 60 s while user-service is unavailable.
+const USER_DATA_CACHE_TTL_SECONDS = 60;
 
 interface TokenOptions {
   companyId?: string;
@@ -51,9 +49,24 @@ interface TokenOptions {
   permissions?: string[];
 }
 
+interface RefreshTokenPayload {
+  sub: string;
+  email: string;
+  jti: string;
+  iss: string;
+  iat: number;
+  exp: number;
+  companyId?: string;
+}
+
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
+  // Derived once from JWT_REFRESH_EXPIRATION so Redis TTL always matches the JWT expiry.
+  private readonly refreshTtlSeconds: number;
+  // bcrypt cost factor read from ConfigService so it can be overridden in tests.
+  private readonly bcryptRounds: number;
+  // Dummy hash to run bcrypt.compare even when no credential exists (timing equalization).
+  private readonly dummyHash: string;
 
   constructor(
     @InjectRepository(Credential)
@@ -63,10 +76,29 @@ export class AuthService {
     @Inject("REDIS_CLIENT") private readonly redis: Redis,
     private readonly userClientService: UserClientService,
     private readonly kafkaProducer: KafkaProducerService,
-  ) {}
+    private readonly logger: AppLogger,
+  ) {
+    this.refreshTtlSeconds = parseDurationToSeconds(
+      this.configService.getOrThrow<string>('JWT_REFRESH_EXPIRATION'),
+      43200, // fallback: 12 h
+    );
+
+    const rawRounds = this.configService.get<string>('BCRYPT_ROUNDS');
+    const parsed = rawRounds !== undefined && rawRounds !== null
+      ? Number.parseInt(rawRounds, 10)
+      : DEFAULT_BCRYPT_ROUNDS;
+    this.bcryptRounds = Number.isInteger(parsed) && parsed >= 10 && parsed <= 14
+      ? parsed
+      : DEFAULT_BCRYPT_ROUNDS;
+
+    this.dummyHash = bcrypt.hashSync('__invalid_password__', this.bcryptRounds);
+  }
 
   /**
    * Idempotent: creates credentials by email (global, not per-company).
+   * Caller contract: only user-service (authenticated via x-internal-token) may invoke this.
+   * userId is expected to be a valid, persisted user in user-service before this call is made;
+   * the caller guarantees referential integrity across the service boundary.
    */
   async provisionCredentials(dto: ProvisionCredentialDto) {
     const existing = await this.credentialRepo.findOne({
@@ -84,7 +116,7 @@ export class AuthService {
       }
 
       if (!existing.passwordHash) {
-        existing.passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+        existing.passwordHash = await bcrypt.hash(dto.password, this.bcryptRounds);
         existing.status = CredentialStatus.ACTIVE;
         await this.credentialRepo.save(existing);
       }
@@ -92,7 +124,7 @@ export class AuthService {
       return { ok: true };
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+    const passwordHash = await bcrypt.hash(dto.password, this.bcryptRounds);
 
     const credential = this.credentialRepo.create({
       userId: dto.userId,
@@ -115,23 +147,37 @@ export class AuthService {
     });
 
     // Always run bcrypt.compare to prevent timing-based user enumeration.
-    // Use DUMMY_HASH when credential is missing, inactive, or has no password yet
+    // Use this.dummyHash when credential is missing, inactive, or has no password yet
     // (invitation flow: user created but complete-registration not done).
     const hashToCheck = (credential?.status === CredentialStatus.ACTIVE && credential.passwordHash)
       ? credential.passwordHash
-      : DUMMY_HASH;
+      : this.dummyHash;
     const valid = await bcrypt.compare(dto.password, hashToCheck);
 
+    // Check lockout after bcrypt so timing is equalized regardless of lock state.
+    if (credential?.status === CredentialStatus.ACTIVE &&
+        credential.lockedUntil && credential.lockedUntil > new Date()) {
+      throw new ForbiddenException('Account temporarily locked. Try again later.');
+    }
+
     if (!credential || credential.status !== CredentialStatus.ACTIVE || !valid) {
+      // Only track failures for active credentials — disabled accounts and unknown
+      // emails must not influence failure counters (prevents enumeration via lockout).
+      if (credential?.status === CredentialStatus.ACTIVE && !valid) {
+        await this.recordFailedAttempt(credential);
+      }
       throw new UnauthorizedException("Invalid credentials");
     }
+
+    // Credentials are valid — reset the failure counter and any previous lockout.
+    await this.clearLoginFailures(credential);
 
     let userInfo: { isSuperAdmin: boolean };
     let companies: string[];
     try {
       [userInfo, companies] = await Promise.all([
-        this.userClientService.getUserInfo(credential.userId),
-        this.userClientService.getUserCompanies(credential.userId),
+        this.getCachedUserInfo(credential.userId),
+        this.getCachedUserCompanies(credential.userId),
       ]);
     } catch (err) {
       if (err instanceof NotFoundException) {
@@ -156,9 +202,9 @@ export class AuthService {
    * Preserves companyId and recalculates scoped claims from user-service.
    */
   async refresh(refreshToken: string) {
-    let payload: any;
+    let payload: RefreshTokenPayload;
     try {
-      payload = this.jwtService.verify(refreshToken, {
+      payload = this.jwtService.verify<RefreshTokenPayload>(refreshToken, {
         secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
       });
     } catch {
@@ -183,12 +229,13 @@ export class AuthService {
     // Recalculate scope from user-service instead of trusting the old token.
     // This ensures revoked company access or super admin status is enforced
     // on the next refresh rather than persisting for the full 7-day TTL.
+    // Cached fallback (60 s) allows refresh to succeed when user-service is briefly unavailable.
     let companies: string[];
     let userInfo: { isSuperAdmin: boolean };
     try {
       [companies, userInfo] = await Promise.all([
-        this.userClientService.getUserCompanies(payload.sub),
-        this.userClientService.getUserInfo(payload.sub),
+        this.getCachedUserCompanies(payload.sub),
+        this.getCachedUserInfo(payload.sub),
       ]);
     } catch (err) {
       if (err instanceof NotFoundException) {
@@ -216,7 +263,7 @@ export class AuthService {
       permissions = rawPermissions.map((p) => `${p.module}:${p.action}`);
     }
 
-    return this.generateTokenPair(credential, {
+    const tokenPair = await this.generateTokenPair(credential, {
       companyId: payload.companyId,
       permissions,
       // Only include isSuperAdmin for global (non-company) tokens.
@@ -224,6 +271,24 @@ export class AuthService {
       // is limited to their company role permissions in that context.
       ...(!payload.companyId && { isSuperAdmin: userInfo.isSuperAdmin || undefined }),
     });
+
+    // Extend the saved global refresh token TTL on every company-scoped refresh
+    // so the super-admin can still exit the company after long sessions.
+    if (payload.companyId) {
+      const globalKey = `sa-global-rt:${credential.userId}`;
+      const storedGlobal = await this.redis.get(globalKey);
+      if (storedGlobal) {
+        const globalPayload = this.jwtService.decode(storedGlobal) as Record<string, unknown> | null;
+        await Promise.all([
+          this.redis.expire(globalKey, this.refreshTtlSeconds),
+          globalPayload?.sub && globalPayload?.jti
+            ? this.redis.expire(`refresh:${globalPayload.sub}:${globalPayload.jti}`, this.refreshTtlSeconds)
+            : Promise.resolve(),
+        ]);
+      }
+    }
+
+    return tokenPair;
   }
 
   /**
@@ -298,6 +363,46 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException("Invalid or expired token");
     }
+  }
+
+  /**
+   * Persists the global refresh token so exit-company can restore it later.
+   * Called by the switch-company endpoint before issuing the company-scoped pair.
+   */
+  async saveGlobalContext(userId: string, globalRefreshToken: string): Promise<void> {
+    await this.redis.set(
+      `sa-global-rt:${userId}`,
+      globalRefreshToken,
+      'EX', this.refreshTtlSeconds,
+      'NX',
+    );
+  }
+
+  /**
+   * Restores the super-admin global context from the saved global refresh token.
+   * Called by the POST /auth/exit-company endpoint.
+   * Validates and consumes the company refresh token, then validates and rotates
+   * the saved global refresh token to produce a new global token pair.
+   */
+  async exitCompanyContext(companyRefreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    let payload: RefreshTokenPayload;
+    try {
+      payload = this.jwtService.verify<RefreshTokenPayload>(companyRefreshToken, {
+        secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
+      });
+    } catch {
+      throw new UnauthorizedException("Invalid or expired company refresh token");
+    }
+
+    const consumed = await this.redis.getdel(`refresh:${payload.sub}:${payload.jti}`);
+    if (!consumed) throw new UnauthorizedException("Company session revoked");
+
+    const globalRefreshToken = await this.redis.getdel(`sa-global-rt:${payload.sub}`);
+    if (!globalRefreshToken) {
+      throw new UnauthorizedException("Global session expired — please log in again");
+    }
+
+    return this.refresh(globalRefreshToken);
   }
 
   /**
@@ -381,7 +486,7 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired password reset token');
     }
 
-    credential.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    credential.passwordHash = await bcrypt.hash(newPassword, this.bcryptRounds);
     await this.credentialRepo.save(credential);
 
     // Invalidate all existing sessions so the user must log in with the new password.
@@ -391,13 +496,89 @@ export class AuthService {
     return { ok: true };
   }
 
+  /**
+   * Returns user info from user-service, caching the result in Redis for
+   * USER_DATA_CACHE_TTL_SECONDS. On failure, returns the cached value if
+   * available (user-service temporarily unavailable) or rethrows.
+   */
+  private async getCachedUserInfo(userId: string): Promise<{ isSuperAdmin: boolean }> {
+    const key = `user-info-cache:${userId}`;
+    const cached = await this.redis.get(key);
+
+    try {
+      const result = await this.userClientService.getUserInfo(userId);
+      await this.redis.setex(key, USER_DATA_CACHE_TTL_SECONDS, JSON.stringify(result));
+      return result;
+    } catch (err) {
+      if (cached) {
+        this.logger.warn(`user-service unavailable — using cached user-info for ${userId}`);
+        return JSON.parse(cached) as { isSuperAdmin: boolean };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Returns the user's company list from user-service, caching the result in
+   * Redis for USER_DATA_CACHE_TTL_SECONDS. On failure, returns the cached
+   * value if available or rethrows.
+   */
+  private async getCachedUserCompanies(userId: string): Promise<string[]> {
+    const key = `user-companies-cache:${userId}`;
+    const cached = await this.redis.get(key);
+
+    try {
+      const result = await this.userClientService.getUserCompanies(userId);
+      await this.redis.setex(key, USER_DATA_CACHE_TTL_SECONDS, JSON.stringify(result));
+      return result;
+    } catch (err) {
+      if (cached) {
+        this.logger.warn(`user-service unavailable — using cached user-companies for ${userId}`);
+        return JSON.parse(cached) as string[];
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Increments the per-email failure counter in Redis and locks the account
+   * in the DB when the count reaches a lockout threshold.
+   */
+  private async recordFailedAttempt(credential: Credential): Promise<void> {
+    const key = `login-failures:${credential.email}`;
+    const count = await this.redis.incr(key);
+    await this.redis.expire(key, FAILURE_COUNTER_TTL_SECONDS);
+
+    // Pick the most severe applicable lockout stage (reverse-find)
+    const stage = LOCKOUT_STAGES.slice().reverse().find(s => count >= s.threshold);
+    if (stage) {
+      credential.lockedUntil = new Date(Date.now() + stage.durationMs);
+      await this.credentialRepo.save(credential);
+      this.logger.warn(
+        `Account locked: ${credential.email} after ${count} failures (${stage.durationMs / 60000} min)`,
+      );
+    }
+  }
+
+  /**
+   * Clears the Redis failure counter and removes any DB lockout after a
+   * successful authentication.
+   */
+  private async clearLoginFailures(credential: Credential): Promise<void> {
+    await this.redis.del(`login-failures:${credential.email}`);
+    if (credential.lockedUntil) {
+      credential.lockedUntil = null;
+      await this.credentialRepo.save(credential);
+    }
+  }
+
   private async generateTokenPair(
     credential: Credential,
     options: TokenOptions = {},
   ) {
     const jti = randomUUID();
 
-    const basePayload: Record<string, any> = {
+    const basePayload: Record<string, unknown> = {
       sub: credential.userId,
       email: credential.email,
       iss: "sgd-jwt-key",
@@ -409,23 +590,21 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(basePayload, {
       secret: this.configService.get<string>("JWT_SECRET"),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expiresIn: this.configService.get("JWT_EXPIRATION") as any,
+      expiresIn: this.configService.getOrThrow<StringValue>("JWT_EXPIRATION"),
     });
 
     const refreshToken = this.jwtService.sign(
       { ...basePayload, jti },
       {
         secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        expiresIn: this.configService.get("JWT_REFRESH_EXPIRATION") as any,
+        expiresIn: this.configService.getOrThrow<StringValue>("JWT_REFRESH_EXPIRATION"),
       },
     );
 
     // Fix: use userId (not credential.id) so refresh lookup is consistent
     await this.redis.setex(
       `refresh:${credential.userId}:${jti}`,
-      REFRESH_TTL_SECONDS,
+      this.refreshTtlSeconds,
       "1",
     );
 

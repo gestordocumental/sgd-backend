@@ -85,6 +85,8 @@ describe('UsersController', () => {
             setOptionalReviewer: jest.fn(),
             completeRegistration: jest.fn(),
             resendInvitation: jest.fn(),
+            removeAllFromOrg: jest.fn(),
+            getEffectivePermissions: jest.fn(),
           },
         },
         {
@@ -418,6 +420,194 @@ describe('UsersController', () => {
       await controller.removeFromOrg({ sub: 'caller-id' } as any, 'user-uuid-1', 'org-uuid-1');
 
       expect(usersService.removeFromOrg).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1', 'caller-id');
+    });
+  });
+
+  // ─── GET /admin/counts-by-org ─────────────────────────────────────────────
+
+  describe('countsByOrg', () => {
+    it('delegates to service.getCountsByOrg', async () => {
+      const counts = [{ orgId: 'org-1', total: 10, active: 8, inactive: 2 }];
+      usersService.getCountsByOrg.mockResolvedValue(counts);
+
+      const result = await controller.countsByOrg(undefined as any);
+
+      expect(usersService.getCountsByOrg).toHaveBeenCalled();
+      expect(result).toEqual(counts);
+    });
+  });
+
+  // ─── GET /super-admins ────────────────────────────────────────────────────
+
+  describe('findAllSuperAdmin', () => {
+    it('returns paginated UserResponseDto items for super admins', async () => {
+      const users = [makeUser({ isSuperAdmin: true })];
+      usersService.findAllSuperAdmin.mockResolvedValue({ data: users, total: 1 });
+
+      const result = await controller.findAllSuperAdmin(1, 20);
+
+      expect(usersService.findAllSuperAdmin).toHaveBeenCalledWith(1, 20, undefined, undefined);
+      expect(result.total).toBe(1);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]).toBeInstanceOf(UserResponseDto);
+    });
+  });
+
+  // ─── GET /me/org-roles ────────────────────────────────────────────────────
+
+  describe('getMyOrgRoles', () => {
+    it('returns UserOrgRoleResponseDto array for authenticated user', async () => {
+      const uors = [makeUor()];
+      usersService.getMyOrgRoles.mockResolvedValue(uors);
+
+      const result = await controller.getMyOrgRoles({
+        sub: 'user-uuid-1',
+        companyId: 'org-uuid-1',
+      } as any);
+
+      expect(usersService.getMyOrgRoles).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1');
+      expect(result).toHaveLength(1);
+      result.forEach((r) => expect(r).toBeInstanceOf(UserOrgRoleResponseDto));
+    });
+
+    it('throws UnauthorizedException when sub claim is missing', () => {
+      expect(() =>
+        controller.getMyOrgRoles({ sub: '', companyId: 'org-uuid-1' } as any),
+      ).toThrow(UnauthorizedException);
+    });
+
+    it('throws ForbiddenException when companyId is missing', () => {
+      expect(() =>
+        controller.getMyOrgRoles({ sub: 'user-uuid-1', companyId: undefined } as any),
+      ).toThrow(ForbiddenException);
+    });
+  });
+
+  // ─── DELETE /internal/orgs/:orgId/users ──────────────────────────────────
+
+  describe('removeAllFromOrg', () => {
+    it('delegates to service.removeAllFromOrg when internal token is valid', async () => {
+      usersService.removeAllFromOrg.mockResolvedValue(undefined);
+
+      await controller.removeAllFromOrg(INTERNAL_TOKEN, 'org-uuid-1');
+
+      expect(usersService.removeAllFromOrg).toHaveBeenCalledWith('org-uuid-1');
+    });
+
+    it('throws UnauthorizedException when internal token is invalid', async () => {
+      await expect(controller.removeAllFromOrg('wrong-token', 'org-uuid-1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  // ─── GET /:id/effective-permissions ──────────────────────────────────────
+
+  describe('getEffectivePermissions', () => {
+    it('returns permissions when token and companyId are valid', async () => {
+      const perms = [{ module: 'USERS', action: 'READ' }];
+      usersService.getEffectivePermissions.mockResolvedValue(perms);
+
+      const result = await controller.getEffectivePermissions(INTERNAL_TOKEN, 'user-uuid-1', 'org-uuid-1');
+
+      expect(usersService.getEffectivePermissions).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1');
+      expect(result).toEqual(perms);
+    });
+
+    it('throws UnauthorizedException when companyId query param is missing', async () => {
+      await expect(
+        controller.getEffectivePermissions(INTERNAL_TOKEN, 'user-uuid-1', ''),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  // ─── POST /:id/resend-invitation ─────────────────────────────────────────
+
+  describe('resendInvitation', () => {
+    it('passes callerOrgId from JWT for non-super-admin callers', async () => {
+      const user = makeUser();
+      const invitationToken = 'b'.repeat(64);
+      usersService.resendInvitation.mockResolvedValue({ user, invitationToken });
+
+      const result = await controller.resendInvitation(
+        { sub: 'admin', companyId: 'org-uuid-1', isSuperAdmin: false } as any,
+        'user-uuid-1',
+      );
+
+      expect(usersService.resendInvitation).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1');
+      expect(result.invitationToken).toBe(invitationToken);
+    });
+
+    it('passes undefined callerOrgId for super admin callers', async () => {
+      const user = makeUser();
+      usersService.resendInvitation.mockResolvedValue({ user, invitationToken: 'x'.repeat(64) });
+
+      await controller.resendInvitation(
+        { sub: 'sa', isSuperAdmin: true } as any,
+        'user-uuid-1',
+      );
+
+      expect(usersService.resendInvitation).toHaveBeenCalledWith('user-uuid-1', undefined);
+    });
+  });
+
+  // ─── POST /complete-registration ─────────────────────────────────────────
+
+  describe('completeRegistration', () => {
+    it('delegates to service and returns UserResponseDto', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
+      usersService.completeRegistration.mockResolvedValue(UserResponseDto.from(user));
+
+      const dto = { token: 'a'.repeat(64), firstName: 'Juan', lastName: 'Perez', idNumber: 'CC123', password: 'Str0ng@Pass' };
+      const result = await controller.completeRegistration(dto as any);
+
+      expect(usersService.completeRegistration).toHaveBeenCalledWith(dto);
+      expect(result).toBeInstanceOf(UserResponseDto);
+    });
+  });
+
+  // ─── PATCH /:id/orgs/:orgId/optional-reviewer ────────────────────────────
+
+  describe('setOptionalReviewer', () => {
+    it('delegates to service when caller is in the same org', async () => {
+      usersService.setOptionalReviewer.mockResolvedValue(undefined);
+
+      await controller.setOptionalReviewer(
+        { sub: 'caller-id', companyId: 'org-uuid-1', isSuperAdmin: false } as any,
+        'user-uuid-1',
+        'org-uuid-1',
+        { value: true } as any,
+      );
+
+      expect(usersService.setOptionalReviewer).toHaveBeenCalledWith(
+        'user-uuid-1', 'org-uuid-1', true, 'caller-id',
+      );
+    });
+
+    it('throws ForbiddenException when non-super-admin tries to update a different org', () => {
+      expect(() =>
+        controller.setOptionalReviewer(
+          { sub: 'caller-id', companyId: 'org-uuid-1', isSuperAdmin: false } as any,
+          'user-uuid-1',
+          'org-uuid-DIFFERENT',
+          { value: true } as any,
+        ),
+      ).toThrow(ForbiddenException);
+
+      expect(usersService.setOptionalReviewer).not.toHaveBeenCalled();
+    });
+
+    it('allows super admin to update any org without ForbiddenException', async () => {
+      usersService.setOptionalReviewer.mockResolvedValue(undefined);
+
+      await controller.setOptionalReviewer(
+        { sub: 'sa-id', companyId: 'org-uuid-1', isSuperAdmin: true } as any,
+        'user-uuid-1',
+        'org-uuid-DIFFERENT',
+        { value: false } as any,
+      );
+
+      expect(usersService.setOptionalReviewer).toHaveBeenCalled();
     });
   });
 });

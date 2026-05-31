@@ -84,14 +84,14 @@ export class AuthController {
     }
   }
 
+  /** The refresh token is never returned in the response body — it lives
+   *  exclusively in the httpOnly cookie to prevent XSS token theft. */
   private toAccessTokenResponse(
     tokenPair: { accessToken: string; refreshToken: string },
     res: Response | undefined,
-  ): { accessToken: string; refreshToken: string } {
+  ): { accessToken: string } {
     this.setRefreshCookie(res, tokenPair.refreshToken);
-    // Return the refresh token in the body so cross-origin clients (no withCredentials)
-    // can store it themselves. The httpOnly cookie remains as defense-in-depth.
-    return { accessToken: tokenPair.accessToken, refreshToken: tokenPair.refreshToken };
+    return { accessToken: tokenPair.accessToken };
   }
 
   @ApiOperation({ summary: 'Provision credentials for a new user (internal only)' })
@@ -165,36 +165,24 @@ export class AuthController {
     return this.toAccessTokenResponse(await this.authService.login(dto), res);
   }
 
-  @ApiOperation({ summary: 'Refresh access token using refresh token' })
-  @ApiResponse({ status: 200, description: 'Returns new accessToken + refreshToken and rotates refresh HttpOnly cookie' })
-  @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
+  @ApiOperation({ summary: 'Refresh access token using the httpOnly refresh-token cookie' })
+  @ApiResponse({ status: 200, description: 'Returns new accessToken and rotates the refresh HttpOnly cookie' })
+  @ApiResponse({ status: 401, description: 'Missing, invalid or expired refresh cookie' })
   @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
   @UseGuards(ThrottlerGuard)
   @Post("refresh")
   async refresh(
     @Headers("cookie") cookieHeader: string | undefined,
-    @Body() body: { refreshToken?: string },
     @Res({ passthrough: true }) res?: Response,
   ) {
-    // When the body carries an explicit refreshToken, use it unconditionally.
-    // This allows exitCompany() on the frontend to restore the global
-    // super-admin context by sending the stored global refresh token in the
-    // body, even when the httpOnly cookie currently holds a company-scoped
-    // token (which would otherwise shadow it).
-    // Both paths validate the token via Redis GETDEL + JWT signature, so the
-    // security posture is identical.
     let refreshToken: string;
-    if (body?.refreshToken) {
-      refreshToken = body.refreshToken;
-    } else {
-      try {
-        refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
-      } catch (err) {
-        if (err instanceof UnauthorizedException && err.message === 'Missing refresh cookie') {
-          throw new UnauthorizedException('Missing refresh token');
-        }
-        throw err;
+    try {
+      refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
+    } catch (err) {
+      if (err instanceof UnauthorizedException && err.message === 'Missing refresh cookie') {
+        throw new UnauthorizedException('Missing refresh token');
       }
+      throw err;
     }
     return this.toAccessTokenResponse(await this.authService.refresh(refreshToken), res);
   }
@@ -257,11 +245,43 @@ export class AuthController {
   @Post("switch-company")
   async switchCompany(
     @Headers("authorization") auth: string,
+    @Headers("cookie") cookieHeader: string | undefined,
     @Body() dto: SwitchCompanyDto,
     @Res({ passthrough: true }) res?: Response,
   ) {
     const payload = this.authService.verifyAccessToken(auth);
+
+    // Persist the current global refresh token so exit-company can restore it.
+    // Best-effort: if the cookie is absent (non-cookie clients), skip silently.
+    try {
+      const globalRefreshToken = this.getRefreshTokenFromCookie(cookieHeader);
+      await this.authService.saveGlobalContext(payload.sub, globalRefreshToken);
+    } catch {
+      // Non-httpOnly-cookie clients cannot use exit-company — that is acceptable.
+    }
+
     const tokenPair = await this.authService.switchCompany(payload.sub, dto.companyId);
     return this.toAccessTokenResponse(tokenPair, res);
+  }
+
+  @ApiOperation({ summary: 'Restore the global super-admin context after exiting a company' })
+  @ApiResponse({ status: 200, description: 'Returns global accessToken and rotates refresh cookie' })
+  @ApiResponse({ status: 401, description: 'Missing cookie or global session expired — re-login required' })
+  @Post("exit-company")
+  @HttpCode(HttpStatus.OK)
+  async exitCompany(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    let companyRefreshToken: string;
+    try {
+      companyRefreshToken = this.getRefreshTokenFromCookie(cookieHeader);
+    } catch {
+      throw new UnauthorizedException('Missing or malformed refresh cookie');
+    }
+    return this.toAccessTokenResponse(
+      await this.authService.exitCompanyContext(companyRefreshToken),
+      res,
+    );
   }
 }

@@ -43,6 +43,7 @@ export class UserClientService {
             "x-internal-token": this.internalToken,
             [CORRELATION_ID_HEADER]: correlationId,
           },
+          timeout: 3000,
         }),
       );
 
@@ -91,6 +92,7 @@ export class UserClientService {
             'x-internal-token': this.internalToken,
             [CORRELATION_ID_HEADER]: correlationId,
           },
+          timeout: 3000,
         }),
       );
 
@@ -113,8 +115,9 @@ export class UserClientService {
         correlationId,
         message: `← [user-service] GET /api/users/${userId}/effective-permissions ${status ?? 500}: ${message}`,
       });
-      // Non-fatal: return empty list so the token is still issued without permissions
-      return [];
+      throw new InternalServerErrorException(
+        `Could not fetch effective permissions from user-service: ${message}`,
+      );
     }
   }
 
@@ -137,6 +140,7 @@ export class UserClientService {
             "x-internal-token": this.internalToken,
             [CORRELATION_ID_HEADER]: correlationId,
           },
+          timeout: 3000,
         }),
       );
 

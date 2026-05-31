@@ -65,6 +65,10 @@ export class AreasService {
     return this.repo.find({ where: { orgId, departamentoId }, order: { name: 'ASC' }, take: 500 });
   }
 
+  findAllByOrg(orgId: string): Promise<Area[]> {
+    return this.repo.find({ where: { orgId }, order: { name: 'ASC' }, take: 500 });
+  }
+
   async findOne(orgId: string, departamentoId: string, id: string): Promise<Area> {
     await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId } });

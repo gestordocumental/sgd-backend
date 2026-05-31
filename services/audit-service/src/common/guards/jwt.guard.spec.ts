@@ -91,13 +91,19 @@ describe('JwtGuard', () => {
   });
 
   it('allows request with valid internal token', async () => {
-    reflector.getAllAndOverride.mockReturnValue({ orgMember: false, superAdminOnly: false });
+    // getAllAndOverride is called twice: first for AUTH_KEY, then for INTERNAL_TOKEN_KEYS_META.
+    // The second call must return undefined so the guard falls back to the default key list.
+    reflector.getAllAndOverride
+      .mockReturnValueOnce({ orgMember: false, superAdminOnly: false })
+      .mockReturnValueOnce(undefined);
     const { ctx } = makeCtx({}, { 'x-internal-token': INTERNAL });
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
   });
 
   it('falls through to JWT check when internal token has wrong length', async () => {
-    reflector.getAllAndOverride.mockReturnValue({ orgMember: false, superAdminOnly: false });
+    reflector.getAllAndOverride
+      .mockReturnValueOnce({ orgMember: false, superAdminOnly: false })
+      .mockReturnValueOnce(undefined);
     const { ctx } = makeCtx({}, { 'x-internal-token': 'wrong' });
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });

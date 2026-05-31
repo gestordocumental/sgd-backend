@@ -21,6 +21,7 @@ import { KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sg
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const parse = (v: string): number[] | null => {
     const normalized = v.replace(/^v/i, '');
+    // eslint-disable-next-line security/detect-unsafe-regex
     if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
     return normalized.split('.').map((n) => Number(n));
   };

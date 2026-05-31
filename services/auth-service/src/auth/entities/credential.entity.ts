@@ -21,7 +21,12 @@ export class Credential {
   @Column()
   email!: string;
 
-  // Logical relationship with the User Service
+  // Cross-service reference to user-service's User.id.
+  // No DB FK by design: auth-service and user-service use separate databases (microservice boundary).
+  // Integrity is maintained at the application layer:
+  //   - Only user-service may write this field via POST /credentials/provision (x-internal-token).
+  //   - No other code path creates a Credential record, so no other source of userId exists.
+  //   - ProvisionCredentialDto validates the value as a UUID before it reaches the service.
   @Index({ unique: true })
   @Column({ name: "user_id", type: "uuid" })
   userId!: string;
@@ -37,10 +42,6 @@ export class Credential {
     default: CredentialStatus.ACTIVE,
   })
   status!: CredentialStatus;
-
-  // Refresh current token (optional) for rotation/revocation
-  @Column({ name: "refresh_token_hash", nullable: true })
-  refreshTokenHash!: string | null;
 
   @Column({ name: "locked_until", type: "timestamptz", nullable: true })
   lockedUntil!: Date | null;

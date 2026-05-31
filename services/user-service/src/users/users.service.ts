@@ -177,6 +177,9 @@ export class UsersService {
     }
 
     if (callerOrgId) {
+      // Org-scoped callers must always prove membership regardless of the target
+      // user's role. Platform/super-admin callers pass callerOrgId = undefined,
+      // so this block is only reached by org-scoped actors.
       const membership = await this.userOrgRoleRepository.findOne({
         where: { userId: user.id, orgId: callerOrgId },
       });
@@ -336,6 +339,46 @@ export class UsersService {
         const to = (dto as Record<string, unknown>)[key]
         if (before[key] !== to) changes[key] = { from: before[key], to }
       }
+
+      // Resolve human-readable names for org-structure UUID changes so the
+      // audit detail modal shows "Marketing → Ventas" instead of UUIDs.
+      if (orgId && (changes['departamentoId'] || changes['areaId'] || changes['cargoId'])) {
+        const newDeptId  = saved.departamentoId;
+        const newAreaId  = saved.areaId  ?? undefined;
+        const newCargoId = saved.cargoId ?? undefined;
+        const oldDeptId  = (before['departamentoId'] as string | undefined) ?? saved.departamentoId ?? undefined;
+        const oldAreaId  = before['areaId']  as string | null | undefined;
+        const oldCargoId = before['cargoId'] as string | null | undefined;
+
+        const [toNames, fromNames] = await Promise.all([
+          newDeptId
+            ? this.orgClientService.resolveNamesById(orgId, newDeptId, newAreaId, newCargoId)
+            : null,
+          oldDeptId
+            ? this.orgClientService.resolveNamesById(orgId, oldDeptId, oldAreaId, oldCargoId)
+            : null,
+        ]);
+
+        if (changes['departamentoId']) {
+          changes['departamentoId'] = {
+            from: fromNames?.departamentoNombre ?? changes['departamentoId'].from,
+            to:   toNames?.departamentoNombre   ?? changes['departamentoId'].to,
+          };
+        }
+        if (changes['areaId']) {
+          changes['areaId'] = {
+            from: fromNames?.areaNombre ?? changes['areaId'].from,
+            to:   toNames?.areaNombre   ?? changes['areaId'].to,
+          };
+        }
+        if (changes['cargoId']) {
+          changes['cargoId'] = {
+            from: fromNames?.cargoNombre ?? changes['cargoId'].from,
+            to:   toNames?.cargoNombre   ?? changes['cargoId'].to,
+          };
+        }
+      }
+
       if (Object.keys(changes).length > 0) {
         this.emitAuditLog({
           actorId,
@@ -556,8 +599,12 @@ export class UsersService {
 
     // Also include super admins so their names resolve in workflow/audit views
     // even if they have no explicit org membership record.
+    // Exclude super admins who have not yet completed registration: they have
+    // taken no actions in the system so their names don't need to resolve, and
+    // showing them would let org admins attempt to resend invitations to users
+    // with no membership record — causing a spurious 403.
     const superAdmins = await this.usersRepository.find({
-      where: { isSuperAdmin: true },
+      where: { isSuperAdmin: true, registrationStatus: RegistrationStatus.ACTIVE },
       withDeleted: true,
     });
     for (const sa of superAdmins) {

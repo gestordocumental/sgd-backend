@@ -341,6 +341,70 @@ describe('WorkflowApprovalService', () => {
       );
       expect(eventTypes).toContain(TimelineEventType.STEP_REJECTED);
     });
+
+    it('notifies the workflow creator when rejected', async () => {
+      const { service, workflowRepo, kafkaProducer } = buildService();
+      const wf = pendingWorkflow();
+      workflowRepo.findOne.mockResolvedValue(wf);
+      workflowRepo.findOneOrFail.mockResolvedValue(wf);
+
+      await service.reject('wf-1', 'approver-1', { observations: 'motivo de rechazo' });
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        'notification.send',
+        expect.objectContaining({
+          type: 'WORKFLOW_REJECTED',
+          recipientUserIds: expect.arrayContaining(['creator-1']),
+        }),
+      );
+    });
+
+    it('also notifies final users when the workflow has finalUserIds', async () => {
+      const { service, workflowRepo, kafkaProducer } = buildService();
+      const wf = makeWorkflow({
+        status: WorkflowStatus.PENDING_APPROVAL,
+        currentApprovalStepOrder: 1,
+        currentAssignedUserId: 'approver-1',
+        approvalSteps: [makeStep({ status: ApprovalStepStatus.PENDING })],
+        finalUserIds: ['final-user-1', 'final-user-2'],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      workflowRepo.findOneOrFail.mockResolvedValue(wf);
+
+      await service.reject('wf-1', 'approver-1', { observations: 'motivo de rechazo' });
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        'notification.send',
+        expect.objectContaining({
+          type: 'WORKFLOW_REJECTED',
+          recipientUserIds: expect.arrayContaining(['creator-1', 'final-user-1', 'final-user-2']),
+        }),
+      );
+    });
+
+    it('does not duplicate createdBy in recipientUserIds when createdBy is also in finalUserIds', async () => {
+      const { service, workflowRepo, kafkaProducer } = buildService();
+      const wf = makeWorkflow({
+        status: WorkflowStatus.PENDING_APPROVAL,
+        currentApprovalStepOrder: 1,
+        currentAssignedUserId: 'approver-1',
+        approvalSteps: [makeStep({ status: ApprovalStepStatus.PENDING })],
+        // creator-1 aparece también en finalUserIds — no debe duplicarse
+        finalUserIds: ['creator-1', 'final-user-1'],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      workflowRepo.findOneOrFail.mockResolvedValue(wf);
+
+      await service.reject('wf-1', 'approver-1', { observations: 'motivo de rechazo' });
+
+      type EmitCall = [string, { type: string; recipientUserIds: string[] }];
+      const calls = kafkaProducer.emitSafe.mock.calls as EmitCall[];
+      const call = calls.find((c) => c[0] === 'notification.send' && c[1].type === 'WORKFLOW_REJECTED');
+      expect(call).toBeDefined();
+      const recipients: string[] = call![1].recipientUserIds;
+      const creatorCount = recipients.filter((id) => id === 'creator-1').length;
+      expect(creatorCount).toBe(1);
+    });
   });
 
   // ── resubmit ─────────────────────────────────────────────────────────────────

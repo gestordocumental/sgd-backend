@@ -32,6 +32,7 @@ export { PermissionsGuard } from './guards/permissions.guard';
 
 // Decorators
 export { OrgMember, SuperAdminOnly, Auth, AUTH_KEY } from './decorators/auth.decorator';
+export { AllowInternalTokens, INTERNAL_TOKEN_KEYS_META } from './decorators/internal-token.decorator';
 export type { AuthMeta } from './decorators/auth.decorator';
 export { JwtPayloadParam, jwtPayloadFactory } from './decorators/jwt-payload.decorator';
 export type { JwtPayload } from './decorators/jwt-payload.decorator';

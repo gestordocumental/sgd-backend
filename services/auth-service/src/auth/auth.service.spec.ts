@@ -14,7 +14,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { Credential, CredentialStatus } from './entities/credential.entity';
 import { UserClientService } from '../user-client/user-client.service';
-import { KafkaProducerService } from '@sgd/common';
+import { AppLogger, KafkaProducerService } from '@sgd/common';
 
 jest.mock('bcryptjs', () => ({
   hashSync: jest.fn().mockReturnValue('$2a$10$hashed'),
@@ -49,12 +49,16 @@ describe('AuthService', () => {
     jwtService = {
       sign: jest.fn().mockReturnValue('mock.jwt.token'),
       verify: jest.fn(),
+      decode: jest.fn().mockReturnValue(null),
     };
     redis = {
       setex: jest.fn().mockResolvedValue('OK'),
       getdel: jest.fn(),
-      scan: jest.fn().mockResolvedValue(['0', []]),
+      get: jest.fn().mockResolvedValue(null),
+      incr: jest.fn().mockResolvedValue(1), // default: 1 failure — below every lockout threshold
+      expire: jest.fn().mockResolvedValue(1),
       del: jest.fn().mockResolvedValue(1),
+      scan: jest.fn().mockResolvedValue(['0', []]),
       set: jest.fn().mockResolvedValue('OK'),
     };
     userClient = {
@@ -82,12 +86,20 @@ describe('AuthService', () => {
                 JWT_REFRESH_EXPIRATION: '12h',
               }[key] ?? null),
             ),
-            getOrThrow: jest.fn(),
+            getOrThrow: jest.fn().mockImplementation((key: string) =>
+              ({
+                JWT_SECRET: 'test-secret',
+                JWT_REFRESH_SECRET: 'test-refresh-secret',
+                JWT_EXPIRATION: '15m',
+                JWT_REFRESH_EXPIRATION: '12h',
+              }[key] ?? (() => { throw new Error(`Config key not found: ${key}`); })()),
+            ),
           },
         },
         { provide: 'REDIS_CLIENT', useValue: redis },
         { provide: UserClientService, useValue: userClient },
         { provide: KafkaProducerService, useValue: kafkaProducer },
+        { provide: AppLogger, useValue: { log: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } },
       ],
     }).compile();
 
@@ -201,14 +213,43 @@ describe('AuthService', () => {
       await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('rethrows InternalServerErrorException from user-service', async () => {
+    it('rethrows InternalServerErrorException from user-service when no cache exists', async () => {
       credRepo.findOne.mockResolvedValue(makeCredential());
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       userClient.getUserInfo.mockRejectedValue(
         new InternalServerErrorException('Connection refused'),
       );
+      // redis.get returns null (no cache) — error must propagate
+      redis.get.mockResolvedValue(null);
 
       await expect(service.login(dto)).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('uses cached user-info when user-service is unavailable during login', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      userClient.getUserInfo.mockRejectedValue(new InternalServerErrorException('down'));
+      // Provide stale cache for both user-info and user-companies
+      redis.get.mockImplementation((key: string) => {
+        if (key.startsWith('user-info-cache:')) return Promise.resolve(JSON.stringify({ isSuperAdmin: false }));
+        if (key.startsWith('user-companies-cache:')) return Promise.resolve(JSON.stringify(['org-1']));
+        return Promise.resolve(null);
+      });
+
+      await expect(service.login(dto)).resolves.toHaveProperty('accessToken');
+    });
+
+    it('uses cached user-companies when user-service is unavailable during login', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      userClient.getUserCompanies.mockRejectedValue(new InternalServerErrorException('down'));
+      redis.get.mockImplementation((key: string) => {
+        if (key.startsWith('user-info-cache:')) return Promise.resolve(JSON.stringify({ isSuperAdmin: false }));
+        if (key.startsWith('user-companies-cache:')) return Promise.resolve(JSON.stringify(['org-1']));
+        return Promise.resolve(null);
+      });
+
+      await expect(service.login(dto)).resolves.toHaveProperty('accessToken');
     });
 
     it('includes isSuperAdmin in access token payload when user is super admin', async () => {
@@ -237,6 +278,142 @@ describe('AuthService', () => {
         1,
         expect.not.objectContaining({ isSuperAdmin: expect.anything() }),
         expect.any(Object),
+      );
+    });
+
+    // ── Brute-force / lockout ──────────────────────────────────────────────
+
+    it('throws ForbiddenException when account is locked and lockout has not expired', async () => {
+      const lockedUntil = new Date(Date.now() + 5 * 60 * 1000);
+      credRepo.findOne.mockResolvedValue(makeCredential({ lockedUntil }));
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await expect(service.login(dto)).rejects.toThrow(ForbiddenException);
+      expect(redis.incr).not.toHaveBeenCalled();
+    });
+
+    it('allows login when lockout has expired (lockedUntil is in the past)', async () => {
+      const pastDate = new Date(Date.now() - 1000);
+      const credential = makeCredential({ lockedUntil: pastDate });
+      credRepo.findOne.mockResolvedValue(credential);
+      credRepo.save.mockResolvedValue(credential);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await expect(service.login(dto)).resolves.toHaveProperty('accessToken');
+      // clearLoginFailures must remove the expired lockedUntil from the DB
+      expect(credRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ lockedUntil: null }),
+      );
+    });
+
+    it('does NOT record a failed attempt when credential is not found (no enumeration)', async () => {
+      credRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      expect(redis.incr).not.toHaveBeenCalled();
+    });
+
+    it('does NOT record a failed attempt when credential is DISABLED', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential({ status: CredentialStatus.DISABLED }));
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      expect(redis.incr).not.toHaveBeenCalled();
+    });
+
+    it('increments Redis failure counter after a wrong password on an active account', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      expect(redis.incr).toHaveBeenCalledWith(`login-failures:${dto.email}`);
+      expect(redis.expire).toHaveBeenCalledWith(
+        `login-failures:${dto.email}`,
+        expect.any(Number),
+      );
+    });
+
+    it('does NOT lock the account when failure count is below first threshold (< 5)', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      redis.incr.mockResolvedValue(4); // below threshold
+
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      expect(credRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('locks account for 5 min after reaching the first threshold (5 failures)', async () => {
+      const credential = makeCredential();
+      credRepo.findOne.mockResolvedValue(credential);
+      credRepo.save.mockResolvedValue(credential);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      redis.incr.mockResolvedValue(5);
+
+      const before = Date.now();
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      const after = Date.now();
+
+      expect(credRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lockedUntil: expect.any(Date),
+        }),
+      );
+      const savedCredential = credRepo.save.mock.calls[0][0] as { lockedUntil: Date };
+      const lockDurationMs = savedCredential.lockedUntil.getTime() - before;
+      expect(lockDurationMs).toBeGreaterThanOrEqual(5 * 60 * 1000 - 100);
+      expect(lockDurationMs).toBeLessThanOrEqual(5 * 60 * 1000 + (after - before));
+    });
+
+    it('applies a 15-min lockout at the second threshold (10 failures)', async () => {
+      const credential = makeCredential();
+      credRepo.findOne.mockResolvedValue(credential);
+      credRepo.save.mockResolvedValue(credential);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      redis.incr.mockResolvedValue(10);
+
+      const before = Date.now();
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+
+      const savedCredential = credRepo.save.mock.calls[0][0] as { lockedUntil: Date };
+      const lockDurationMs = savedCredential.lockedUntil.getTime() - before;
+      expect(lockDurationMs).toBeGreaterThanOrEqual(15 * 60 * 1000 - 100);
+    });
+
+    it('applies a 1-hour lockout at the third threshold (15 failures)', async () => {
+      const credential = makeCredential();
+      credRepo.findOne.mockResolvedValue(credential);
+      credRepo.save.mockResolvedValue(credential);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      redis.incr.mockResolvedValue(15);
+
+      const before = Date.now();
+      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+
+      const savedCredential = credRepo.save.mock.calls[0][0] as { lockedUntil: Date };
+      const lockDurationMs = savedCredential.lockedUntil.getTime() - before;
+      expect(lockDurationMs).toBeGreaterThanOrEqual(60 * 60 * 1000 - 100);
+    });
+
+    it('clears the failure counter in Redis on successful login', async () => {
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login(dto);
+
+      expect(redis.del).toHaveBeenCalledWith(`login-failures:${dto.email}`);
+    });
+
+    it('clears lockedUntil from DB when a successful login follows an expired lockout', async () => {
+      const pastLock = new Date(Date.now() - 1000);
+      const credential = makeCredential({ lockedUntil: pastLock });
+      credRepo.findOne.mockResolvedValue(credential);
+      credRepo.save.mockResolvedValue(credential);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login(dto);
+
+      expect(credRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ lockedUntil: null }),
       );
     });
   });

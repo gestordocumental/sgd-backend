@@ -4,8 +4,7 @@ process.env.SERVICE_NAME = 'auth-service';
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
-  // Exclude integration tests — they run via jest.integration.config.js
-  testRegex: '(?<!integration)\\.spec\\.ts$',
+  testRegex: '.*\\.integration\\.spec\\.ts$',
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
@@ -17,22 +16,8 @@ module.exports = {
     'node_modules',
     '<rootDir>/../node_modules',
   ],
-  collectCoverageFrom: [
-    '**/*.{ts,js}',
-    '!**/*.spec.{ts,js}',
-    '!**/migrations/**',
-    '!**/*.entity.{ts,js}',
-    '!**/*.module.{ts,js}',
-    '!main.{ts,js}',
-    '!data-source.{ts,js}',
-  ],
-  coverageDirectory: '../coverage',
   testEnvironment: 'node',
   setupFiles: ['reflect-metadata'],
-  coverageThreshold: {
-    global: {
-      statements: 85,
-      lines: 85,
-    },
-  },
+  // Integration tests can be slow (real DB + Redis); allow 60 s per test
+  testTimeout: 60_000,
 };

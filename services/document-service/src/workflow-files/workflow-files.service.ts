@@ -73,6 +73,7 @@ export class WorkflowFilesService {
       }
     }
 
+    // eslint-disable-next-line no-control-regex
     const safeTitle = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
     if (!safeTitle || safeTitle === '.' || safeTitle === '..') {
       throw new BadRequestException('Título inválido');

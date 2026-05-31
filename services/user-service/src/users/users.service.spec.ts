@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { IsNull, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 import { UsersService } from './users.service';
@@ -73,7 +73,7 @@ describe('UsersService', () => {
   let authClient: jest.Mocked<AuthClientService>;
   let redis: { getdel: jest.Mock; setex: jest.Mock };
   let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit' | 'emitSafe'>>;
-  let orgClient: jest.Mocked<Pick<OrgClientService, 'validateOrgStructure'>>;
+  let orgClient: jest.Mocked<Pick<OrgClientService, 'validateOrgStructure' | 'resolveNamesById'>>;
 
   beforeEach(async () => {
     redis = { getdel: jest.fn(), setex: jest.fn() };
@@ -90,11 +90,13 @@ describe('UsersService', () => {
           useValue: {
             findOne: jest.fn(),
             find: jest.fn(),
+            findBy: jest.fn(),
             findAndCount: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
             softRemove: jest.fn(),
             restore: jest.fn(),
+            createQueryBuilder: jest.fn(),
             manager: {
               transaction: jest.fn().mockImplementation(async (cb: (m: any) => Promise<void>) => {
                 await cb({ save: jest.fn() });
@@ -140,7 +142,10 @@ describe('UsersService', () => {
         },
         {
           provide: OrgClientService,
-          useValue: { validateOrgStructure: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            validateOrgStructure: jest.fn().mockResolvedValue(undefined),
+            resolveNamesById:     jest.fn().mockResolvedValue(null),
+          },
         },
       ],
     }).compile();
@@ -899,6 +904,366 @@ describe('UsersService', () => {
       await expect(service.completeRegistration(dto)).rejects.toThrow(
         'Error creating access credentials',
       );
+    });
+  });
+
+  // ─── findManyByIds ────────────────────────────────────────────────────────
+
+  describe('findManyByIds', () => {
+    it('returns empty array without hitting the repository when ids is empty', async () => {
+      const result = await service.findManyByIds([]);
+      expect(usersRepo.findBy).not.toHaveBeenCalled();
+      expect(result).toEqual([]);
+    });
+
+    it('queries the repository by ids when the array is non-empty', async () => {
+      const users = [makeUser()];
+      usersRepo.findBy.mockResolvedValue(users);
+
+      const result = await service.findManyByIds([users[0].id]);
+      expect(usersRepo.findBy).toHaveBeenCalledWith(
+        expect.objectContaining({ id: expect.anything() }),
+      );
+      expect(result).toEqual(users);
+    });
+  });
+
+  // ─── uploadAvatar ─────────────────────────────────────────────────────────
+
+  describe('uploadAvatar', () => {
+    it('updates avatarUrl and returns the saved user', async () => {
+      const url  = 'https://cdn.example.com/avatars/test.webp';
+      const user = makeUser({ avatarUrl: null });
+      const updated = { ...user, avatarUrl: url };
+
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(updated);
+
+      const result = await service.uploadAvatar(user.id, url);
+
+      expect(usersRepo.save).toHaveBeenCalledWith(expect.objectContaining({ avatarUrl: url }));
+      expect(result.avatarUrl).toBe(url);
+    });
+  });
+
+  // ─── remove (additional paths) ────────────────────────────────────────────
+
+  describe('remove (additional paths)', () => {
+    it('delegates to removeFromOrg when callerOrgId is provided', async () => {
+      const user = makeUser();
+      usersRepo.findOne.mockResolvedValue(user);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.remove(user.id, 'org-uuid-1');
+
+      expect(usersRepo.softRemove).not.toHaveBeenCalled();
+      expect(uorRepo.update).toHaveBeenCalled();
+    });
+
+    it('emits audit log on global delete when actorId is provided', async () => {
+      const user = makeUser();
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.softRemove.mockResolvedValue(undefined as any);
+      authClient.disableCredentials.mockResolvedValue(undefined);
+
+      await service.remove(user.id, undefined, 'actor-uuid');
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ action: 'USER_DELETED', actorId: 'actor-uuid' }),
+      );
+    });
+  });
+
+  // ─── update (actorId audit paths) ─────────────────────────────────────────
+
+  describe('update (actorId audit paths)', () => {
+    it('emits audit log when actorId is provided and fields change', async () => {
+      const user = makeUser({ firstName: 'Old' });
+      const updated = { ...user, firstName: 'New' };
+
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(updated);
+
+      await service.update(user.id, { firstName: 'New' }, 'actor-uuid');
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          action: 'USER_UPDATED',
+          actorId: 'actor-uuid',
+          metadata: { changes: { firstName: { from: 'Old', to: 'New' } } },
+        }),
+      );
+    });
+
+    it('resolves org-structure names when departamentoId changes and orgId is provided', async () => {
+      const user = makeUser({ departamentoId: 'old-dept', areaId: null, cargoId: null });
+      const updated = { ...user, departamentoId: 'new-dept' };
+      orgClient.resolveNamesById.mockResolvedValue({
+        departamentoNombre: 'Finanzas',
+        areaNombre: null,
+        cargoNombre: null,
+      });
+
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(updated);
+
+      await service.update(user.id, { departamentoId: 'new-dept' }, 'actor-uuid', 'org-uuid-1');
+
+      const [calledOrgId, calledDeptId] = orgClient.resolveNamesById.mock.calls[0] ?? [];
+      expect(calledOrgId).toBe('org-uuid-1');
+      expect(calledDeptId).toBe('new-dept');
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ action: 'USER_UPDATED' }),
+      );
+    });
+
+    it('does not emit audit log when no fields actually change', async () => {
+      const user = makeUser({ firstName: 'Same' });
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(user);
+
+      await service.update(user.id, { firstName: 'Same' }, 'actor-uuid');
+
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── getMyOrgRoles ────────────────────────────────────────────────────────
+
+  describe('getMyOrgRoles', () => {
+    it('returns active role assignments for the given user and org', async () => {
+      const uors = [makeUor()];
+      uorRepo.find.mockResolvedValue(uors as any);
+
+      const result = await service.getMyOrgRoles('user-uuid-1', 'org-uuid-1');
+
+      expect(uorRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId: 'user-uuid-1', orgId: 'org-uuid-1' }),
+        }),
+      );
+      expect(result).toEqual(uors);
+    });
+
+    it('returns empty array when no active roles exist in the org', async () => {
+      uorRepo.find.mockResolvedValue([]);
+      expect(await service.getMyOrgRoles('user-uuid-1', 'org-uuid-99')).toEqual([]);
+    });
+  });
+
+  // ─── getEffectivePermissions ──────────────────────────────────────────────
+
+  describe('getEffectivePermissions', () => {
+    it('returns flat deduplicated permissions from all org roles', async () => {
+      const uor = makeUor({
+        role: {
+          ...makeRole(),
+          permissions: [
+            { module: 'USERS', action: 'READ' },
+            { module: 'USERS', action: 'WRITE' },
+            { module: 'USERS', action: 'READ' }, // duplicate — must be deduped
+          ],
+        } as any,
+      });
+      uorRepo.find.mockResolvedValue([uor] as any);
+
+      const result = await service.getEffectivePermissions('user-uuid-1', 'org-uuid-1');
+
+      expect(result).toEqual([
+        { module: 'USERS', action: 'READ' },
+        { module: 'USERS', action: 'WRITE' },
+      ]);
+    });
+
+    it('returns empty array when user has no roles in the org', async () => {
+      uorRepo.find.mockResolvedValue([]);
+      expect(await service.getEffectivePermissions('user-uuid-1', 'org-uuid-1')).toEqual([]);
+    });
+  });
+
+  // ─── removeAllFromOrg ─────────────────────────────────────────────────────
+
+  describe('removeAllFromOrg', () => {
+    it('executes a query builder update to clear all memberships for the org', async () => {
+      const qb = {
+        update:   jest.fn().mockReturnThis(),
+        set:      jest.fn().mockReturnThis(),
+        where:    jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute:  jest.fn().mockResolvedValue({ affected: 3 }),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      await service.removeAllFromOrg('org-uuid-1');
+
+      expect(qb.where).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ orgId: 'org-uuid-1' }),
+      );
+      expect(qb.execute).toHaveBeenCalled();
+    });
+  });
+
+  // ─── removeFromOrg (actorId paths) ────────────────────────────────────────
+
+  describe('removeFromOrg (actorId paths)', () => {
+    it('emits audit log when actorId is provided', async () => {
+      const user = makeUser();
+      usersRepo.findOne.mockResolvedValue(user);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.removeFromOrg(user.id, 'org-uuid-1', 'actor-uuid');
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ action: 'USER_REMOVED_FROM_ORG', actorId: 'actor-uuid' }),
+      );
+    });
+
+    it('throws NotFoundException when user is not assigned to the org', async () => {
+      usersRepo.findOne.mockResolvedValue(makeUser());
+      uorRepo.update.mockResolvedValue({ affected: 0 } as any);
+
+      await expect(service.removeFromOrg('user-uuid-1', 'org-uuid-99')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ─── completeRegistration (HttpException paths) ───────────────────────────
+
+  describe('completeRegistration (HttpException paths)', () => {
+    const validToken = 'a'.repeat(64);
+    const dto = {
+      token: validToken,
+      firstName: 'Juan',
+      lastName: 'Perez',
+      idNumber: 'CC123',
+      password: 'Str0ng@Pass',
+    };
+
+    it('wraps a 4xx HttpException as HttpException("Invalid registration data")', async () => {
+      const user = makeUser();
+      redis.getdel.mockResolvedValue(user.id);
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      authClient.provisionCredentials.mockRejectedValue(new BadRequestException('weak password'));
+
+      const p = service.completeRegistration(dto);
+      await expect(p).rejects.toBeInstanceOf(HttpException);
+      await expect(p).rejects.toThrow('Invalid registration data');
+    });
+
+    it('wraps a 5xx HttpException as InternalServerErrorException', async () => {
+      const user = makeUser();
+      redis.getdel.mockResolvedValue(user.id);
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      authClient.provisionCredentials.mockRejectedValue(
+        new InternalServerErrorException('auth-service fail'),
+      );
+
+      const p = service.completeRegistration(dto);
+      await expect(p).rejects.toBeInstanceOf(InternalServerErrorException);
+      await expect(p).rejects.toThrow('Error creating access credentials');
+    });
+  });
+
+  // ─── findByOrg (super admin inclusion) ────────────────────────────────────
+
+  describe('findByOrg (super admin inclusion)', () => {
+    it('includes ACTIVE super admins not already present as org members', async () => {
+      const superAdmin = makeUser({
+        id: 'sa-uuid-1',
+        email: 'sa@example.com',
+        isSuperAdmin: true,
+        registrationStatus: RegistrationStatus.ACTIVE,
+      });
+
+      const qb: Record<string, jest.Mock> = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where:             jest.fn().mockReturnThis(),
+        withDeleted:       jest.fn().mockReturnThis(),
+        getMany:           jest.fn().mockResolvedValue([]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+      usersRepo.find.mockResolvedValue([superAdmin]);
+
+      const { data, total } = await service.findByOrg('org-uuid-1');
+
+      expect(total).toBe(1);
+      expect(data[0].user.id).toBe(superAdmin.id);
+      expect(data[0].roles).toEqual([]);
+    });
+  });
+
+  // ─── getCountsByOrg ───────────────────────────────────────────────────────
+
+  describe('getCountsByOrg', () => {
+    it('returns counts grouped by org with values parsed as numbers', async () => {
+      const qb = {
+        innerJoin:  jest.fn().mockReturnThis(),
+        select:     jest.fn().mockReturnThis(),
+        addSelect:  jest.fn().mockReturnThis(),
+        where:      jest.fn().mockReturnThis(),
+        andWhere:   jest.fn().mockReturnThis(),
+        groupBy:    jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '10', active: '8' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(result).toEqual([
+        { orgId: 'org-1', total: 10, active: 8, inactive: 2 },
+      ]);
+    });
+  });
+
+  // ─── findByPosition ───────────────────────────────────────────────────────
+
+  describe('findByPosition', () => {
+    function makeUsersQb(users: User[]) {
+      const qb: Record<string, jest.Mock> = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where:     jest.fn().mockReturnThis(),
+        andWhere:  jest.fn().mockReturnThis(),
+        getMany:   jest.fn().mockResolvedValue(users),
+      };
+      usersRepo.createQueryBuilder.mockReturnValue(qb as any);
+      return qb;
+    }
+
+    it('returns users matching all provided filters', async () => {
+      const user = makeUser();
+      makeUsersQb([user]);
+
+      const result = await service.findByPosition('org-uuid-1', {
+        departamentoId: 'dept-uuid',
+        cargoId:        'cargo-uuid',
+        areaId:         'area-uuid',
+      });
+
+      expect(result).toEqual([
+        { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email },
+      ]);
+    });
+
+    it('filters by area_id IS NULL when areaId is explicitly null', async () => {
+      const user = makeUser();
+      const qb = makeUsersQb([user]);
+
+      await service.findByPosition('org-uuid-1', { departamentoId: 'dept-uuid', areaId: null });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('u.area_id IS NULL');
+    });
+
+    it('returns empty array when no users match', async () => {
+      makeUsersQb([]);
+      expect(await service.findByPosition('org-uuid-1', {})).toEqual([]);
     });
   });
 });

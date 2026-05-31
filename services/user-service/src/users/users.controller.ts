@@ -59,21 +59,7 @@ export class UsersController {
     private readonly storageService: StorageService,
   ) {}
 
-  /**
-   * Validates x-internal-token against every known caller of user-service.
-   * Each token is specific to one (caller → user-service) direction:
-   *   INTERNAL_TOKEN_AUTH_USER     — auth-service
-   *   INTERNAL_TOKEN_NOTIF_USER    — notification-service
-   *   INTERNAL_TOKEN_WORKFLOW_USER — workflow-service
-   *   INTERNAL_TOKEN_ORG_USER      — org-service
-   */
-  private verifyInternalToken(token: string | undefined): void {
-    const keys = [
-      'INTERNAL_TOKEN_AUTH_USER',
-      'INTERNAL_TOKEN_NOTIF_USER',
-      'INTERNAL_TOKEN_WORKFLOW_USER',
-      'INTERNAL_TOKEN_ORG_USER',
-    ];
+  private verifyInternalToken(token: string | undefined, keys: string[]): void {
     const allowed = keys
       .map((k) => this.configService.get<string>(k))
       .filter((t): t is string => !!t)
@@ -241,7 +227,8 @@ export class UsersController {
     @Headers("x-internal-token") internalToken: string,
     @Param("orgId", ParseUUIDPipe) orgId: string,
   ): Promise<void> {
-    this.verifyInternalToken(internalToken);
+    // Only org-service is authorized to call this endpoint
+    this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_ORG_USER']);
     await this.usersService.removeAllFromOrg(orgId);
   }
 
@@ -254,7 +241,8 @@ export class UsersController {
     @Param("id", ParseUUIDPipe) id: string,
     @Query("companyId") companyId: string,
   ): Promise<{ module: string; action: string }[]> {
-    this.verifyInternalToken(internalToken);
+    // Only auth-service is authorized to call this endpoint
+    this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
     if (!companyId) throw new UnauthorizedException('companyId query param required');
     return this.usersService.getEffectivePermissions(id, companyId);
   }
@@ -267,7 +255,8 @@ export class UsersController {
     @Headers("x-internal-token") internalToken: string,
     @Param("id") id: string,
   ) {
-    this.verifyInternalToken(internalToken);
+    // Only auth-service is authorized to call this endpoint
+    this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
     return this.usersService.getCompanies(id);
   }
 
