@@ -11,8 +11,11 @@
     "outDir": "./dist",
     "incremental": true,
     "skipLibCheck": true,
-    "strictNullChecks": false,
-    "noImplicitAny": false
+    "strict": true,
+    "types": [
+      "jest",
+      "node"
+    ]
   },
   "include": [
     "src/**/*"

@@ -2,6 +2,27 @@ import { MigrationInterface, QueryRunner } from "typeorm";
 
 export class DeleteSuperAdminRole1774692345732 implements MigrationInterface {
     public async up(queryRunner: QueryRunner): Promise<void> {
+      // Guard 1: skip outside production — dev/staging may rely on this role for testing.
+      // TypeORM still records the migration as applied, so there is no schema drift.
+      if (process.env['NODE_ENV'] !== 'production') {
+        return;
+      }
+
+      // Guard 2: abort if any users are still assigned to SUPER_ADMIN.
+      // Resolve the assignments before re-running.
+      const assigned: { count: number }[] = await queryRunner.query(`
+        SELECT COUNT(*)::int AS count
+        FROM user_org_roles
+        WHERE role_id = (SELECT id FROM roles WHERE name = 'SUPER_ADMIN' AND org_id IS NULL)
+      `);
+      const assignedCount = assigned[0]?.count ?? 0;
+      if (assignedCount > 0) {
+        throw new Error(
+          `DeleteSuperAdminRole: ${assignedCount} user(s) still assigned to SUPER_ADMIN — ` +
+          'reassign or remove them before running this migration.',
+        );
+      }
+
       // 1. Desvincular permisos del rol SUPER_ADMIN
       await queryRunner.query(`
         DELETE FROM role_permissions

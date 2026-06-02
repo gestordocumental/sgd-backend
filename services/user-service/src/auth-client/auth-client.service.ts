@@ -5,7 +5,7 @@ import {
 } from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
-import { firstValueFrom } from "rxjs";
+import { firstValueFrom, retry, throwError, timer } from "rxjs";
 import { AppLogger, getCorrelationId, CORRELATION_ID_HEADER } from '@sgd/common';
 
 export interface ProvisionPayload {
@@ -114,6 +114,12 @@ export class AuthClientService {
       message: `→ [auth-service] PATCH ${path}`,
     });
 
+    // Retry up to 2 times (3 total attempts) with exponential backoff (500 ms, 1 000 ms)
+    // before propagating the error.  4xx errors are never retried — they are
+    // deterministic (e.g. invalid token, resource not found) and retrying would not help.
+    const RETRY_COUNT   = 2;
+    const RETRY_BASE_MS = 500;
+
     try {
       const response = await firstValueFrom(
         this.httpService.patch(url, {}, {
@@ -121,7 +127,23 @@ export class AuthClientService {
             "x-internal-token": this.internalToken,
             [CORRELATION_ID_HEADER]: correlationId,
           },
-        }),
+        }).pipe(
+          retry({
+            count: RETRY_COUNT,
+            delay: (error: any, attempt: number) => {
+              const status = error?.response?.status;
+              if (typeof status === 'number' && status >= 400 && status < 500) {
+                return throwError(() => error); // 4xx — do not retry
+              }
+              const delayMs = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+              this.logger.warn(
+                `[auth-service] PATCH ${path} failed (attempt ${attempt}/${RETRY_COUNT}), retrying in ${delayMs}ms`,
+                'AuthClientService',
+              );
+              return timer(delayMs);
+            },
+          }),
+        ),
       );
 
       this.logger.http({

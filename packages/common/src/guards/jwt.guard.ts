@@ -52,38 +52,31 @@ export class JwtGuard implements CanActivate {
       user?: Record<string, unknown>;
     }>();
 
-    // Internal service-to-service calls bypass JWT validation.
-    // When @AllowInternalTokens(...keys) is present, only those specific env-var
-    // keys are accepted — preventing a compromised service's token from being
-    // used against endpoints it was not meant to call.
-    // Without the decorator, falls back to checking all configured tokens
-    // (backward compat for endpoints that haven't opted in yet).
+    // Internal service-to-service calls bypass JWT validation only when the
+    // endpoint explicitly opts in via @AllowInternalTokens(...envKeys).
+    // Without the decorator, all x-internal-token headers are ignored and the
+    // request falls through to normal JWT validation — a compromised service's
+    // token cannot call endpoints that never declared it as a valid caller.
     const internalToken = request.headers['x-internal-token'];
     if (internalToken) {
       const declaredKeys = this.reflector.getAllAndOverride<string[] | undefined>(
         INTERNAL_TOKEN_KEYS_META,
         [ctx.getHandler(), ctx.getClass()],
       );
-      const keysToCheck = declaredKeys ?? [
-        'INTERNAL_TOKEN_AUTH_USER',
-        'INTERNAL_TOKEN_USER_AUTH',
-        'INTERNAL_TOKEN_NOTIF_USER',
-        'INTERNAL_TOKEN_NOTIF_ORG',
-        'INTERNAL_TOKEN_WORKFLOW_USER',
-        'INTERNAL_TOKEN_WORKFLOW_DOC',
-        'INTERNAL_TOKEN_DOC_ORG',
-        'INTERNAL_TOKEN_ORG_USER',
-      ];
-      const allowed = keysToCheck
-        .map((k) => this.configService.get<string>(k))
-        .filter((t): t is string => !!t)
-        .map((t) => Buffer.from(t));
-      const provided = Buffer.from(internalToken);
-      if (allowed.some(
-        (expected) =>
-          provided.length === expected.length &&
-          timingSafeEqual(new Uint8Array(expected), new Uint8Array(provided)),
-      )) return true;
+      // No decorator → reject all internal tokens (default-deny).
+      const keysToCheck = declaredKeys ?? [];
+      if (keysToCheck.length > 0) {
+        const allowed = keysToCheck
+          .map((k) => this.configService.get<string>(k))
+          .filter((t): t is string => !!t)
+          .map((t) => Buffer.from(t));
+        const provided = Buffer.from(internalToken);
+        if (allowed.some(
+          (expected) =>
+            provided.length === expected.length &&
+            timingSafeEqual(new Uint8Array(expected), new Uint8Array(provided)),
+        )) return true;
+      }
     }
 
     const auth = request.headers['authorization'];

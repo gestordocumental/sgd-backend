@@ -597,22 +597,6 @@ export class UsersService {
       }
     }
 
-    // Also include super admins so their names resolve in workflow/audit views
-    // even if they have no explicit org membership record.
-    // Exclude super admins who have not yet completed registration: they have
-    // taken no actions in the system so their names don't need to resolve, and
-    // showing them would let org admins attempt to resend invitations to users
-    // with no membership record — causing a spurious 403.
-    const superAdmins = await this.usersRepository.find({
-      where: { isSuperAdmin: true, registrationStatus: RegistrationStatus.ACTIVE },
-      withDeleted: true,
-    });
-    for (const sa of superAdmins) {
-      if (!byUser.has(sa.id)) {
-        byUser.set(sa.id, { user: sa, roles: [], orgRemovedAt: null, isOptionalReviewer: false });
-      }
-    }
-
     const all = Array.from(byUser.values());
     return { data: all.slice(skip, skip + safeLimit), total: all.length };
   }

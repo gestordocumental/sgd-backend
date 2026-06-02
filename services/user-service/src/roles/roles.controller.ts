@@ -6,13 +6,14 @@ import {
   Delete,
   Param,
   Body,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { RolesService } from './roles.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
 import { OrgId } from '../common/decorators/org-id.decorator';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 
 // orgId comes from the JWT payload forwarded by Kong as x-org-id header
 @ApiTags('Roles')
@@ -30,12 +31,15 @@ export class RolesController {
   @ApiOperation({ summary: 'Get role by ID' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @Get(':id')
-  findOne(@Param('id') id: string, @OrgId() orgId: string) {
+  findOne(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string, @OrgId() orgId: string) {
     return this.rolesService.findOne(id, orgId);
   }
 
   @ApiOperation({ summary: 'Create a custom role for the organization' })
+  @ApiBody({ type: CreateRoleDto })
   @ApiResponse({ status: 201, description: 'Role created' })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Role name already exists in this organization' })
   @Post()
   create(@Body() dto: CreateRoleDto, @OrgId() orgId: string) {
     return this.rolesService.create(dto, orgId);
@@ -43,9 +47,13 @@ export class RolesController {
 
   @ApiOperation({ summary: 'Update role name or description' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: UpdateRoleDto })
+  @ApiResponse({ status: 200, description: 'Role updated' })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
   @Patch(':id')
   update(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateRoleDto,
     @OrgId() orgId: string,
   ) {
@@ -55,16 +63,19 @@ export class RolesController {
   @ApiOperation({ summary: 'Delete a role' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @Delete(':id')
-  remove(@Param('id') id: string, @OrgId() orgId: string) {
+  remove(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string, @OrgId() orgId: string) {
     return this.rolesService.remove(id, orgId);
   }
 
   @ApiOperation({ summary: 'Replace all permissions on a role' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  // Replace all permissions on a role
+  @ApiBody({ type: AssignPermissionsDto })
+  @ApiResponse({ status: 201, description: 'Permissions replaced' })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid permission IDs' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
   @Post(':id/permissions')
   assignPermissions(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: AssignPermissionsDto,
     @OrgId() orgId: string,
   ) {
@@ -77,8 +88,8 @@ export class RolesController {
   // Remove a single permission from a role
   @Delete(':id/permissions/:permissionId')
   removePermission(
-    @Param('id') id: string,
-    @Param('permissionId') permissionId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('permissionId', new ParseUUIDPipe({ version: '4' })) permissionId: string,
     @OrgId() orgId: string,
   ) {
     return this.rolesService.removePermission(id, permissionId, orgId);

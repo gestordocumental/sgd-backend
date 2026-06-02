@@ -19,7 +19,7 @@ import { Credential, CredentialStatus } from "./entities/credential.entity";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
-import { AppLogger, KafkaProducerService, TOPICS } from "@sgd/common";
+import { AppLogger, KafkaProducerService, TOPICS, getCorrelationId } from "@sgd/common";
 import { parseDurationToSeconds } from "./utils/parse-duration";
 
 // Password reset token TTL: 1 hour
@@ -84,9 +84,7 @@ export class AuthService {
     );
 
     const rawRounds = this.configService.get<string>('BCRYPT_ROUNDS');
-    const parsed = rawRounds !== undefined && rawRounds !== null
-      ? Number.parseInt(rawRounds, 10)
-      : DEFAULT_BCRYPT_ROUNDS;
+    const parsed = rawRounds != null ? Number.parseInt(rawRounds, 10) : DEFAULT_BCRYPT_ROUNDS;
     this.bcryptRounds = Number.isInteger(parsed) && parsed >= 10 && parsed <= 14
       ? parsed
       : DEFAULT_BCRYPT_ROUNDS;
@@ -465,7 +463,7 @@ export class AuthService {
       expiresAt,
     });
 
-    this.logger.log(`Password reset token issued for userId ${credential.userId}`);
+    this.logger.log(`Password reset token issued [${getCorrelationId()}]`);
     return { ok: true };
   }
 
@@ -492,7 +490,7 @@ export class AuthService {
     // Invalidate all existing sessions so the user must log in with the new password.
     await this.revokeAllRefreshTokens(userId);
 
-    this.logger.log(`Password reset completed for userId ${userId}`);
+    this.logger.log(`Password reset completed [${getCorrelationId()}]`);
     return { ok: true };
   }
 

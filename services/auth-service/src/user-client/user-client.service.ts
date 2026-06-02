@@ -2,16 +2,21 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  GatewayTimeoutException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
-import { firstValueFrom } from "rxjs";
+import { firstValueFrom, timeout, TimeoutError } from "rxjs";
 import { AppLogger, getCorrelationId, CORRELATION_ID_HEADER } from '@sgd/common';
+import CircuitBreaker = require('opossum');
 
 @Injectable()
 export class UserClientService {
   private readonly userServiceUrl: string;
   private readonly internalToken: string;
+  private readonly timeoutMs = 3_000;
+  private readonly cb: CircuitBreaker;
 
   constructor(
     private readonly httpService: HttpService,
@@ -22,6 +27,24 @@ export class UserClientService {
       this.configService.getOrThrow<string>("USER_SERVICE_URL");
     this.internalToken =
       this.configService.getOrThrow<string>("INTERNAL_TOKEN_AUTH_USER");
+
+    this.cb = new CircuitBreaker(
+      (fn: () => Promise<unknown>) => fn(),
+      {
+        name:                     'user-service',
+        timeout:                  false,   // RxJS timeout() handles per-request timeouts
+        errorThresholdPercentage: 50,
+        resetTimeout:             30_000,
+        volumeThreshold:          3,
+        // 404 = user not found — legitimate business error, must not trip the circuit.
+        // Only network failures and 5xx errors should contribute to the failure count.
+        errorFilter: (err: any) => err?.response?.status === 404,
+      },
+    );
+
+    this.cb.on('open',     () => this.logger.warn('[circuit] user-service OPEN — failing fast', 'UserClientService'));
+    this.cb.on('halfOpen', () => this.logger.log('[circuit] user-service HALF-OPEN — probing',  'UserClientService'));
+    this.cb.on('close',    () => this.logger.log('[circuit] user-service CLOSED — recovered',   'UserClientService'));
   }
 
   async getUserCompanies(userId: string): Promise<string[]> {
@@ -37,14 +60,17 @@ export class UserClientService {
     });
 
     try {
-      const response = await firstValueFrom(
-        this.httpService.get<string[]>(url, {
-          headers: {
-            "x-internal-token": this.internalToken,
-            [CORRELATION_ID_HEADER]: correlationId,
-          },
-          timeout: 3000,
-        }),
+      const response = await this.fireWithCb<{ data: string[] }>(() =>
+        firstValueFrom(
+          this.httpService
+            .get<string[]>(url, {
+              headers: {
+                "x-internal-token": this.internalToken,
+                [CORRELATION_ID_HEADER]: correlationId,
+              },
+            })
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
 
       this.logger.http({
@@ -56,17 +82,9 @@ export class UserClientService {
       });
 
       return response.data;
-    } catch (error: any) {
-      const status = error?.response?.status;
-      const message =
-        error?.response?.data?.message ?? error?.message ?? "Unknown error";
-
-      if (status === 404) {
-        throw new NotFoundException(`User ${userId} not found in user-service`);
-      }
-      throw new InternalServerErrorException(
-        `Could not fetch user companies from user-service: ${message}`,
-      );
+    } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      return this.handleError(error, `GET /api/users/${userId}/companies`, correlationId);
     }
   }
 
@@ -86,14 +104,17 @@ export class UserClientService {
     });
 
     try {
-      const response = await firstValueFrom(
-        this.httpService.get<{ module: string; action: string }[]>(url, {
-          headers: {
-            'x-internal-token': this.internalToken,
-            [CORRELATION_ID_HEADER]: correlationId,
-          },
-          timeout: 3000,
-        }),
+      const response = await this.fireWithCb<{ data: { module: string; action: string }[] }>(() =>
+        firstValueFrom(
+          this.httpService
+            .get<{ module: string; action: string }[]>(url, {
+              headers: {
+                'x-internal-token': this.internalToken,
+                [CORRELATION_ID_HEADER]: correlationId,
+              },
+            })
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
 
       this.logger.http({
@@ -105,19 +126,9 @@ export class UserClientService {
       });
 
       return response.data;
-    } catch (error: any) {
-      const status = error?.response?.status;
-      const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
-      this.logger.http({
-        type: 'internal-response',
-        target: 'user-service',
-        statusCode: status ?? 500,
-        correlationId,
-        message: `← [user-service] GET /api/users/${userId}/effective-permissions ${status ?? 500}: ${message}`,
-      });
-      throw new InternalServerErrorException(
-        `Could not fetch effective permissions from user-service: ${message}`,
-      );
+    } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      return this.handleError(error, `GET /api/users/${userId}/effective-permissions`, correlationId);
     }
   }
 
@@ -134,14 +145,17 @@ export class UserClientService {
     });
 
     try {
-      const response = await firstValueFrom(
-        this.httpService.get<{ isSuperAdmin: boolean }>(url, {
-          headers: {
-            "x-internal-token": this.internalToken,
-            [CORRELATION_ID_HEADER]: correlationId,
-          },
-          timeout: 3000,
-        }),
+      const response = await this.fireWithCb<{ data: { isSuperAdmin: boolean } }>(() =>
+        firstValueFrom(
+          this.httpService
+            .get<{ isSuperAdmin: boolean }>(url, {
+              headers: {
+                "x-internal-token": this.internalToken,
+                [CORRELATION_ID_HEADER]: correlationId,
+              },
+            })
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
 
       this.logger.http({
@@ -153,26 +167,57 @@ export class UserClientService {
       });
 
       return { isSuperAdmin: response.data.isSuperAdmin ?? false };
-    } catch (error: any) {
-      const status = error?.response?.status;
-      const message =
-        error?.response?.data?.message ?? error?.message ?? "Unknown error";
-
-      this.logger.http({
-        type: "internal-response",
-        target: "user-service",
-        statusCode: status ?? 500,
-        correlationId,
-        message: `← [user-service] GET /api/users/${userId} ${status ?? 500}: ${message}`,
-      });
-
-      if (status === 404) {
-        throw new NotFoundException(`User ${userId} not found in user-service`);
-      }
-
-      throw new InternalServerErrorException(
-        `Could not fetch user info from user-service: ${message}`,
-      );
+    } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      return this.handleError(error, `GET /api/users/${userId}`, correlationId);
     }
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────────────
+
+  private async fireWithCb<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await this.cb.fire(fn) as T;
+    } catch (err: any) {
+      if (err?.code === 'EOPENBREAKER') {
+        // Circuit is open — fast-fail so callers can use the Redis cache immediately
+        // instead of waiting 3 s per request while user-service is down.
+        throw new ServiceUnavailableException('user-service is temporarily unavailable');
+      }
+      throw err;
+    }
+  }
+
+  private handleError(error: unknown, operation: string, correlationId: string): never {
+    if (error instanceof TimeoutError) {
+      this.logger.http({
+        type: 'internal-response',
+        target: 'user-service',
+        statusCode: 504,
+        correlationId,
+        message: `← [user-service] ${operation} 504: timed out after ${this.timeoutMs}ms`,
+      });
+      throw new GatewayTimeoutException('user-service did not respond in time');
+    }
+
+    const err     = error as { response?: { status?: number; data?: { message?: string } }; message?: string };
+    const status  = err?.response?.status;
+    const message = err?.response?.data?.message ?? err?.message ?? 'Unknown error';
+
+    this.logger.http({
+      type: 'internal-response',
+      target: 'user-service',
+      statusCode: status ?? 500,
+      correlationId,
+      message: `← [user-service] ${operation} ${status ?? 500}: ${message}`,
+    });
+
+    if (status === 404) {
+      throw new NotFoundException(message);
+    }
+
+    throw new InternalServerErrorException(
+      `Could not fetch from user-service (${operation}): ${message}`,
+    );
   }
 }

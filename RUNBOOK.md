@@ -14,6 +14,7 @@
 5. [TypeORM transaction behaviour in PostgreSQL](#5-typeorm-transaction-behaviour-in-postgresql)
 6. [Migration safety catalogue](#6-migration-safety-catalogue)
 7. [Approval requirements for destructive migrations](#7-approval-requirements-for-destructive-migrations)
+8. [Known eventual-consistency windows](#8-known-eventual-consistency-windows)
 
 ---
 
@@ -161,3 +162,68 @@ For the currently catalogued destructive migrations, the practical rollback stra
 - `1774692345732-DeleteSuperAdminRole`
 - `1773120000000-SeedPermissionsAndSystemRoles`
 - `1746600000000-ReplaceApprovalActionAttachmentsWithJsonb`
+
+---
+
+## 8. Known eventual-consistency windows
+
+This section catalogues cross-service operations where a failure mid-sequence can leave data in an inconsistent state between two independent databases. Each entry describes the risk, the current mitigation, and the manual recovery procedure.
+
+---
+
+### 8.1 User soft-delete → credential disable (user-service → auth-service)
+
+**Services involved:** user-service (PostgreSQL `user_db`), auth-service (PostgreSQL `auth_db`)
+
+**Operation sequence:**
+
+```
+1. user-service: softRemove(user)       → user.deleted_at = NOW()
+2. user-service: authClient.disableCredentials(userId) → PATCH /auth/credentials/:id/disable
+```
+
+**Failure window:** If step 2 fails after step 1 completes, the user record is soft-deleted but credentials remain `ACTIVE`. The user can still log in until the credential is manually disabled or their refresh token expires.
+
+**Current mitigation:**
+- `AuthClientService.internalPatch` retries up to **2 times** (3 total attempts) with exponential backoff (500 ms, 1 000 ms) before propagating the error.
+- If all retries fail, the HTTP response to the admin returns an error, prompting a manual retry.
+- Since `disableCredentials` is **idempotent**, retrying the full `DELETE /api/v1/users/:id` operation from the admin UI is safe.
+
+**Manual recovery (if inconsistency is discovered):**
+
+```bash
+# 1. Identify the affected userId from user-service logs (correlationId) or DB query
+# 2. Call auth-service directly to disable the credential:
+curl -X PATCH https://<auth-service-url>/api/v1/auth/credentials/<userId>/disable \
+  -H "x-internal-token: <INTERNAL_TOKEN_USER_AUTH>"
+
+# 3. Optionally revoke all active refresh tokens:
+curl -X PATCH https://<auth-service-url>/api/v1/auth/credentials/<userId>/revoke-tokens \
+  -H "x-internal-token: <INTERNAL_TOKEN_USER_AUTH>"
+```
+
+**Detection query (auth_db):**
+
+```sql
+-- Credentials that are still ACTIVE but whose userId does not appear in user_db.users
+-- Run after exporting the list of soft-deleted userIds from user_db:
+SELECT id, email, user_id, status
+FROM credentials
+WHERE status = 'active'
+  AND user_id IN ('<userId1>', '<userId2>');  -- paste list from user_db query
+```
+
+**Consistency horizon:** At most the duration of the retry window (~1.5 s) plus the remaining TTL of any active access token (`JWT_EXPIRATION`, default 1 h). After that the user cannot issue new sessions.
+
+---
+
+### 8.2 User restore → credential enable (user-service → auth-service)
+
+Same topology as 8.1 but in reverse. If `enableCredentials` fails after `usersRepository.restore`, the user record is active but the credential stays `DISABLED`.
+
+**Manual recovery:**
+
+```bash
+curl -X PATCH https://<auth-service-url>/api/v1/auth/credentials/<userId>/enable \
+  -H "x-internal-token: <INTERNAL_TOKEN_USER_AUTH>"
+```

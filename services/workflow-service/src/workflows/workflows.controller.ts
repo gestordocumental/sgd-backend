@@ -19,6 +19,7 @@ import {
   ApiHeader,
   ApiOperation,
   ApiResponse,
+  ApiBody,
   ApiParam,
 } from '@nestjs/swagger';
 
@@ -133,7 +134,9 @@ export class WorkflowsController {
   @RequirePermission('WORKFLOWS', 'WRITE')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Notifica a los administradores que una tipología no tiene usuarios finales elegibles' })
+  @ApiBody({ type: NotifyNoFinalUsersDto })
   @ApiResponse({ status: 204 })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
   notifyNoFinalUsers(
     @Body() dto: NotifyNoFinalUsersDto,
     @JwtPayloadParam() user: JwtPayload,
@@ -147,7 +150,10 @@ export class WorkflowsController {
   @OrgMember()
   @RequirePermission('WORKFLOWS', 'WRITE')
   @ApiOperation({ summary: 'Crear un nuevo workflow en estado DRAFT' })
+  @ApiBody({ type: CreateWorkflowDto })
   @ApiResponse({ status: 201, type: WorkflowResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Tipología no encontrada o sin usuarios finales configurados' })
   create(
     @Body() dto: CreateWorkflowDto,
     @JwtPayloadParam() user: JwtPayload,
@@ -185,7 +191,10 @@ export class WorkflowsController {
   @RequirePermission('WORKFLOWS', 'WRITE')
   @ApiOperation({ summary: 'Actualizar workflow (solo en estado DRAFT)' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: UpdateWorkflowDto })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Workflow no está en estado DRAFT — no puede modificarse' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateWorkflowDto,
@@ -234,7 +243,10 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Aprobar el paso actual (aprobador actual)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: ApproveWorkflowDto })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Workflow no está en estado PENDING_APPROVAL o el usuario no es el aprobador actual' })
   async approve(
     @Headers('Idempotency-Key') idempotencyKey: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,
@@ -253,7 +265,10 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Rechazar con observaciones obligatorias (aprobador actual)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: RejectWorkflowDto })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — observaciones requeridas y faltantes' })
+  @ApiResponse({ status: 409, description: 'Workflow no está en estado PENDING_APPROVAL o el usuario no es el aprobador actual' })
   async reject(
     @Headers('Idempotency-Key') idempotencyKey: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,
@@ -274,7 +289,10 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Iniciar ciclo administrativo (usuario final)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: CreateAdminCycleDto })
   @ApiResponse({ status: 201, type: AdminCycleResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Workflow no está en estado APPROVED o el usuario no es un usuario final elegible' })
   @HttpCode(HttpStatus.CREATED)
   async createAdminCycle(
     @Headers('Idempotency-Key') idempotencyKey: string | undefined,
@@ -296,7 +314,10 @@ export class WorkflowsController {
   @ApiParam({ name: 'cycleId', format: 'uuid' })
   @ApiParam({ name: 'stepId', format: 'uuid' })
   @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: CompleteAdminStepDto })
   @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Paso no está en estado pendiente o el usuario no es el admin asignado' })
   completeAdminStep(
     @Headers('Idempotency-Key') idempotencyKey: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,
@@ -318,6 +339,9 @@ export class WorkflowsController {
   @ApiParam({ name: 'cycleId', format: 'uuid' })
   @ApiParam({ name: 'stepId', format: 'uuid' })
   @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: ForwardAdminStepDto })
+  @ApiResponse({ status: 201, description: 'Paso reenviado al revisor opcional' })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
   @HttpCode(HttpStatus.CREATED)
   forwardAdminStep(
     @Headers('Idempotency-Key') idempotencyKey: string | undefined,
@@ -376,7 +400,10 @@ export class WorkflowsController {
   @ApiOperation({ summary: 'Cerrar definitivamente el workflow (usuario final)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: CloseWorkflowDto })
   @ApiResponse({ status: 200, type: WorkflowResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Workflow no puede cerrarse en su estado actual' })
   async close(
     @Headers('Idempotency-Key') idempotencyKey: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,

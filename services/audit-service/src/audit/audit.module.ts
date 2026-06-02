@@ -13,9 +13,14 @@ import { AuditConsumer } from './audit.consumer';
     ElasticsearchModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        node: config.getOrThrow<string>('ELASTICSEARCH_URL'),
-      }),
+      useFactory: (config: ConfigService) => {
+        const username = config.get<string>('ELASTICSEARCH_USERNAME');
+        const password = config.get<string>('ELASTICSEARCH_PASSWORD');
+        return {
+          node: config.getOrThrow<string>('ELASTICSEARCH_URL'),
+          ...(username && { auth: { username, password: password ?? '' } }),
+        };
+      },
     }),
   ],
   controllers: [AuditController],

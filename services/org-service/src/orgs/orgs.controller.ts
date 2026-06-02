@@ -16,7 +16,7 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { OrgsService } from './orgs.service';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
@@ -33,7 +33,10 @@ export class OrgsController {
   constructor(private readonly orgsService: OrgsService) {}
 
   @ApiOperation({ summary: 'Create an organization (super admin only)' })
+  @ApiBody({ type: CreateOrgDto })
   @ApiResponse({ status: 201, description: 'Organization created', type: OrgResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Organization name already exists' })
   /**
    * Create an organization.
    * Super admin only.
@@ -94,7 +97,10 @@ export class OrgsController {
 
   @ApiOperation({ summary: 'Update organization data' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: UpdateOrgDto })
   @ApiResponse({ status: 200, description: 'Organization updated', type: OrgResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
   /**
    * Update an organization.
    * Super admin or org member (to update data for their own org).
