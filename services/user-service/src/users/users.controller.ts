@@ -242,11 +242,10 @@ export class UsersController {
   async getEffectivePermissions(
     @Headers("x-internal-token") internalToken: string,
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
-    @Query("companyId") companyId: string,
+    @Query("companyId", new ParseUUIDPipe({ version: '4' })) companyId: string,
   ): Promise<{ module: string; action: string }[]> {
     // Only auth-service is authorized to call this endpoint
     this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
-    if (!companyId) throw new UnauthorizedException('companyId query param required');
     return this.usersService.getEffectivePermissions(id, companyId);
   }
 

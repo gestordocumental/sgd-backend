@@ -157,24 +157,26 @@ describe('AuthController', () => {
       const dto = { email: 'user@test.com', password: 'pass1234' };
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
       const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
+      try {
+        process.env.NODE_ENV = 'production';
 
-      const result = await controller.login(dto, res as any);
+        const result = await controller.login(dto, res as any);
 
-      expect(result).toMatchObject({ accessToken: 'access.jwt', csrfToken: expect.any(String) });
-      expect(res.cookie).toHaveBeenCalledWith(
-        'sgd_refresh_token',
-        'refresh.jwt',
-        expect.objectContaining({
-          httpOnly: true,
-          secure: true,
-          sameSite: 'none',
-          path: '/api/v1/auth',
-        }),
-      );
-      expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
-
-      process.env.NODE_ENV = originalEnv;
+        expect(result).toMatchObject({ accessToken: 'access.jwt', csrfToken: expect.any(String) });
+        expect(res.cookie).toHaveBeenCalledWith(
+          'sgd_refresh_token',
+          'refresh.jwt',
+          expect.objectContaining({
+            httpOnly: true,
+            secure: true,
+            sameSite: 'none',
+            path: '/api/v1/auth',
+          }),
+        );
+        expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
     });
   });
 
