@@ -177,7 +177,7 @@ This section catalogues cross-service operations where a failure mid-sequence ca
 
 **Operation sequence:**
 
-```
+```text
 1. user-service: softRemove(user)       → user.deleted_at = NOW()
 2. user-service: authClient.disableCredentials(userId) → PATCH /auth/credentials/:id/disable
 ```

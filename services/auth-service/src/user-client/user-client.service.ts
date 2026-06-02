@@ -36,9 +36,12 @@ export class UserClientService {
         errorThresholdPercentage: 50,
         resetTimeout:             30_000,
         volumeThreshold:          3,
-        // 404 = user not found — legitimate business error, must not trip the circuit.
-        // Only network failures and 5xx errors should contribute to the failure count.
-        errorFilter: (err: any) => err?.response?.status === 404,
+        // 4xx = client/business errors (not found, forbidden, validation) — deterministic,
+        // retrying would not help.  Only network failures and 5xx errors trip the circuit.
+        errorFilter: (err: any) => {
+          const s = err?.response?.status;
+          return typeof s === 'number' && s >= 400 && s < 500;
+        },
       },
     );
 

@@ -169,8 +169,11 @@ export class WorkflowsService {
     if (dto.status)    qb.andWhere('w.status = :status', { status: dto.status });
     if (dto.createdBy) qb.andWhere('w.created_by = :createdBy', { createdBy: dto.createdBy });
     if (dto.search) {
-      const term = `%${dto.search.trim()}%`;
-      qb.andWhere('(w.title ILIKE :term OR w.description ILIKE :term)', { term });
+      const trimmed = dto.search.trim();
+      if (trimmed) {
+        const term = `%${trimmed}%`;
+        qb.andWhere('(w.title ILIKE :term OR w.description ILIKE :term)', { term });
+      }
     }
 
     qb.orderBy('w.createdAt', 'DESC').skip(skip).take(limit);

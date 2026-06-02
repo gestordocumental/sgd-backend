@@ -137,7 +137,7 @@ export class AuthClientService {
               }
               const delayMs = RETRY_BASE_MS * Math.pow(2, attempt - 1);
               this.logger.warn(
-                `[auth-service] PATCH ${path} failed (attempt ${attempt}/${RETRY_COUNT}), retrying in ${delayMs}ms`,
+                `[auth-service] PATCH ${path} failed (attempt ${attempt + 1}/${RETRY_COUNT + 1}), retrying in ${delayMs}ms`,
                 'AuthClientService',
               );
               return timer(delayMs);

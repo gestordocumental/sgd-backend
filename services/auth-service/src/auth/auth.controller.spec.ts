@@ -153,7 +153,7 @@ describe('AuthController', () => {
       expect(result).not.toHaveProperty('refreshToken');
     });
 
-    it('sets refresh token cookie and returns only accessToken in body', async () => {
+    it('sets refresh token cookie and returns accessToken + csrfToken in body', async () => {
       const dto = { email: 'user@test.com', password: 'pass1234' };
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
       const originalEnv = process.env.NODE_ENV;
@@ -161,7 +161,7 @@ describe('AuthController', () => {
 
       const result = await controller.login(dto, res as any);
 
-      expect(result).toEqual({ accessToken: 'access.jwt' });
+      expect(result).toMatchObject({ accessToken: 'access.jwt', csrfToken: expect.any(String) });
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
         'refresh.jwt',
@@ -195,7 +195,7 @@ describe('AuthController', () => {
       const result = await controller.refresh('sgd_refresh_token=old.refresh.jwt; sgd_csrf_token=test-csrf', 'test-csrf', res as any);
 
       expect(authService.refresh).toHaveBeenCalledWith('old.refresh.jwt');
-      expect(result).toEqual({ accessToken: 'access.jwt' });
+      expect(result).toMatchObject({ accessToken: 'access.jwt', csrfToken: expect.any(String) });
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
         'refresh.jwt',
@@ -205,6 +205,20 @@ describe('AuthController', () => {
 
     it('throws UnauthorizedException when no refresh cookie is present', async () => {
       await expect(controller.refresh(undefined, undefined)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when CSRF header is absent but cookie is present', async () => {
+      await expect(
+        controller.refresh('sgd_refresh_token=old.refresh.jwt; sgd_csrf_token=test-csrf', undefined),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(authService.refresh).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when CSRF header does not match the cookie', async () => {
+      await expect(
+        controller.refresh('sgd_refresh_token=old.refresh.jwt; sgd_csrf_token=test-csrf', 'wrong-csrf'),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(authService.refresh).not.toHaveBeenCalled();
     });
 
     it('throws UnauthorizedException when refresh cookie is malformed (invalid URI encoding)', async () => {
@@ -303,7 +317,7 @@ describe('AuthController', () => {
       );
 
       expect(authService.saveGlobalContext).toHaveBeenCalledWith('user-id', 'global.refresh.jwt');
-      expect(result).toEqual({ accessToken: 'scoped.jwt' });
+      expect(result).toMatchObject({ accessToken: 'scoped.jwt', csrfToken: expect.any(String) });
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
         'refresh.jwt',
@@ -338,11 +352,11 @@ describe('AuthController', () => {
   // ── exitCompany ───────────────────────────────────────────────────────────
 
   describe('POST /api/v1/auth/exit-company', () => {
-    it('restores global super-admin context and returns only accessToken in body', async () => {
+    it('restores global super-admin context and returns accessToken + csrfToken in body', async () => {
       const result = await controller.exitCompany('sgd_refresh_token=company.refresh.jwt; sgd_csrf_token=test-csrf', 'test-csrf');
 
       expect(authService.exitCompanyContext).toHaveBeenCalledWith('company.refresh.jwt');
-      expect(result).toEqual({ accessToken: 'global.jwt' });
+      expect(result).toMatchObject({ accessToken: 'global.jwt', csrfToken: expect.any(String) });
       expect(result).not.toHaveProperty('refreshToken');
     });
 
@@ -361,6 +375,20 @@ describe('AuthController', () => {
     it('throws UnauthorizedException when no refresh cookie is present', async () => {
       await expect(controller.exitCompany(undefined, undefined)).rejects.toThrow(UnauthorizedException);
 
+      expect(authService.exitCompanyContext).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when CSRF header is absent but cookie is present', async () => {
+      await expect(
+        controller.exitCompany('sgd_refresh_token=company.refresh.jwt; sgd_csrf_token=test-csrf', undefined),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(authService.exitCompanyContext).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when CSRF header does not match the cookie', async () => {
+      await expect(
+        controller.exitCompany('sgd_refresh_token=company.refresh.jwt; sgd_csrf_token=test-csrf', 'wrong-csrf'),
+      ).rejects.toThrow(UnauthorizedException);
       expect(authService.exitCompanyContext).not.toHaveBeenCalled();
     });
 

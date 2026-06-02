@@ -145,7 +145,7 @@ export class UsersController {
   @Get('by-org/:orgId')
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByOrg(
-    @Param('orgId', ParseUUIDPipe) orgId: string,
+    @Param('orgId', new ParseUUIDPipe({ version: '4' })) orgId: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(500), ParseIntPipe) limit: number,
   ): Promise<{ data: UserWithOrgRolesDto[]; total: number }> {
@@ -228,7 +228,7 @@ export class UsersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeAllFromOrg(
     @Headers("x-internal-token") internalToken: string,
-    @Param("orgId", ParseUUIDPipe) orgId: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
   ): Promise<void> {
     // Only org-service is authorized to call this endpoint
     this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_ORG_USER']);
@@ -241,7 +241,7 @@ export class UsersController {
   @Get(":id/effective-permissions")
   async getEffectivePermissions(
     @Headers("x-internal-token") internalToken: string,
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Query("companyId") companyId: string,
   ): Promise<{ module: string; action: string }[]> {
     // Only auth-service is authorized to call this endpoint
@@ -256,7 +256,7 @@ export class UsersController {
   @Get(":id/companies")
   getCompanies(
     @Headers("x-internal-token") internalToken: string,
-    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
     // Only auth-service is authorized to call this endpoint
     this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
@@ -268,7 +268,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User found', type: UserResponseDto })
   @Get(":id")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
-  async findOne(@Param("id", new ParseUUIDPipe()) id: string): Promise<UserResponseDto> {
+  async findOne(@Param("id", new ParseUUIDPipe({ version: '4' })) id: string): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.findOne(id));
   }
 
@@ -282,7 +282,7 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async update(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateUserDto,
   ): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.update(id, dto, caller.sub, caller.companyId));
@@ -296,7 +296,7 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.DELETE)
   remove(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
     return this.usersService.remove(id, caller.companyId, caller.sub);
   }
@@ -308,7 +308,7 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async restore(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.restore(id, caller.sub));
   }
@@ -322,7 +322,7 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async resendInvitation(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
     const callerOrgId = caller.isSuperAdmin ? undefined : caller.companyId;
     const { user, invitationToken } = await this.usersService.resendInvitation(id, callerOrgId);
@@ -348,7 +348,7 @@ export class UsersController {
   @ApiResponse({ status: 409, description: 'User already has a password set' })
   @Post(":id/provision")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
-  provision(@Param("id", new ParseUUIDPipe()) id: string, @Body() dto: ProvisionUserDto) {
+  provision(@Param("id", new ParseUUIDPipe({ version: '4' })) id: string, @Body() dto: ProvisionUserDto) {
     return this.usersService.provision(id, dto);
   }
 
@@ -362,7 +362,7 @@ export class UsersController {
   async setSuperAdmin(
     @RequireSuperAdmin() _caller: void,
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: SetSuperAdminDto,
   ): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.setSuperAdmin(id, dto.enabled, caller.sub));
@@ -380,7 +380,7 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   async assignOrg(
     @CurrentUserId() callerId: string,
-    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: AssignOrgDto,
   ): Promise<UserOrgRoleResponseDto> {
     return UserOrgRoleResponseDto.from(
@@ -394,7 +394,7 @@ export class UsersController {
   @Get(":id/orgs")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async getOrgRoles(
-    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserOrgRoleResponseDto[]> {
     return (await this.usersService.getOrgRoles(id)).map(UserOrgRoleResponseDto.from);
   }
@@ -408,8 +408,8 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   removeFromOrg(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", new ParseUUIDPipe()) id: string,
-    @Param("orgId", new ParseUUIDPipe()) orgId: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
   ): Promise<void> {
     return this.usersService.removeFromOrg(id, orgId, caller.sub);
   }
@@ -426,8 +426,8 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   setOptionalReviewer(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", ParseUUIDPipe) id: string,
-    @Param("orgId", ParseUUIDPipe) orgId: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
     @Body() dto: SetOptionalReviewerDto,
   ): Promise<void> {
     if (!caller.isSuperAdmin && caller.companyId !== orgId) {

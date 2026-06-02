@@ -107,4 +107,15 @@ describe('JwtGuard', () => {
     const { ctx } = makeCtx({}, { 'x-internal-token': 'wrong' });
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
+
+  it('default-deny: x-internal-token is ignored and falls through to JWT when no @AllowInternalTokens decorator is present', async () => {
+    // First call returns auth meta; second returns undefined (no @AllowInternalTokens decorator).
+    // A valid internal token must NOT bypass JWT validation — the endpoint never opted in.
+    reflector.getAllAndOverride
+      .mockReturnValueOnce({ orgMember: false, superAdminOnly: false })
+      .mockReturnValueOnce(undefined);
+    const { ctx } = makeCtx({}, { 'x-internal-token': INTERNAL });
+    // No Authorization header → JWT check fails
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
 });

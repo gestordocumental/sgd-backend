@@ -24,7 +24,7 @@ import { SwitchCompanyDto } from "./dto/switch-company.dto";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
 import {
-  ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth, ApiSecurity, ApiParam,
+  ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth, ApiSecurity, ApiParam, ApiHeader,
 } from '@nestjs/swagger';
 
 const REFRESH_COOKIE_NAME = 'sgd_refresh_token';
@@ -212,7 +212,7 @@ export class AuthController {
 
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiBody({ type: LoginDto })
-  @ApiResponse({ status: 200, description: 'Returns accessToken and sets refresh token as HttpOnly cookie' })
+  @ApiResponse({ status: 200, description: 'Returns { accessToken, csrfToken } and sets httpOnly refresh cookie' })
   @ApiResponse({ status: 400, description: 'Validation error — invalid email or missing fields' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
@@ -225,8 +225,9 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Refresh access token using the httpOnly refresh-token cookie' })
-  @ApiResponse({ status: 200, description: 'Returns new accessToken and rotates the refresh HttpOnly cookie' })
-  @ApiResponse({ status: 401, description: 'Missing, invalid or expired refresh cookie' })
+  @ApiHeader({ name: CSRF_HEADER_NAME, required: true, description: 'Must echo the sgd_csrf_token cookie value (double-submit CSRF pattern)' })
+  @ApiResponse({ status: 200, description: 'Returns { accessToken, csrfToken } and rotates the httpOnly refresh cookie' })
+  @ApiResponse({ status: 401, description: 'Missing, invalid or expired refresh cookie or CSRF token' })
   @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
   @Post("refresh")
   async refresh(
@@ -301,7 +302,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Switch active company context (generates a new token with selected companyId)' })
   @ApiBearerAuth('JWT')
   @ApiBody({ type: SwitchCompanyDto })
-  @ApiResponse({ status: 200, description: 'Returns new accessToken with updated companyId and rotates refresh cookie' })
+  @ApiResponse({ status: 200, description: 'Returns { accessToken, csrfToken } with updated companyId and rotates httpOnly refresh cookie' })
   @ApiResponse({ status: 400, description: 'Validation error — invalid companyId format' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
   @ApiResponse({ status: 404, description: 'User does not belong to the requested company' })
@@ -328,8 +329,9 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Restore the global super-admin context after exiting a company' })
-  @ApiResponse({ status: 200, description: 'Returns global accessToken and rotates refresh cookie' })
-  @ApiResponse({ status: 401, description: 'Missing cookie or global session expired — re-login required' })
+  @ApiHeader({ name: CSRF_HEADER_NAME, required: true, description: 'Must echo the sgd_csrf_token cookie value (double-submit CSRF pattern)' })
+  @ApiResponse({ status: 200, description: 'Returns { accessToken, csrfToken } for the global context and rotates the httpOnly refresh cookie' })
+  @ApiResponse({ status: 401, description: 'Missing cookie, CSRF token, or global session expired — re-login required' })
   @Post("exit-company")
   @HttpCode(HttpStatus.OK)
   async exitCompany(

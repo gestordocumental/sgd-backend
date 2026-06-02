@@ -16,9 +16,16 @@ import { AuditConsumer } from './audit.consumer';
       useFactory: (config: ConfigService) => {
         const username = config.get<string>('ELASTICSEARCH_USERNAME');
         const password = config.get<string>('ELASTICSEARCH_PASSWORD');
+
+        if (Boolean(username) !== Boolean(password)) {
+          throw new Error(
+            'ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD must both be set or both be absent',
+          );
+        }
+
         return {
           node: config.getOrThrow<string>('ELASTICSEARCH_URL'),
-          ...(username && { auth: { username, password: password ?? '' } }),
+          ...(username && password ? { auth: { username, password } } : {}),
         };
       },
     }),
