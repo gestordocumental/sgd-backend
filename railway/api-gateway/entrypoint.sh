@@ -6,6 +6,8 @@ set -eu
 
 : "${KONG_JWT_SECRET:?KONG_JWT_SECRET is required}"
 : "${FRONTEND_URL:?FRONTEND_URL is required}"
+: "${AUTH_SENSITIVE_RATE_LIMIT:?AUTH_SENSITIVE_RATE_LIMIT is required}"
+: "${AUTH_SESSION_RATE_LIMIT:?AUTH_SESSION_RATE_LIMIT is required}"
 
 # Railway inyecta PORT. Kong debe escuchar en ese puerto.
 # Si PORT no está seteado (local), usar 8000 como fallback.
@@ -22,6 +24,8 @@ frontend_url_escaped="$(escape_sed_replacement "${FRONTEND_URL}")"
 sed \
   -e "s|\${KONG_JWT_SECRET}|${jwt_secret_escaped}|g" \
   -e "s|\${FRONTEND_URL}|${frontend_url_escaped}|g" \
+  -e "s|\${AUTH_SENSITIVE_RATE_LIMIT}|${AUTH_SENSITIVE_RATE_LIMIT}|g" \
+  -e "s|\${AUTH_SESSION_RATE_LIMIT}|${AUTH_SESSION_RATE_LIMIT}|g" \
   /etc/kong/kong.yaml.template > /etc/kong/kong.yaml
 
 export KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yaml
