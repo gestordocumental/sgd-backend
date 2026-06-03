@@ -13,6 +13,6 @@ export const AppDataSource = new DataSource({
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME ?? 'org_db',
   entities: [Org, Departamento, Area, Cargo],
-  migrations: [__dirname + '/migrations/*.js'],
+  migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
 });

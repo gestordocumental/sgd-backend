@@ -11,7 +11,7 @@ const INTERNAL_TOKEN = 'my-super-secret-internal-token';
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: Record<string, jest.Mock>;
-  let configService: { getOrThrow: jest.Mock };
+  let configService: { getOrThrow: jest.Mock; get: jest.Mock };
 
   beforeEach(async () => {
     authService = {
@@ -32,6 +32,9 @@ describe('AuthController', () => {
 
     configService = {
       getOrThrow: jest.fn().mockReturnValue(INTERNAL_TOKEN),
+      get: jest.fn().mockImplementation((key: string) =>
+        key === 'NODE_ENV' ? process.env['NODE_ENV'] : undefined,
+      ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -150,28 +153,30 @@ describe('AuthController', () => {
       expect(result).not.toHaveProperty('refreshToken');
     });
 
-    it('sets refresh token cookie and returns only accessToken in body', async () => {
+    it('sets refresh token cookie and returns accessToken + csrfToken in body', async () => {
       const dto = { email: 'user@test.com', password: 'pass1234' };
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
       const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
+      try {
+        process.env.NODE_ENV = 'production';
 
-      const result = await controller.login(dto, res as any);
+        const result = await controller.login(dto, res as any);
 
-      expect(result).toEqual({ accessToken: 'access.jwt' });
-      expect(res.cookie).toHaveBeenCalledWith(
-        'sgd_refresh_token',
-        'refresh.jwt',
-        expect.objectContaining({
-          httpOnly: true,
-          secure: true,
-          sameSite: 'none',
-          path: '/api/v1/auth',
-        }),
-      );
-      expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
-
-      process.env.NODE_ENV = originalEnv;
+        expect(result).toMatchObject({ accessToken: 'access.jwt', csrfToken: expect.any(String) });
+        expect(res.cookie).toHaveBeenCalledWith(
+          'sgd_refresh_token',
+          'refresh.jwt',
+          expect.objectContaining({
+            httpOnly: true,
+            secure: true,
+            sameSite: 'none',
+            path: '/api/v1/auth',
+          }),
+        );
+        expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
     });
   });
 
@@ -179,7 +184,7 @@ describe('AuthController', () => {
 
   describe('POST /api/v1/auth/refresh', () => {
     it('reads refresh token from cookie and delegates to authService.refresh', async () => {
-      const result = await controller.refresh('sgd_refresh_token=old.refresh.jwt');
+      const result = await controller.refresh('sgd_refresh_token=old.refresh.jwt; sgd_csrf_token=test-csrf', 'test-csrf');
 
       expect(authService.refresh).toHaveBeenCalledWith('old.refresh.jwt');
       expect(result).toHaveProperty('accessToken');
@@ -189,10 +194,10 @@ describe('AuthController', () => {
     it('sets refresh token cookie when response is provided', async () => {
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
 
-      const result = await controller.refresh('sgd_refresh_token=old.refresh.jwt', res as any);
+      const result = await controller.refresh('sgd_refresh_token=old.refresh.jwt; sgd_csrf_token=test-csrf', 'test-csrf', res as any);
 
       expect(authService.refresh).toHaveBeenCalledWith('old.refresh.jwt');
-      expect(result).toEqual({ accessToken: 'access.jwt' });
+      expect(result).toMatchObject({ accessToken: 'access.jwt', csrfToken: expect.any(String) });
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
         'refresh.jwt',
@@ -201,12 +206,26 @@ describe('AuthController', () => {
     });
 
     it('throws UnauthorizedException when no refresh cookie is present', async () => {
-      await expect(controller.refresh(undefined)).rejects.toThrow(UnauthorizedException);
+      await expect(controller.refresh(undefined, undefined)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when CSRF header is absent but cookie is present', async () => {
+      await expect(
+        controller.refresh('sgd_refresh_token=old.refresh.jwt; sgd_csrf_token=test-csrf', undefined),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(authService.refresh).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when CSRF header does not match the cookie', async () => {
+      await expect(
+        controller.refresh('sgd_refresh_token=old.refresh.jwt; sgd_csrf_token=test-csrf', 'wrong-csrf'),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(authService.refresh).not.toHaveBeenCalled();
     });
 
     it('throws UnauthorizedException when refresh cookie is malformed (invalid URI encoding)', async () => {
       await expect(
-        controller.refresh('sgd_refresh_token=%E0%A4%A'),
+        controller.refresh('sgd_refresh_token=%E0%A4%A; sgd_csrf_token=test-csrf', 'test-csrf'),
       ).rejects.toThrow(UnauthorizedException);
 
       expect(authService.refresh).not.toHaveBeenCalled();
@@ -214,7 +233,7 @@ describe('AuthController', () => {
 
     it('URL-decodes the refresh token value from the cookie before passing to the service', async () => {
       const encoded = encodeURIComponent('valid.refresh.jwt');
-      await controller.refresh(`sgd_refresh_token=${encoded}`);
+      await controller.refresh(`sgd_refresh_token=${encoded}; sgd_csrf_token=test-csrf`, 'test-csrf');
 
       expect(authService.refresh).toHaveBeenCalledWith('valid.refresh.jwt');
     });
@@ -242,41 +261,21 @@ describe('AuthController', () => {
 
   describe('GET /api/v1/auth/me', () => {
     it('returns user info from valid access token', () => {
-      authService.verifyAccessToken.mockReturnValue({ sub: 'user-id', email: 'user@test.com' });
-
-      const result = controller.me('Bearer valid.token');
+      const result = controller.me({ sub: 'user-id', email: 'user@test.com' });
 
       expect(result).toMatchObject({ userId: 'user-id', email: 'user@test.com' });
     });
 
     it('includes companyId when present in token payload', () => {
-      authService.verifyAccessToken.mockReturnValue({
-        sub: 'user-id',
-        email: 'user@test.com',
-        companyId: 'org-id',
-      });
-
-      const result = controller.me('Bearer scoped.token');
+      const result = controller.me({ sub: 'user-id', email: 'user@test.com', companyId: 'org-id' });
 
       expect(result).toHaveProperty('companyId', 'org-id');
     });
 
     it('includes isSuperAdmin when present in token payload', () => {
-      authService.verifyAccessToken.mockReturnValue({
-        sub: 'user-id',
-        email: 'user@test.com',
-        isSuperAdmin: true,
-      });
-
-      const result = controller.me('Bearer admin.token');
+      const result = controller.me({ sub: 'user-id', email: 'user@test.com', isSuperAdmin: true });
 
       expect(result).toHaveProperty('isSuperAdmin', true);
-    });
-
-    it('throws UnauthorizedException when token payload has no sub claim', () => {
-      authService.verifyAccessToken.mockReturnValue({ email: 'user@test.com' }); // no sub
-
-      expect(() => controller.me('Bearer no-sub.token')).toThrow(UnauthorizedException);
     });
   });
 
@@ -284,9 +283,7 @@ describe('AuthController', () => {
 
   describe('GET /api/v1/auth/me/companies', () => {
     it('returns list of companies for the authenticated user', async () => {
-      authService.verifyAccessToken.mockReturnValue({ sub: 'user-id' });
-
-      const result = await controller.getMyCompanies('Bearer valid.token');
+      const result = await controller.getMyCompanies({ sub: 'user-id' });
 
       expect(authService.getMyCompanies).toHaveBeenCalledWith('user-id');
       expect(result).toEqual(['org-id']);
@@ -322,7 +319,7 @@ describe('AuthController', () => {
       );
 
       expect(authService.saveGlobalContext).toHaveBeenCalledWith('user-id', 'global.refresh.jwt');
-      expect(result).toEqual({ accessToken: 'scoped.jwt' });
+      expect(result).toMatchObject({ accessToken: 'scoped.jwt', csrfToken: expect.any(String) });
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
         'refresh.jwt',
@@ -357,18 +354,18 @@ describe('AuthController', () => {
   // ── exitCompany ───────────────────────────────────────────────────────────
 
   describe('POST /api/v1/auth/exit-company', () => {
-    it('restores global super-admin context and returns only accessToken in body', async () => {
-      const result = await controller.exitCompany('sgd_refresh_token=company.refresh.jwt');
+    it('restores global super-admin context and returns accessToken + csrfToken in body', async () => {
+      const result = await controller.exitCompany('sgd_refresh_token=company.refresh.jwt; sgd_csrf_token=test-csrf', 'test-csrf');
 
       expect(authService.exitCompanyContext).toHaveBeenCalledWith('company.refresh.jwt');
-      expect(result).toEqual({ accessToken: 'global.jwt' });
+      expect(result).toMatchObject({ accessToken: 'global.jwt', csrfToken: expect.any(String) });
       expect(result).not.toHaveProperty('refreshToken');
     });
 
     it('sets the new global refresh token as httpOnly cookie', async () => {
       const res = { cookie: jest.fn(), setHeader: jest.fn() };
 
-      await controller.exitCompany('sgd_refresh_token=company.refresh.jwt', res as any);
+      await controller.exitCompany('sgd_refresh_token=company.refresh.jwt; sgd_csrf_token=test-csrf', 'test-csrf', res as any);
 
       expect(res.cookie).toHaveBeenCalledWith(
         'sgd_refresh_token',
@@ -378,14 +375,28 @@ describe('AuthController', () => {
     });
 
     it('throws UnauthorizedException when no refresh cookie is present', async () => {
-      await expect(controller.exitCompany(undefined)).rejects.toThrow(UnauthorizedException);
+      await expect(controller.exitCompany(undefined, undefined)).rejects.toThrow(UnauthorizedException);
 
+      expect(authService.exitCompanyContext).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when CSRF header is absent but cookie is present', async () => {
+      await expect(
+        controller.exitCompany('sgd_refresh_token=company.refresh.jwt; sgd_csrf_token=test-csrf', undefined),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(authService.exitCompanyContext).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when CSRF header does not match the cookie', async () => {
+      await expect(
+        controller.exitCompany('sgd_refresh_token=company.refresh.jwt; sgd_csrf_token=test-csrf', 'wrong-csrf'),
+      ).rejects.toThrow(UnauthorizedException);
       expect(authService.exitCompanyContext).not.toHaveBeenCalled();
     });
 
     it('throws UnauthorizedException when refresh cookie is malformed', async () => {
       await expect(
-        controller.exitCompany('sgd_refresh_token=%E0%A4%A'),
+        controller.exitCompany('sgd_refresh_token=%E0%A4%A; sgd_csrf_token=test-csrf', 'test-csrf'),
       ).rejects.toThrow(UnauthorizedException);
 
       expect(authService.exitCompanyContext).not.toHaveBeenCalled();

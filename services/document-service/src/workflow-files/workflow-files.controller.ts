@@ -43,6 +43,9 @@ const workflowMulterOptions = {
     file: Express.Multer.File,
     cb: (err: Error | null, accept: boolean) => void,
   ) => {
+    // Re-interpret Latin-1 decoded bytes as UTF-8 to recover accented characters in filenames.
+    file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
     if (WORKFLOW_MIME_WHITELIST.has(file.mimetype)) cb(null, true);
     else cb(new BadRequestException('Formato no permitido. Use PDF, DOCX, XLSX o imagen (PNG, JPG, WEBP, GIF, BMP, TIFF).'), false);
   },
@@ -83,9 +86,11 @@ export class WorkflowFilesController {
   async getSignedUrl(
     @Param('orgId') orgId: string,
     @Body('storageKey') storageKey: string,
+    @Body('originalName') originalName?: string,
+    @Body('mimeType') mimeType?: string,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     if (!storageKey) throw new BadRequestException('storageKey es requerido');
-    return this.service.getSignedUrl(orgId, storageKey);
+    return this.service.getSignedUrl(orgId, storageKey, originalName, mimeType);
   }
 
   @ApiOperation({ summary: 'Descargar múltiples archivos del workflow como un ZIP' })
@@ -97,8 +102,12 @@ export class WorkflowFilesController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { stream, filename } = await this.service.downloadZip(orgId, body.files, body.title);
+    const isAscii = /^[\x20-\x7E]*$/.test(filename);
+    const disposition = isAscii
+      ? `attachment; filename="${filename}"`
+      : `attachment; filename="${filename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename).replace(/'/g, '%27')}`;
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', disposition);
     return new StreamableFile(stream);
   }
 }

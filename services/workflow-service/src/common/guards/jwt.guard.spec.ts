@@ -95,13 +95,13 @@ function guardWithMeta(meta?: AuthMeta) {
 
 // Simulate canActivate using the shared reflector mock.
 // getAllAndOverride is called twice when x-internal-token is present:
-//   call 1 → AUTH_KEY      → return meta
-//   call 2 → INTERNAL_TOKEN_KEYS_META → return undefined (fallback to default list)
+//   call 1 → AUTH_KEY                → return meta
+//   call 2 → INTERNAL_TOKEN_KEYS_META → return key list (simulates @AllowInternalTokens)
 function activate(guard: JwtGuard, request: ReturnType<typeof makeRequest>, meta?: AuthMeta): Promise<boolean> {
   const reflector = {
     getAllAndOverride: jest.fn()
       .mockReturnValueOnce(meta)
-      .mockReturnValueOnce(undefined)
+      .mockReturnValueOnce(['INTERNAL_TOKEN_WORKFLOW_USER'])
       .mockReturnValue(meta),
   } as unknown as Reflector;
   // Replace the guard's reflector at runtime via casting

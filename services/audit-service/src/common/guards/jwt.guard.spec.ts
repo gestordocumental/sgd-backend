@@ -92,19 +92,30 @@ describe('JwtGuard', () => {
 
   it('allows request with valid internal token', async () => {
     // getAllAndOverride is called twice: first for AUTH_KEY, then for INTERNAL_TOKEN_KEYS_META.
-    // The second call must return undefined so the guard falls back to the default key list.
+    // The second call simulates @AllowInternalTokens('INTERNAL_TOKEN_AUTH_USER') on the endpoint.
     reflector.getAllAndOverride
       .mockReturnValueOnce({ orgMember: false, superAdminOnly: false })
-      .mockReturnValueOnce(undefined);
+      .mockReturnValueOnce(['INTERNAL_TOKEN_AUTH_USER']);
     const { ctx } = makeCtx({}, { 'x-internal-token': INTERNAL });
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
   });
 
-  it('falls through to JWT check when internal token has wrong length', async () => {
+  it('falls through to JWT check when internal token does not match', async () => {
+    reflector.getAllAndOverride
+      .mockReturnValueOnce({ orgMember: false, superAdminOnly: false })
+      .mockReturnValueOnce(['INTERNAL_TOKEN_AUTH_USER']);
+    const { ctx } = makeCtx({}, { 'x-internal-token': 'wrong' });
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('default-deny: x-internal-token is ignored and falls through to JWT when no @AllowInternalTokens decorator is present', async () => {
+    // First call returns auth meta; second returns undefined (no @AllowInternalTokens decorator).
+    // A valid internal token must NOT bypass JWT validation — the endpoint never opted in.
     reflector.getAllAndOverride
       .mockReturnValueOnce({ orgMember: false, superAdminOnly: false })
       .mockReturnValueOnce(undefined);
-    const { ctx } = makeCtx({}, { 'x-internal-token': 'wrong' });
+    const { ctx } = makeCtx({}, { 'x-internal-token': INTERNAL });
+    // No Authorization header → JWT check fails
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 });

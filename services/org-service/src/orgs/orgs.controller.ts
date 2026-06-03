@@ -16,13 +16,13 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { OrgsService } from './orgs.service';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
 import { OrgResponseDto } from './dto/org-response.dto';
 import { OrgGuard } from '../common/guards/org.guard';
-import { SuperAdminOnly, OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
+import { SuperAdminOnly, OrgMemberOrSuperAdmin, AuthOnly } from '../common/decorators/auth.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Organizations')
@@ -33,7 +33,10 @@ export class OrgsController {
   constructor(private readonly orgsService: OrgsService) {}
 
   @ApiOperation({ summary: 'Create an organization (super admin only)' })
+  @ApiBody({ type: CreateOrgDto })
   @ApiResponse({ status: 201, description: 'Organization created', type: OrgResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Organization name already exists' })
   /**
    * Create an organization.
    * Super admin only.
@@ -79,6 +82,23 @@ export class OrgsController {
     return { data: data.map(OrgResponseDto.from), total };
   }
 
+  @ApiOperation({ summary: 'Resolve org details for a list of IDs (used by profile context-switcher)' })
+  @ApiResponse({ status: 200, description: 'Returns full org data for each ID provided', type: OrgResponseDto, isArray: true })
+  /**
+   * Accepts a comma-separated list of org IDs via ?ids=a,b,c and returns full org data.
+   * Requires a valid JWT but no org-scope restriction — the caller (frontend) already
+   * received these IDs from /auth/me/companies and needs name, status, nit, etc.
+   */
+  @Get('mine')
+  @AuthOnly()
+  async getMyOrgs(
+    @Query('ids') idsParam?: string,
+  ): Promise<OrgResponseDto[]> {
+    const ids = idsParam?.split(',').filter(Boolean) ?? [];
+    const orgs = await this.orgsService.findByIds(ids);
+    return orgs.map(OrgResponseDto.from);
+  }
+
   @ApiOperation({ summary: 'Get organization by ID' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Organization found', type: OrgResponseDto })
@@ -94,7 +114,10 @@ export class OrgsController {
 
   @ApiOperation({ summary: 'Update organization data' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: UpdateOrgDto })
   @ApiResponse({ status: 200, description: 'Organization updated', type: OrgResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
   /**
    * Update an organization.
    * Super admin or org member (to update data for their own org).

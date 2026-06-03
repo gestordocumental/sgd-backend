@@ -13,9 +13,21 @@ import { AuditConsumer } from './audit.consumer';
     ElasticsearchModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        node: config.getOrThrow<string>('ELASTICSEARCH_URL'),
-      }),
+      useFactory: (config: ConfigService) => {
+        const username = config.get<string>('ELASTICSEARCH_USERNAME');
+        const password = config.get<string>('ELASTICSEARCH_PASSWORD');
+
+        if (Boolean(username) !== Boolean(password)) {
+          throw new Error(
+            'ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD must both be set or both be absent',
+          );
+        }
+
+        return {
+          node: config.getOrThrow<string>('ELASTICSEARCH_URL'),
+          ...(username && password ? { auth: { username, password } } : {}),
+        };
+      },
     }),
   ],
   controllers: [AuditController],

@@ -14,6 +14,13 @@ if (process.env.DISABLE_TLS_VERIFY === 'true') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
+// Elasticsearch sin autenticación en producción expone todos los logs de auditoría.
+if (process.env.NODE_ENV === 'production' &&
+    (!process.env.ELASTICSEARCH_USERNAME || !process.env.ELASTICSEARCH_PASSWORD)) {
+  throw new Error('ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD must be set in production');
+}
+
+import { json, urlencoded } from 'express';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
@@ -24,7 +31,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
  * Bootstraps and starts the NestJS application: creates the app, installs the application logger, registers global validation, logging interceptor and HTTP exception filter, configures Swagger (Bearer JWT) at `api/audit/docs`, and listens on the port from `process.env.PORT` or `3007`.
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
+
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   const logger = app.get(AppLogger);
 

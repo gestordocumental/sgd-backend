@@ -514,9 +514,9 @@ describe('UsersController', () => {
       expect(result).toEqual(perms);
     });
 
-    it('throws UnauthorizedException when companyId query param is missing', async () => {
+    it('throws UnauthorizedException when the internal token is invalid', async () => {
       await expect(
-        controller.getEffectivePermissions(INTERNAL_TOKEN, 'user-uuid-1', ''),
+        controller.getEffectivePermissions('wrong-token', 'user-uuid-1', 'org-uuid-1'),
       ).rejects.toThrow(UnauthorizedException);
     });
   });

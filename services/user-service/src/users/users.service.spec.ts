@@ -1170,17 +1170,10 @@ describe('UsersService', () => {
     });
   });
 
-  // ─── findByOrg (super admin inclusion) ────────────────────────────────────
+  // ─── findByOrg (explicit membership only) ────────────────────────────────
 
-  describe('findByOrg (super admin inclusion)', () => {
-    it('includes ACTIVE super admins not already present as org members', async () => {
-      const superAdmin = makeUser({
-        id: 'sa-uuid-1',
-        email: 'sa@example.com',
-        isSuperAdmin: true,
-        registrationStatus: RegistrationStatus.ACTIVE,
-      });
-
+  describe('findByOrg (explicit membership only)', () => {
+    it('does not include super admins without explicit org membership', async () => {
       const qb: Record<string, jest.Mock> = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where:             jest.fn().mockReturnThis(),
@@ -1188,13 +1181,44 @@ describe('UsersService', () => {
         getMany:           jest.fn().mockResolvedValue([]),
       };
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
-      usersRepo.find.mockResolvedValue([superAdmin]);
+
+      const { data, total } = await service.findByOrg('org-uuid-1');
+
+      expect(total).toBe(0);
+      expect(data).toEqual([]);
+      expect(usersRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('includes a super admin that has an explicit user_org_roles record', async () => {
+      const superAdmin = makeUser({
+        id: 'sa-uuid-1',
+        email: 'sa@example.com',
+        isSuperAdmin: true,
+        registrationStatus: RegistrationStatus.ACTIVE,
+      });
+      const orgRole = {
+        userId: superAdmin.id,
+        orgId: 'org-uuid-1',
+        roleId: 'role-uuid-1',
+        role: { id: 'role-uuid-1', name: 'ADMIN' },
+        user: superAdmin,
+        removedAt: null,
+        isOptionalReviewer: false,
+      };
+
+      const qb: Record<string, jest.Mock> = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where:             jest.fn().mockReturnThis(),
+        withDeleted:       jest.fn().mockReturnThis(),
+        getMany:           jest.fn().mockResolvedValue([orgRole]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
 
       const { data, total } = await service.findByOrg('org-uuid-1');
 
       expect(total).toBe(1);
       expect(data[0].user.id).toBe(superAdmin.id);
-      expect(data[0].roles).toEqual([]);
+      expect(data[0].roles).toEqual([{ roleId: 'role-uuid-1', roleName: 'ADMIN' }]);
     });
   });
 

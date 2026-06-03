@@ -5,11 +5,11 @@ export class ResetPasswordDto {
   @ApiProperty({ description: 'Token recibido por correo' })
   @IsString()
   @IsNotEmpty()
-  token: string;
+  token!: string;
 
   @ApiProperty({ example: 'NuevaC0ntraseña!', minLength: 8 })
   @IsString()
   @IsNotEmpty()
   @MinLength(8)
-  newPassword: string;
+  newPassword!: string;
 }
