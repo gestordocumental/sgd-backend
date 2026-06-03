@@ -321,7 +321,13 @@ export class UsersController {
     @JwtPayloadParam() caller: JwtPayload,
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserResponseDto> {
-    return UserResponseDto.from(await this.usersService.disable(id, caller.sub));
+    return UserResponseDto.from(
+      await this.usersService.disable(id, {
+        actorId: caller.sub,
+        companyId: caller.companyId,
+        isSuperAdmin: caller.isSuperAdmin,
+      }),
+    );
   }
 
   @ApiOperation({ summary: 'Enable a previously disabled user' })
@@ -333,7 +339,13 @@ export class UsersController {
     @JwtPayloadParam() caller: JwtPayload,
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserResponseDto> {
-    return UserResponseDto.from(await this.usersService.enable(id, caller.sub));
+    return UserResponseDto.from(
+      await this.usersService.enable(id, {
+        actorId: caller.sub,
+        companyId: caller.companyId,
+        isSuperAdmin: caller.isSuperAdmin,
+      }),
+    );
   }
 
   @ApiOperation({ summary: 'Resend invitation email to a PENDING user' })
