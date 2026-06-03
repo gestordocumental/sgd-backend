@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { Credential } from './auth/entities/credential.entity';
 
@@ -11,10 +10,6 @@ export const AppDataSource = new DataSource({
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME ?? 'auth_db',
   entities: [Credential],
-  migrations: [
-    process.env.NODE_ENV === 'production'
-      ? path.join(__dirname, 'migrations', '*.js')
-      : 'src/migrations/*.ts',
-  ],
+  migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
 });
