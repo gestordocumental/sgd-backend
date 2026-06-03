@@ -125,7 +125,7 @@ export class UsersController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('search') search?: string,
-    @Query('status') status?: 'active' | 'deleted' | 'pending',
+    @Query('status') status?: 'active' | 'inactive' | 'deleted' | 'pending',
   ): Promise<{ data: UserResponseDto[]; total: number }> {
     const { data, total } = await this.usersService.findAllSuperAdmin(page, limit, search, status);
     return { data: data.map(UserResponseDto.from), total };
@@ -310,6 +310,42 @@ export class UsersController {
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.restore(id, caller.sub));
+  }
+
+  @ApiOperation({ summary: 'Disable a user — blocks login without deleting the account' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User disabled', type: UserResponseDto })
+  @Patch(":id/disable")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  async disable(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.from(
+      await this.usersService.disable(id, {
+        actorId: caller.sub,
+        companyId: caller.companyId,
+        isSuperAdmin: caller.isSuperAdmin,
+      }),
+    );
+  }
+
+  @ApiOperation({ summary: 'Enable a previously disabled user' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User enabled', type: UserResponseDto })
+  @Patch(":id/enable")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  async enable(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.from(
+      await this.usersService.enable(id, {
+        actorId: caller.sub,
+        companyId: caller.companyId,
+        isSuperAdmin: caller.isSuperAdmin,
+      }),
+    );
   }
 
   @ApiOperation({ summary: 'Resend invitation email to a PENDING user' })
