@@ -20,12 +20,14 @@ escape_sed_replacement() {
 
 jwt_secret_escaped="$(escape_sed_replacement "${KONG_JWT_SECRET}")"
 frontend_url_escaped="$(escape_sed_replacement "${FRONTEND_URL}")"
+auth_sensitive_rate_limit_escaped="$(escape_sed_replacement "${AUTH_SENSITIVE_RATE_LIMIT}")"
+auth_session_rate_limit_escaped="$(escape_sed_replacement "${AUTH_SESSION_RATE_LIMIT}")"
 
 sed \
   -e "s|\${KONG_JWT_SECRET}|${jwt_secret_escaped}|g" \
   -e "s|\${FRONTEND_URL}|${frontend_url_escaped}|g" \
-  -e "s|\${AUTH_SENSITIVE_RATE_LIMIT}|${AUTH_SENSITIVE_RATE_LIMIT}|g" \
-  -e "s|\${AUTH_SESSION_RATE_LIMIT}|${AUTH_SESSION_RATE_LIMIT}|g" \
+  -e "s|\${AUTH_SENSITIVE_RATE_LIMIT}|${auth_sensitive_rate_limit_escaped}|g" \
+  -e "s|\${AUTH_SESSION_RATE_LIMIT}|${auth_session_rate_limit_escaped}|g" \
   /etc/kong/kong.yaml.template > /etc/kong/kong.yaml
 
 export KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yaml
