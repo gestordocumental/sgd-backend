@@ -135,7 +135,7 @@ services:
     plugins:
       - name: rate-limiting
         config:
-          minute: "${AUTH_SENSITIVE_RATE_LIMIT}"
+          minute: ${AUTH_SENSITIVE_RATE_LIMIT}
           policy: local
           fault_tolerant: true
 
@@ -153,7 +153,7 @@ services:
     plugins:
       - name: rate-limiting
         config:
-          minute: "${AUTH_SESSION_RATE_LIMIT}"
+          minute: ${AUTH_SESSION_RATE_LIMIT}
           policy: local
           fault_tolerant: true
 
