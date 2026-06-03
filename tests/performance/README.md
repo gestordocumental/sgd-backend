@@ -61,9 +61,10 @@ k6 run --out json=results.json tests/performance/stress-test.js
 
 | Threshold | Límite | Significado |
 |---|---|---|
-| `http_req_duration p(95)` | < 2000ms | 95% responde en < 2s |
-| `login_duration p(99)` | < 3000ms | 99% de logins en < 3s |
-| `error_rate` | < 5% | Menos del 5% de errores |
+| `http_req_duration p(95)` | < 2000ms | 95% de requests responden en < 2s |
+| `error_rate` | < 5% | Menos del 5% de requests fallidas |
+
+> El login ocurre solo en `setup()` (una vez, fuera del loop de carga), por lo que no existe threshold de `login_duration` en el test principal.
 
 ### Señales de que encontraste el límite
 

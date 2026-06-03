@@ -64,7 +64,14 @@ export function setup() {
       continue;
     }
 
-    const userId = JSON.parse(createRes.body).id;
+    let userId;
+    try {
+      userId = JSON.parse(createRes.body).id;
+    } catch (_) {}
+    if (!userId) {
+      console.warn(`[setup] Respuesta inesperada al crear ${email}: ${createRes.body}`);
+      continue;
+    }
 
     // 2. Espera a que Kafka procese la creación de credenciales en auth-service
     sleep(2);
@@ -98,10 +105,15 @@ export function setup() {
       continue;
     }
 
-    const token = JSON.parse(loginRes.body).accessToken;
-    if (token) {
-      users.push({ userId, email, token });
+    let token;
+    try {
+      token = JSON.parse(loginRes.body).accessToken;
+    } catch (_) {}
+    if (!token) {
+      console.warn(`[setup] No se obtuvo accessToken para ${email}: ${loginRes.body}`);
+      continue;
     }
+    users.push({ userId, email, token });
 
     // Pausa pequeña para no activar el rate limiter durante el setup
     sleep(0.3);
@@ -179,7 +191,12 @@ function adminLogin() {
     );
 
     if (res.status === 200 || res.status === 201) {
-      return JSON.parse(res.body).accessToken;
+      let token;
+      try {
+        token = JSON.parse(res.body).accessToken;
+      } catch (_) {}
+      if (!token) throw new Error(`[adminLogin] Body inesperado: ${res.body}`);
+      return token;
     }
 
     if (res.status === 429) {

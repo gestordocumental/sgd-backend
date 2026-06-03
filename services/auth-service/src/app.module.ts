@@ -19,10 +19,13 @@ import { AppLogger, CorrelationMiddleware, MetricsModule, JwtGuard } from '@sgd/
     // Override via THROTTLE_TTL / THROTTLE_LIMIT env vars (e.g. increase for load-test envs).
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => [{
-        ttl:   config.get<number>('THROTTLE_TTL',   60_000),
-        limit: config.get<number>('THROTTLE_LIMIT', 10),
-      }],
+      useFactory: (config: ConfigService) => {
+        const ttl   = Number(config.get<string>('THROTTLE_TTL',   '60000'));
+        const limit = Number(config.get<string>('THROTTLE_LIMIT', '10'));
+        if (!Number.isFinite(ttl)   || ttl   <= 0) throw new Error(`Invalid THROTTLE_TTL: ${config.get('THROTTLE_TTL')}`);
+        if (!Number.isFinite(limit) || limit <= 0) throw new Error(`Invalid THROTTLE_LIMIT: ${config.get('THROTTLE_LIMIT')}`);
+        return [{ ttl, limit }];
+      },
     }),
 
     TypeOrmModule.forRootAsync({

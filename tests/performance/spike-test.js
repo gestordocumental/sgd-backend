@@ -45,9 +45,11 @@ export default function () {
 
   const token = JSON.parse(res.body).accessToken;
 
-  http.get(`${BASE_URL}/api/v1/auth/me`, {
+  const meRes = http.get(`${BASE_URL}/api/v1/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  const meOk = check(meRes, { 'me ok': (r) => r.status === 200 });
+  errorRate.add(!meOk);
 
   sleep(1);
 }
