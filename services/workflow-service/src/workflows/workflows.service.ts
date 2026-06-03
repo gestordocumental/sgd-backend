@@ -336,6 +336,32 @@ export class WorkflowsService {
       .take(100)
       .getMany();
 
+    // 6. Workflows donde el usuario es un aprobador definido (workflow_approval_steps)
+    //    Una vez que el flujo llega a AVAILABLE_FOR_FINAL_USERS o REJECTED, el aprobador
+    //    debe poder ver el resultado en la pestaña "Disponibles para mí".
+    const approverWorkflows = await this.workflowRepo
+      .createQueryBuilder('w')
+      .leftJoinAndSelect('w.approvalSteps', 'steps')
+      .where('w.org_id = :orgId', { orgId })
+      .andWhere('w.status IN (:...approverStatuses)', {
+        approverStatuses: [
+          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+          WorkflowStatus.REJECTED,
+        ],
+      })
+      .andWhere('w.deleted_at IS NULL')
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM workflow_approval_steps s
+          WHERE s.workflow_id = w.id
+            AND s.user_id = :userId
+        )`,
+        { userId },
+      )
+      .orderBy('w.updatedAt', 'DESC')
+      .take(100)
+      .getMany();
+
     // Combinar y deduplicar por id
     const merged = new Map<string, Workflow>();
     for (const w of [
@@ -344,6 +370,7 @@ export class WorkflowsService {
       ...allowedOptionalWorkflows,
       ...pastOptionalReviewerWorkflows,
       ...createdByUserWorkflows,
+      ...approverWorkflows,
     ]) {
       merged.set(w.id, w);
     }
@@ -355,6 +382,7 @@ export class WorkflowsService {
       `allowedOptional=${allowedOptionalWorkflows.length} ` +
       `pastOptional=${pastOptionalReviewerWorkflows.length} ` +
       `createdBy=${createdByUserWorkflows.length} ` +
+      `approver=${approverWorkflows.length} ` +
       `total=${merged.size}`,
     );
 

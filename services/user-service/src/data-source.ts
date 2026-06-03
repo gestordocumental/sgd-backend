@@ -13,7 +13,7 @@ export const AppDataSource = new DataSource({
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME ?? 'user_db',
   entities: [User, Role, Permission, UserOrgRole],
-  migrations: [__dirname + '/migrations/*.js'],
+  migrations: [__dirname + '/migrations/*{.ts,.js}'],
   // 'each' gives every migration its own transaction so ALTER TYPE ADD VALUE
   // can commit before the next migration uses the new enum value.
   migrationsTransactionMode: 'each',

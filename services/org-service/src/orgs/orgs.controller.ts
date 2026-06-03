@@ -22,7 +22,7 @@ import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
 import { OrgResponseDto } from './dto/org-response.dto';
 import { OrgGuard } from '../common/guards/org.guard';
-import { SuperAdminOnly, OrgMemberOrSuperAdmin } from '../common/decorators/auth.decorator';
+import { SuperAdminOnly, OrgMemberOrSuperAdmin, AuthOnly } from '../common/decorators/auth.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Organizations')
@@ -80,6 +80,23 @@ export class OrgsController {
       status: status as 'active' | 'inactive' | 'deleted' | undefined,
     });
     return { data: data.map(OrgResponseDto.from), total };
+  }
+
+  @ApiOperation({ summary: 'Resolve org details for a list of IDs (used by profile context-switcher)' })
+  @ApiResponse({ status: 200, description: 'Returns full org data for each ID provided', type: OrgResponseDto, isArray: true })
+  /**
+   * Accepts a comma-separated list of org IDs via ?ids=a,b,c and returns full org data.
+   * Requires a valid JWT but no org-scope restriction — the caller (frontend) already
+   * received these IDs from /auth/me/companies and needs name, status, nit, etc.
+   */
+  @Get('mine')
+  @AuthOnly()
+  async getMyOrgs(
+    @Query('ids') idsParam?: string,
+  ): Promise<OrgResponseDto[]> {
+    const ids = idsParam?.split(',').filter(Boolean) ?? [];
+    const orgs = await this.orgsService.findByIds(ids);
+    return orgs.map(OrgResponseDto.from);
   }
 
   @ApiOperation({ summary: 'Get organization by ID' })

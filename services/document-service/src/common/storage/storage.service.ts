@@ -64,7 +64,17 @@ export class StorageService implements OnModuleInit {
     mimeType?: string,
   ): Promise<{ url: string; expiresAt: Date }> {
     const disposition = filename
-      ? `${mimeType === 'application/pdf' ? 'inline' : 'attachment'}; filename="${filename.replace(/"/g, '\\"')}"`
+      ? (() => {
+          const mode = mimeType === 'application/pdf' ? 'inline' : 'attachment';
+          const isAscii = /^[\x20-\x7E]*$/.test(filename);
+          if (isAscii) {
+            return `${mode}; filename="${filename.replace(/"/g, '\\"')}"`;
+          }
+          // RFC 5987: provide ASCII fallback and UTF-8 encoded name for full compatibility.
+          const ascii = filename.replace(/[^\x20-\x7E]/g, '_');
+          const rfc5987 = encodeURIComponent(filename).replace(/'/g, '%27');
+          return `${mode}; filename="${ascii}"; filename*=UTF-8''${rfc5987}`;
+        })()
       : undefined;
 
     const url = await getSignedUrl(

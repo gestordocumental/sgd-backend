@@ -6,7 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { Credential, CredentialStatus } from './entities/credential.entity';
 
 /** Must match the fixed UUID in user-service SuperAdminSeeder */
-const SUPER_ADMIN_USER_ID = '00000000-0000-0000-0000-000000000001';
+const SUPER_ADMIN_USER_ID = '00000000-0000-4000-8000-000000000001';
 
 @Injectable()
 export class CredentialSeeder implements OnApplicationBootstrap {

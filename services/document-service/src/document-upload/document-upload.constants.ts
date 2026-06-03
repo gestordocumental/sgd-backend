@@ -15,6 +15,10 @@ export const multerFileFilter = (
   file: Express.Multer.File,
   cb: (error: Error | null, acceptFile: boolean) => void,
 ) => {
+  // Multer decodes multipart Content-Disposition filenames as Latin-1 per the HTTP spec,
+  // but browsers actually send UTF-8 bytes. Re-interpret to recover accented characters.
+  file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
   if (ALLOWED_MIMETYPES[file.mimetype]) cb(null, true);
   else cb(new BadRequestException('Format not allowed. Use PDF, DOCX or XLSX.'), false);
 };

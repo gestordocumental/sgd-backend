@@ -94,7 +94,7 @@ describe('WorkflowFilesController', () => {
 
       const result = await ctrl.getSignedUrl('org-1', storageKey);
 
-      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey);
+      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey, undefined, undefined);
       expect(result).toMatchObject({ signedUrl: 'https://signed.url' });
     });
 

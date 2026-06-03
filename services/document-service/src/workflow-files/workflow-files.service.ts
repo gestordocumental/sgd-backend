@@ -50,12 +50,14 @@ export class WorkflowFilesService {
   async getSignedUrl(
     orgId: string,
     storageKey: string,
+    originalName?: string,
+    mimeType?: string,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     const expectedPrefix = `org/${orgId}/workflow-uploads/`;
     if (!storageKey.startsWith(expectedPrefix)) {
       throw new ForbiddenException('El storageKey no pertenece a la organización solicitante');
     }
-    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(storageKey);
+    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(storageKey, originalName, mimeType);
     return { signedUrl: url, expiresAt };
   }
 

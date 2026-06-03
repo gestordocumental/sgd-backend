@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Org, OrgStatus } from './entities/org.entity';
 import { CreateOrgDto } from './dto/create-org.dto';
@@ -164,6 +164,11 @@ export class OrgsService {
     }
 
     if (actorId) this.emitAuditLog('COMPANY_DELETED', org, actorId);
+  }
+
+  async findByIds(ids: string[]): Promise<Org[]> {
+    if (ids.length === 0) return [];
+    return this.orgRepo.findBy({ id: In(ids) });
   }
 
   private async revokeOrgAccess(orgId: string): Promise<void> {

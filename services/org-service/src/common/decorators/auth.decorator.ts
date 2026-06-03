@@ -22,3 +22,10 @@ export const SuperAdminOnly = () =>
  */
 export const OrgMemberOrSuperAdmin = () =>
   SetMetadata<string, AuthMeta>(AUTH_KEY, { orgMember: true });
+
+/**
+ * Requires a valid JWT but imposes no org-membership restriction.
+ * Use for endpoints that need user identity but serve cross-org data.
+ */
+export const AuthOnly = () =>
+  SetMetadata<string, AuthMeta>(AUTH_KEY, {});
