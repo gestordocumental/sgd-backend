@@ -15,7 +15,7 @@ consumers:
 plugins:
   - name: rate-limiting
     config:
-      minute: 100
+      minute: 10000
       policy: local
       fault_tolerant: true
 
@@ -134,7 +134,7 @@ services:
     plugins:
       - name: rate-limiting
         config:
-          minute: 10
+          minute: 1000
           policy: local
           fault_tolerant: true
 
