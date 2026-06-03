@@ -237,7 +237,7 @@ export class UsersService {
     page = 1,
     limit = 20,
     search?: string,
-    status?: 'active' | 'deleted' | 'pending',
+    status?: 'active' | 'inactive' | 'deleted' | 'pending',
   ): Promise<{ data: User[]; total: number }> {
     const safePage  = Math.max(1, page);
     const safeLimit = Math.min(Math.max(1, limit), 500);
@@ -263,6 +263,10 @@ export class UsersService {
         .andWhere('u.registrationStatus = :rs', { rs: 'pending_credentials' });
     } else if (status === 'active') {
       qb.andWhere('u.deletedAt IS NULL')
+        .andWhere('u.isActive = true');
+    } else if (status === 'inactive') {
+      qb.andWhere('u.deletedAt IS NULL')
+        .andWhere('u.isActive = false')
         .andWhere('u.registrationStatus != :rs', { rs: 'pending_credentials' });
     }
 
@@ -429,6 +433,25 @@ export class UsersService {
     const restored = await this.findOne(id);
     this.emitAuditLog({ actorId, action: 'USER_RESTORED', resourceId: id, resourceName: UsersService.userDisplayName(restored) });
     return restored;
+  }
+
+  async disable(id: string, actorId?: string): Promise<User> {
+    const user = await this.findOne(id);
+    user.isActive = false;
+    const saved = await this.usersRepository.save(user);
+    await this.authClientService.disableCredentials(id);
+    await this.authClientService.revokeAllTokens(id);
+    this.emitAuditLog({ actorId, action: 'USER_DISABLED', resourceId: id, resourceName: UsersService.userDisplayName(user) });
+    return saved;
+  }
+
+  async enable(id: string, actorId?: string): Promise<User> {
+    const user = await this.findOne(id);
+    user.isActive = true;
+    const saved = await this.usersRepository.save(user);
+    await this.authClientService.enableCredentials(id);
+    this.emitAuditLog({ actorId, action: 'USER_ENABLED', resourceId: id, resourceName: UsersService.userDisplayName(user) });
+    return saved;
   }
 
   /**
