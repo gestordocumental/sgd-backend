@@ -19,6 +19,7 @@ import { Notification } from './notifications/entities/notification.entity';
         if (!Number.isInteger(dbPort)) {
           throw new Error(`Invalid DB_PORT value: "${config.get('DB_PORT')}"`);
         }
+        const poolSize = Number(config.get<string>('DB_POOL_SIZE') ?? '15');
         return {
           type: 'postgres',
           host:     config.get<string>('DB_HOST'),
@@ -34,6 +35,7 @@ import { Notification } from './notifications/entities/notification.entity';
             parseInt8: true,
             keepAlive: true,
             keepAliveInitialDelayMillis: 10000,
+            max: poolSize,
           },
         };
       },

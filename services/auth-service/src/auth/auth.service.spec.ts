@@ -12,6 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
+import { JwtKeyService } from './jwt-key.service';
 import { Credential, CredentialStatus } from './entities/credential.entity';
 import { UserClientService } from '../user-client/user-client.service';
 import { AppLogger, KafkaProducerService } from '@sgd/common';
@@ -96,6 +97,7 @@ describe('AuthService', () => {
             ),
           },
         },
+        JwtKeyService,
         { provide: 'REDIS_CLIENT', useValue: redis },
         { provide: UserClientService, useValue: userClient },
         { provide: KafkaProducerService, useValue: kafkaProducer },

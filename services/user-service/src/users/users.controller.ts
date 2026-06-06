@@ -159,6 +159,18 @@ export class UsersController {
   }
 
   /**
+   * Returns the caller's own profile. No @RequirePermission needed — a user
+   * can always read their own data regardless of their assigned role.
+   */
+  @ApiOperation({ summary: "Get the logged-in user's own profile" })
+  @ApiResponse({ status: 200, description: 'Caller profile', type: UserResponseDto })
+  @Get('me')
+  async getMe(@JwtPayloadParam() caller: JwtPayload): Promise<UserResponseDto> {
+    if (!caller.sub) throw new UnauthorizedException('Missing sub claim');
+    return UserResponseDto.from(await this.usersService.findOne(caller.sub));
+  }
+
+  /**
    * Returns the caller's own role assignments for their current company (from JWT companyId).
    * No @RequirePermission needed — a user can always read their own roles.
    * Used by the frontend to derive which UI sections to display.

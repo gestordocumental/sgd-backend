@@ -715,10 +715,16 @@ export class UsersService {
     userId: string,
     orgId: string,
   ): Promise<{ module: string; action: string }[]> {
-    const userOrgRoles = await this.userOrgRoleRepository.find({
-      where: { userId, orgId, roleId: Not(IsNull()) },
-      relations: ['role', 'role.permissions'],
-    });
+    // Single query with two JOINs instead of N+1 (one extra query per unique role
+    // when TypeORM loads the ManyToMany relation via a separate round-trip).
+    const userOrgRoles = await this.userOrgRoleRepository
+      .createQueryBuilder('uor')
+      .innerJoinAndSelect('uor.role', 'r')
+      .leftJoinAndSelect('r.permissions', 'p')
+      .where('uor.userId = :userId', { userId })
+      .andWhere('uor.orgId = :orgId', { orgId })
+      .andWhere('uor.roleId IS NOT NULL')
+      .getMany();
 
     const seen = new Set<string>();
     const permissions: { module: string; action: string }[] = [];

@@ -19,6 +19,7 @@ import { Credential, CredentialStatus } from "./entities/credential.entity";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
+import { JwtKeyService } from "./jwt-key.service";
 import { AppLogger, KafkaProducerService, TOPICS, getCorrelationId } from "@sgd/common";
 import { parseDurationToSeconds } from "./utils/parse-duration";
 
@@ -49,6 +50,12 @@ interface TokenOptions {
   permissions?: string[];
 }
 
+interface JwtComplete {
+  header: { kid?: string; [key: string]: unknown };
+  payload: unknown;
+  signature: string;
+}
+
 interface RefreshTokenPayload {
   sub: string;
   email: string;
@@ -75,6 +82,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @Inject("REDIS_CLIENT") private readonly redis: Redis,
     private readonly userClientService: UserClientService,
+    private readonly jwtKeyService: JwtKeyService,
     private readonly kafkaProducer: KafkaProducerService,
     private readonly logger: AppLogger,
   ) {
@@ -202,8 +210,9 @@ export class AuthService {
   async refresh(refreshToken: string) {
     let payload: RefreshTokenPayload;
     try {
+      const kid = this.getTokenKid(refreshToken);
       payload = this.jwtService.verify<RefreshTokenPayload>(refreshToken, {
-        secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
+        secret: this.jwtKeyService.resolveRefreshSecret(kid),
       });
     } catch {
       throw new UnauthorizedException("Invalid or expired refresh token");
@@ -355,11 +364,36 @@ export class AuthService {
       throw new UnauthorizedException("Missing token");
     const token = auth.split(" ")[1];
     try {
+      const kid = this.getTokenKid(token);
       return this.jwtService.verify(token, {
-        secret: this.configService.get<string>("JWT_SECRET"),
+        secret: this.jwtKeyService.resolveAccessSecret(kid),
       });
     } catch {
       throw new UnauthorizedException("Invalid or expired token");
+    }
+  }
+
+  /**
+   * Revokes all sessions for the user that owns the given refresh token.
+   * Best-effort: if the token is already expired or malformed, still attempts
+   * revocation using the decoded sub claim (no signature verification needed).
+   */
+  async logout(refreshToken: string): Promise<void> {
+    let userId: string | undefined;
+    try {
+      const kid = this.getTokenKid(refreshToken);
+      const payload = this.jwtService.verify<RefreshTokenPayload>(refreshToken, {
+        secret: this.jwtKeyService.resolveRefreshSecret(kid),
+      });
+      userId = payload.sub;
+    } catch {
+      // Token is expired or invalid — try to decode without verification
+      // so we can still revoke by userId.
+      const decoded = this.jwtService.decode(refreshToken) as RefreshTokenPayload | null;
+      userId = decoded?.sub;
+    }
+    if (userId) {
+      await this.revokeAllRefreshTokens(userId);
     }
   }
 
@@ -385,8 +419,9 @@ export class AuthService {
   async exitCompanyContext(companyRefreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
     let payload: RefreshTokenPayload;
     try {
+      const kid = this.getTokenKid(companyRefreshToken);
       payload = this.jwtService.verify<RefreshTokenPayload>(companyRefreshToken, {
-        secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
+        secret: this.jwtKeyService.resolveRefreshSecret(kid),
       });
     } catch {
       throw new UnauthorizedException("Invalid or expired company refresh token");
@@ -570,6 +605,10 @@ export class AuthService {
     }
   }
 
+  private getTokenKid(token: string): string | undefined {
+    return (this.jwtService.decode(token, { complete: true }) as JwtComplete | null)?.header?.kid;
+  }
+
   private async generateTokenPair(
     credential: Credential,
     options: TokenOptions = {},
@@ -587,15 +626,17 @@ export class AuthService {
     if (options.permissions?.length) basePayload.permissions = options.permissions;
 
     const accessToken = this.jwtService.sign(basePayload, {
-      secret: this.configService.get<string>("JWT_SECRET"),
+      secret: this.jwtKeyService.accessSecret,
       expiresIn: this.configService.getOrThrow<StringValue>("JWT_EXPIRATION"),
+      keyid: this.jwtKeyService.accessKid,
     });
 
     const refreshToken = this.jwtService.sign(
       { ...basePayload, jti },
       {
-        secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
+        secret: this.jwtKeyService.refreshSecret,
         expiresIn: this.configService.getOrThrow<StringValue>("JWT_REFRESH_EXPIRATION"),
+        keyid: this.jwtKeyService.refreshKid,
       },
     );
 

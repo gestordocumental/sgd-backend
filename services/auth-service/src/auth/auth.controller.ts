@@ -248,6 +248,36 @@ export class AuthController {
     return this.toAccessTokenResponse(await this.authService.refresh(refreshToken), res);
   }
 
+  @ApiOperation({ summary: 'Logout: revoke all sessions and clear auth cookies' })
+  @ApiHeader({ name: CSRF_HEADER_NAME, required: true, description: 'Must echo the sgd_csrf_token cookie value' })
+  @ApiResponse({ status: 204, description: 'Logged out successfully' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid CSRF token' })
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async logout(
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Headers(CSRF_HEADER_NAME) csrfHeader: string | undefined,
+    @Res({ passthrough: true }) res?: Response,
+  ): Promise<void> {
+    this.validateCsrfToken(cookieHeader, csrfHeader);
+
+    try {
+      const refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
+      await this.authService.logout(refreshToken);
+    } catch {
+      // Best effort — clear cookies regardless of token state
+    }
+
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+    const base = {
+      secure: isProduction,
+      sameSite: (isProduction ? 'none' : 'strict') as 'none' | 'strict',
+      maxAge: 0,
+    };
+    res?.clearCookie(REFRESH_COOKIE_NAME, { ...base, path: '/api/v1/auth', httpOnly: true });
+    res?.clearCookie(CSRF_COOKIE_NAME, { ...base, path: '/', httpOnly: false });
+  }
+
   @ApiOperation({ summary: 'Request a password reset email' })
   @ApiBody({ type: ForgotPasswordDto })
   @ApiResponse({ status: 200, description: 'Always returns ok:true to avoid email enumeration' })

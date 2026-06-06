@@ -23,6 +23,11 @@
     }
   },
   "dependencies": {
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/semantic-conventions": "^1.30.0",
     "@nestjs/common": "^11.1.21",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.1.21",

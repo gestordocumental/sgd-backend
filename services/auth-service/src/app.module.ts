@@ -30,22 +30,26 @@ import { AppLogger, CorrelationMiddleware, MetricsModule, JwtGuard } from '@sgd/
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get<string>('DB_HOST'),
-        port: config.get<number>('DB_PORT'),
-        username: config.get<string>('DB_USERNAME'),
-        password: config.get<string>('DB_PASSWORD'),
-        database: config.get<string>('DB_NAME'),
-        entities: [Credential],
-        synchronize: false,
-        retryAttempts: 5,
-        retryDelay: 3000,
-        extra: {
-          keepAlive: true,
-          keepAliveInitialDelayMillis: 10000,
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const poolSize = Number(config.get<string>('DB_POOL_SIZE') ?? '15');
+        return {
+          type: 'postgres',
+          host: config.get<string>('DB_HOST'),
+          port: config.get<number>('DB_PORT'),
+          username: config.get<string>('DB_USERNAME'),
+          password: config.get<string>('DB_PASSWORD'),
+          database: config.get<string>('DB_NAME'),
+          entities: [Credential],
+          synchronize: false,
+          retryAttempts: 5,
+          retryDelay: 3000,
+          extra: {
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000,
+            max: poolSize,
+          },
+        };
+      },
     }),
 
     RedisModule,

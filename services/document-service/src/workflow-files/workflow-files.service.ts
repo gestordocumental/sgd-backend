@@ -57,7 +57,7 @@ export class WorkflowFilesService {
     if (!storageKey.startsWith(expectedPrefix)) {
       throw new ForbiddenException('El storageKey no pertenece a la organización solicitante');
     }
-    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(storageKey, originalName, mimeType);
+    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(storageKey, originalName, mimeType, true);
     return { signedUrl: url, expiresAt };
   }
 

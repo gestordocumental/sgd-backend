@@ -1,3 +1,6 @@
+// Tracing
+export { initTracing } from './tracing/tracing';
+
 // Correlation
 export { correlationStorage, getClientIp, getCorrelationId } from './correlation/correlation.context';
 export type { CorrelationStore } from './correlation/correlation.context';

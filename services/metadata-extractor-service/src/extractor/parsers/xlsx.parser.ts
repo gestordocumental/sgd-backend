@@ -64,7 +64,9 @@ export async function parseXlsxStructured(buffer: Buffer): Promise<XlsxStructure
   });
   const text = lines.join('\n');
 
-  // Collect unique non-empty cell values from first 10 rows
+  // Collect unique non-empty cell values from first 10 rows.
+  // Skip cells whose value looks like a file path or filename — these come from
+  // cached CELL("filename") formula results and must never be used as the title.
   const seen   = new Set<string>();
   const header: string[] = [];
   let   rowIdx = 0;
@@ -74,7 +76,7 @@ export async function parseXlsxStructured(buffer: Buffer): Promise<XlsxStructure
     rowIdx++;
     row.eachCell((cell: any) => {
       const val = cellText(cell).trim();
-      if (val.length >= 2 && !seen.has(val)) {
+      if (val.length >= 2 && !seen.has(val) && !looksLikeFilePath(val)) {
         seen.add(val);
         header.push(val);
       }
@@ -133,5 +135,16 @@ function looksLikeCompany(text: string): boolean {
   if (/\b(s\.?\s*a\.?\s*s?\.?|ltda\.?|corp\.?|inc\.?|cia\.?|grupo|holding)\b/i.test(text)) return true;
   const words = text.trim().split(/\s+/);
   if (words.length <= 2 && text === text.toUpperCase() && text.length < 30) return true;
+  return false;
+}
+
+/**
+ * Returns true when the cell value looks like a file path or filename.
+ * Catches results from Excel's CELL("filename") formula which caches the full
+ * file path (e.g. "C:\Docs\Formato de requisición.xlsx") or just the filename.
+ */
+function looksLikeFilePath(text: string): boolean {
+  if (/\.(xlsx?|docx?|pdf|csv|txt)$/i.test(text)) return true;
+  if (/[\\\/]/.test(text)) return true;
   return false;
 }

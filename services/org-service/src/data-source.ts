@@ -15,4 +15,8 @@ export const AppDataSource = new DataSource({
   entities: [Org, Departamento, Area, Cargo],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
+  // 'each' envuelve cada migración en su propia transacción y permite que
+  // migraciones individuales declaren transaction=false (necesario para
+  // CREATE INDEX CONCURRENTLY, que no puede correr dentro de una transacción).
+  migrationsTransactionMode: 'each',
 });

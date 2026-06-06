@@ -13,11 +13,28 @@ consumers:
 
 # ── Plugins globales ────────────────────────────────────────────────────────
 plugins:
+  # Capa 1 — por IP: protección contra DDoS y scrapers no autenticados.
   - name: rate-limiting
     config:
       minute: 10000
+      limit_by: ip
       policy: local
       fault_tolerant: true
+      hide_client_headers: false
+
+  # Capa 2 — por token JWT (header Authorization): protege contra abuso de un
+  # usuario autenticado sin importar cuántas IPs use.
+  # Cada access token único tiene su propio bucket de ${USER_RATE_LIMIT} req/min.
+  # Rutas públicas (sin Authorization) comparten un bucket vacío, pero ya están
+  # cubiertas por sus propios límites de servicio o por la capa IP.
+  - name: rate-limiting
+    config:
+      minute: ${USER_RATE_LIMIT}
+      limit_by: header
+      header_name: Authorization
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
 
   - name: cors
     config:

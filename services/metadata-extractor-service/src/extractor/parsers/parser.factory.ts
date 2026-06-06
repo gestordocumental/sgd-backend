@@ -1,4 +1,4 @@
-import { parsePdf } from './pdf.parser';
+import { parsePdf, parsePdfFull } from './pdf.parser';
 import { parseDocx, parseDocxStructured, type DocxStructure } from './docx.parser';
 import { parseXlsx, parseXlsxStructured } from './xlsx.parser';
 
@@ -55,7 +55,7 @@ export async function extractStructured(buffer: Buffer, mimeType: string): Promi
     return parseXlsxStructured(buffer);
   }
 
-  // PDF — no table structure available
-  const text = await parsePdf(buffer);
-  return { text, titleCell: null, leftCell: null, rightCell: null };
+  // PDF — use metadata title when available, otherwise fall through to text heuristics
+  const { text, title } = await parsePdfFull(buffer);
+  return { text, titleCell: title, leftCell: null, rightCell: null };
 }
