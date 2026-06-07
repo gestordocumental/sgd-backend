@@ -20,7 +20,7 @@ import { RedisModule } from './common/redis/redis.module';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const dbPortRaw = config.get<string>('DB_PORT');
+        const dbPortRaw = config.get<string>('DB_PORT') ?? '5432';
         const dbPort = Number(dbPortRaw);
         if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
           throw new Error(`Invalid DB_PORT value: "${dbPortRaw}"`);

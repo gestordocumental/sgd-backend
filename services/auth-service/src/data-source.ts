@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import { Credential } from './auth/entities/credential.entity';
 
 const dbPortRaw = process.env.DB_PORT ?? '5432';
-const dbPort = Number.parseInt(dbPortRaw, 10);
+const dbPort = Number(dbPortRaw);
 if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
   throw new Error(`Invalid DB_PORT: "${dbPortRaw}"`);
 }

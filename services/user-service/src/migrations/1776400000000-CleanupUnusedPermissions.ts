@@ -12,6 +12,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class CleanupUnusedPermissions1776400000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Back up existing role assignments so down() can restore them exactly.
+    // The backup table intentionally persists after up() — it is dropped by down().
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS migration_177640_role_permissions_backup (
         role_id uuid NOT NULL,

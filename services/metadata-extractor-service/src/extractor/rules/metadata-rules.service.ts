@@ -111,7 +111,7 @@ export class MetadataRulesService {
     // Pass 1 — explicit label ("Nombre del documento: Política de Seguridad")
     for (const line of lines) {
       const m = line.match(
-        /(?:nombre(?:\s+del?\s+documento)?|t[ií]tulo|title)\s*[:-]\s*(.{5,})/i,
+        /(?:nombre(?:\s+del?\s+documento)?|t[ií]tulo|title)\s*[:-]\s*(.{5,150})/i,
       );
       if (m?.[1]) return m[1].trim().substring(0, 255);
     }
