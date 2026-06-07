@@ -23,6 +23,7 @@ import { Redis } from 'ioredis';
 import { ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { AuthService } from './auth.service';
+import { JwtKeyService } from './jwt-key.service';
 import { Credential } from './entities/credential.entity';
 import { AppLogger, KafkaProducerService } from '@sgd/common';
 import { UserClientService } from '../user-client/user-client.service';
@@ -74,6 +75,7 @@ describe('AuthService — integration', () => {
       ],
       providers: [
         AuthService,
+        JwtKeyService,
         {
           provide: 'REDIS_CLIENT',
           useValue: redis,
