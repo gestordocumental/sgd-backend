@@ -3,7 +3,8 @@ import { extractText, extractStructured } from './parser.factory';
 // ── Module-level mocks ────────────────────────────────────────────────────────
 
 jest.mock('./pdf.parser', () => ({
-  parsePdf: jest.fn().mockResolvedValue('PDF text content'),
+  parsePdf:     jest.fn().mockResolvedValue('PDF text content'),
+  parsePdfFull: jest.fn().mockResolvedValue({ text: 'PDF text content', title: null }),
 }));
 
 jest.mock('./docx.parser', () => ({
@@ -16,7 +17,7 @@ jest.mock('./docx.parser', () => ({
   }),
 }));
 
-import { parsePdf } from './pdf.parser';
+import { parsePdf, parsePdfFull } from './pdf.parser';
 import { parseDocx, parseDocxStructured } from './docx.parser';
 
 const PDF_MIME  = 'application/pdf';
@@ -81,7 +82,7 @@ describe('extractStructured()', () => {
 
   it('returns flat structure for PDF (no table cells available)', async () => {
     const result = await extractStructured(buf, PDF_MIME);
-    expect(parsePdf).toHaveBeenCalledWith(buf);
+    expect(parsePdfFull).toHaveBeenCalledWith(buf);
     expect(result).toEqual({
       text:      'PDF text content',
       titleCell: null,

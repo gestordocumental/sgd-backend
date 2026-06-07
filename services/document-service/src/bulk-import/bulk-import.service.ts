@@ -146,6 +146,11 @@ export class BulkImportService {
     const worksheet = workbook.worksheets[0];
     if (!worksheet) throw new BadRequestException('El archivo Excel no tiene hojas de cálculo');
 
+    // rowCount includes the header; reject before iterating all rows when clearly over the limit.
+    if (worksheet.rowCount - 1 > MAX_ROWS) {
+      throw new BadRequestException(`El archivo excede el máximo de ${MAX_ROWS} filas`);
+    }
+
     const rows: ExcelRow[] = [];
 
     worksheet.eachRow((row, rowNumber) => {

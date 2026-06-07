@@ -264,8 +264,11 @@ export class AuthController {
     try {
       const refreshToken = this.getRefreshTokenFromCookie(cookieHeader);
       await this.authService.logout(refreshToken);
-    } catch {
-      // Best effort — clear cookies regardless of token state
+    } catch (err) {
+      if (!(err instanceof UnauthorizedException)) {
+        throw err;
+      }
+      // Best effort solo para token/cookie ausente o inválido.
     }
 
     const isProduction = this.configService.get<string>('NODE_ENV') === 'production';

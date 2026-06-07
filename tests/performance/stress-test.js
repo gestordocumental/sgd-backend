@@ -60,6 +60,7 @@ export function setup() {
   console.log(`[setup] Usando orgId: ${orgId}`);
 
   const users = [];
+  const cleanupUsers = [];
 
   for (let i = 0; i < N_USERS; i++) {
     const email = `k6test${String(i).padStart(3, '0')}@sgd.local`;
@@ -89,6 +90,8 @@ export function setup() {
       console.warn(`[setup] Respuesta inesperada al crear ${email}: ${createRes.body}`);
       continue;
     }
+    // Registrar para cleanup inmediatamente — los continues posteriores no deben dejar al usuario sin borrar
+    cleanupUsers.push({ userId, email });
 
     // 2. Espera a que Kafka procese la creación de credenciales en auth-service
     sleep(4);
@@ -176,9 +179,9 @@ export function setup() {
     throw new Error('[setup] No se creó ningún usuario de prueba. Abortando.');
   }
 
-  console.log(`[setup] ${users.length} usuarios de prueba creados y autenticados.`);
+  console.log(`[setup] ${users.length} usuarios de prueba autenticados (${cleanupUsers.length} creados en total).`);
   // orgId se propaga al default() para que listOrgs use el endpoint correcto
-  return { users, orgId };
+  return { users, cleanupUsers, orgId };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,8 +213,9 @@ export default function (data) {
 export function teardown(data) {
   const adminToken = adminLogin();
 
+  const toDelete = data.cleanupUsers ?? data.users;
   let deleted = 0;
-  for (const { userId, email } of data.users) {
+  for (const { userId, email } of toDelete) {
     let res;
     // Hasta 3 intentos con backoff de 65s si el rate limiter sigue activo
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -232,10 +236,8 @@ export function teardown(data) {
       }
 
       if (res.status === 429) {
-        // 15s es suficiente: el test ya terminó y el rate limiter global (10k/min) se resetea en 60s.
-        // El backoff largo (65s) era para el login durante el setup, no para deletes en teardown.
-        console.log(`[teardown] Rate limit al borrar ${email} (intento ${attempt}/3). Esperando 15s...`);
-        sleep(15);
+        console.log(`[teardown] Rate limit al borrar ${email} (intento ${attempt}/3). Esperando 65s...`);
+        sleep(65);
         continue;
       }
 
@@ -246,7 +248,7 @@ export function teardown(data) {
     sleep(0.2); // pausa entre deletes para no acumular rate limit
   }
 
-  console.log(`[teardown] ${deleted}/${data.users.length} usuarios de prueba eliminados.`);
+  console.log(`[teardown] ${deleted}/${toDelete.length} usuarios de prueba eliminados.`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

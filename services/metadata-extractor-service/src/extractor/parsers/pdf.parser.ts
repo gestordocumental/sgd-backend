@@ -34,7 +34,7 @@ export async function parsePdfFull(buffer: Buffer): Promise<{ text: string; titl
 
     // Discard if the metadata title is a filename or file path.
     // PDFs exported from Excel inherit the .xlsx filename as the PDF Title property.
-    if (/\.(xlsx?|docx?|pdf|csv|txt)$/i.test(title) || /[\\\/]/.test(title)) {
+    if (/\.(xlsx?|docx?|pdf|csv|txt)$/i.test(title) || /[/\\]/.test(title)) {
       return { text: data.text ?? '', title: null };
     }
 

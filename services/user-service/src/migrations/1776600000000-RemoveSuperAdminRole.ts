@@ -55,6 +55,30 @@ export class RemoveSuperAdminRole1776600000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    // Re-add PLATFORM to the enum if up() removed it
+    const enumHasPlatform: { count: string }[] = await queryRunner.query(`
+      SELECT COUNT(*)::int AS count
+      FROM pg_enum e
+      JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'permissions_module_enum'
+        AND e.enumlabel = 'PLATFORM'
+    `);
+
+    if (Number(enumHasPlatform[0]?.count) === 0) {
+      await queryRunner.query(`ALTER TYPE permissions_module_enum RENAME TO permissions_module_enum_old`);
+      await queryRunner.query(`
+        CREATE TYPE permissions_module_enum AS ENUM (
+          'DOCUMENTS','WORKFLOWS','USERS','ORGS','ORG_STRUCTURE','AUDIT','PLATFORM'
+        )
+      `);
+      await queryRunner.query(`
+        ALTER TABLE permissions
+          ALTER COLUMN module TYPE permissions_module_enum
+          USING module::text::permissions_module_enum
+      `);
+      await queryRunner.query(`DROP TYPE permissions_module_enum_old`);
+    }
+
     // Restore PLATFORM:MANAGE permission
     await queryRunner.query(`
       INSERT INTO permissions (id, module, action, description)

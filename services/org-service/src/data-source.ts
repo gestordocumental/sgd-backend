@@ -5,10 +5,16 @@ import { Departamento } from './org-structure/entities/departamento.entity';
 import { Area } from './org-structure/entities/area.entity';
 import { Cargo } from './org-structure/entities/cargo.entity';
 
+const dbPortRaw = process.env.DB_PORT ?? '5432';
+const dbPort = Number.parseInt(dbPortRaw, 10);
+if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
+  throw new Error(`Invalid DB_PORT: "${dbPortRaw}"`);
+}
+
 export const AppDataSource = new DataSource({
   type: 'postgres',
   host: process.env.DB_HOST ?? 'localhost',
-  port: Number(process.env.DB_PORT ?? 5432),
+  port: dbPort,
   username: process.env.DB_USERNAME ?? 'postgres',
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME ?? 'org_db',

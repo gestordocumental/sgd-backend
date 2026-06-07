@@ -145,6 +145,6 @@ function looksLikeCompany(text: string): boolean {
  */
 function looksLikeFilePath(text: string): boolean {
   if (/\.(xlsx?|docx?|pdf|csv|txt)$/i.test(text)) return true;
-  if (/[\\\/]/.test(text)) return true;
+  if (/[/\\]/.test(text)) return true;
   return false;
 }

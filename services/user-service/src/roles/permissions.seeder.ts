@@ -13,6 +13,13 @@ const PERMISSIONS_CATALOG: {
   action: PermissionAction;
   description: string;
 }[] = [
+  // DOCUMENTS
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.READ,     description: 'View documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE,    description: 'Create and edit documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DELETE,   description: 'Delete documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.UPLOAD,   description: 'Upload documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DOWNLOAD, description: 'Download documents' },
+
   // WORKFLOWS
   { module: PermissionModule.WORKFLOWS, action: PermissionAction.READ,    description: 'View workflows' },
   { module: PermissionModule.WORKFLOWS, action: PermissionAction.WRITE,   description: 'Create and edit workflows' },

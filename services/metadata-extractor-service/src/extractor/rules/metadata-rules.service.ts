@@ -111,7 +111,7 @@ export class MetadataRulesService {
     // Pass 1 — explicit label ("Nombre del documento: Política de Seguridad")
     for (const line of lines) {
       const m = line.match(
-        /(?:nombre(?:\s+del?\s+documento)?|t[ií]tulo|title)\s*[:\-]\s*(.{5,})/i,
+        /(?:nombre(?:\s+del?\s+documento)?|t[ií]tulo|title)\s*[:-]\s*(.{5,})/i,
       );
       if (m?.[1]) return m[1].trim().substring(0, 255);
     }
@@ -150,9 +150,9 @@ export class MetadataRulesService {
     // Standalone document code: "AD-C-F-002"
     if (/^[A-ZÁÉÍÓÚÑ]{1,8}(?:-[A-ZÁÉÍÓÚÑ0-9]{1,8}){1,6}$/.test(line)) return true;
     // Labeled metadata fields: "Código: …", "Versión: …", "Fecha: …"
-    if (/^(?:c[oó]digo|versi[oó]n|version|fecha|date|rev(?:isi[oó]n)?|elabor|aprob|vigencia)\s*[:\-]/i.test(line)) return true;
+    if (/^(?:c[oó]digo|versi[oó]n|version|fecha|date|rev(?:isi[oó]n)?|elabor|aprob|vigencia)\s*[:-]/i.test(line)) return true;
     // Raw date value: "16/04/2026", "2026-04-16"
-    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(line)) return true;
+    if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(line)) return true;
     // Version-only line: "V10", "v1.0", "10"
     if (/^v\.?\s*\d+(?:[.,]\d+)?$/i.test(line) || /^\d+(?:[.,]\d+)?$/.test(line)) return true;
     // Page indicators: "Página 1", "1 de 5"
@@ -204,7 +204,7 @@ export class MetadataRulesService {
     const tokens = line.split(/\s+/).filter(Boolean);
     if (
       tokens.length >= 3 &&
-      tokens.every((t) => t === t.toUpperCase() && /^[A-ZÁÉÍÓÚÑ\/\d]{2,}$/.test(t))
+      tokens.every((t) => t === t.toUpperCase() && /^[A-ZÁÉÍÓÚÑ/\d]{2,}$/.test(t))
     ) {
       return true;
     }

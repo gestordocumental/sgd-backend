@@ -1,4 +1,4 @@
-import { Injectable, Inject, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Inject, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ReplaySubject, Observable, fromEvent } from 'rxjs';
 import { takeUntil, take } from 'rxjs/operators';
 import { MessageEvent } from '@nestjs/common';
@@ -27,6 +27,7 @@ interface SsePayload {
  */
 @Injectable()
 export class SseService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(SseService.name);
   private readonly clients = new Map<string, Set<ReplaySubject<MessageEvent>>>();
 
   constructor(
@@ -83,7 +84,11 @@ export class SseService implements OnModuleInit, OnModuleDestroy {
     const payload: SsePayload = { data, eventType };
     this.publisher
       .publish(`${CHANNEL_PREFIX}${userId}`, JSON.stringify(payload))
-      .catch(() => {}); // fire-and-forget; Redis errors don't break request flow
+      .catch((err) => {
+        this.logger.warn(
+          `Redis publish failed for user ${userId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
   }
 
   get connectedUsers(): number {

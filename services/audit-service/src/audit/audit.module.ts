@@ -23,12 +23,17 @@ export { ES_WRITE_CLIENT, ES_READ_CLIENT };
  * In local dev both roles can share the elastic superuser.
  */
 function buildEsClient(config: ConfigService, role: 'WRITE' | 'READ'): Client {
+  const norm = (v?: string): string | undefined => {
+    const t = v?.trim();
+    return t ? t : undefined;
+  };
+
   const username =
-    config.get<string>(`ELASTICSEARCH_${role}_USERNAME`) ??
-    config.get<string>('ELASTICSEARCH_USERNAME');
+    norm(config.get<string>(`ELASTICSEARCH_${role}_USERNAME`)) ??
+    norm(config.get<string>('ELASTICSEARCH_USERNAME'));
   const password =
-    config.get<string>(`ELASTICSEARCH_${role}_PASSWORD`) ??
-    config.get<string>('ELASTICSEARCH_PASSWORD');
+    norm(config.get<string>(`ELASTICSEARCH_${role}_PASSWORD`)) ??
+    norm(config.get<string>('ELASTICSEARCH_PASSWORD'));
 
   if (Boolean(username) !== Boolean(password)) {
     throw new Error(
