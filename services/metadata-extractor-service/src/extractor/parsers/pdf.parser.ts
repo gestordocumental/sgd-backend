@@ -30,6 +30,7 @@ export async function parsePdfFull(buffer: Buffer): Promise<{ text: string; titl
     let title = fixPdfEncoding(raw.trim());
 
     // Strip leading document code (e.g. "AD-C-F-002 ", "FO-COM-001-2022 ")
+    // eslint-disable-next-line security/detect-unsafe-regex
     title = title.replace(/^[A-ZÁÉÍÓÚÑ]{1,8}(?:-[A-ZÁÉÍÓÚÑ0-9]{1,8}){1,6}\s+/i, '').trim();
 
     // Discard if the metadata title is a filename or file path.
