@@ -15,6 +15,7 @@ consumers:
 plugins:
   # Capa 1 — por IP: protección contra DDoS y scrapers no autenticados.
   - name: rate-limiting
+    id: a1b2c3d4-0001-0000-0000-000000000001
     config:
       minute: 10000
       limit_by: ip
@@ -28,6 +29,7 @@ plugins:
   # Rutas públicas (sin Authorization) comparten un bucket vacío, pero ya están
   # cubiertas por sus propios límites de servicio o por la capa IP.
   - name: rate-limiting
+    id: a1b2c3d4-0002-0000-0000-000000000002
     config:
       minute: ${USER_RATE_LIMIT}
       limit_by: header

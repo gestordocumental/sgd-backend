@@ -20,17 +20,23 @@ export class RemoveSuperAdminRole1776600000000 implements MigrationInterface {
       WHERE role_id = (SELECT id FROM roles WHERE name = 'SUPER_ADMIN' AND org_id IS NULL)
     `);
 
-    // 2. Remove PLATFORM:MANAGE permission (may already be gone in production)
+    // 2. Remove any user–role assignments pointing at SUPER_ADMIN
+    await queryRunner.query(`
+      DELETE FROM user_org_roles
+      WHERE role_id = (SELECT id FROM roles WHERE name = 'SUPER_ADMIN' AND org_id IS NULL)
+    `);
+
+    // 3. Remove PLATFORM:MANAGE permission (may already be gone in production)
     await queryRunner.query(`
       DELETE FROM permissions WHERE module = 'PLATFORM' AND action = 'MANAGE'
     `);
 
-    // 3. Remove the SUPER_ADMIN role row
+    // 4. Remove the SUPER_ADMIN role row
     await queryRunner.query(`
       DELETE FROM roles WHERE name = 'SUPER_ADMIN' AND org_id IS NULL
     `);
 
-    // 4. Drop PLATFORM from the module enum if it still exists (dev environments)
+    // 5. Drop PLATFORM from the module enum if it still exists (dev environments)
     const enumExists: { count: string }[] = await queryRunner.query(`
       SELECT COUNT(*)::int AS count
       FROM pg_enum e
