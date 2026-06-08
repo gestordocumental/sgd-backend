@@ -20,17 +20,23 @@ export class RemoveSuperAdminRole1776600000000 implements MigrationInterface {
       WHERE role_id = (SELECT id FROM roles WHERE name = 'SUPER_ADMIN' AND org_id IS NULL)
     `);
 
-    // 2. Remove PLATFORM:MANAGE permission (may already be gone in production)
+    // 2. Remove any user–role assignments pointing at SUPER_ADMIN
+    await queryRunner.query(`
+      DELETE FROM user_org_roles
+      WHERE role_id = (SELECT id FROM roles WHERE name = 'SUPER_ADMIN' AND org_id IS NULL)
+    `);
+
+    // 3. Remove PLATFORM:MANAGE permission (may already be gone in production)
     await queryRunner.query(`
       DELETE FROM permissions WHERE module = 'PLATFORM' AND action = 'MANAGE'
     `);
 
-    // 3. Remove the SUPER_ADMIN role row
+    // 4. Remove the SUPER_ADMIN role row
     await queryRunner.query(`
       DELETE FROM roles WHERE name = 'SUPER_ADMIN' AND org_id IS NULL
     `);
 
-    // 4. Drop PLATFORM from the module enum if it still exists (dev environments)
+    // 5. Drop PLATFORM from the module enum if it still exists (dev environments)
     const enumExists: { count: string }[] = await queryRunner.query(`
       SELECT COUNT(*)::int AS count
       FROM pg_enum e
@@ -92,6 +98,11 @@ export class RemoveSuperAdminRole1776600000000 implements MigrationInterface {
       VALUES (gen_random_uuid(), 'SUPER_ADMIN', 'SYSTEM', 'Full platform access', true, NULL, NOW())
       ON CONFLICT (name, org_id) DO NOTHING
     `);
+
+    // user_org_roles assignments are NOT restored: the original data was
+    // discarded by up() and cannot be reconstructed. This is intentional —
+    // super-admin capability is controlled by User.isSuperAdmin, not by
+    // role assignments. No user loses elevated access by omitting this.
 
     // Re-assign all permissions to SUPER_ADMIN
     await queryRunner.query(`

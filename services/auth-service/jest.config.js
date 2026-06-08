@@ -12,6 +12,8 @@ module.exports = {
   moduleNameMapper: {
     '^@sgd/common$': '<rootDir>/../../../packages/common/src/index.ts',
     '^@sgd/common/(.*)$': '<rootDir>/../../../packages/common/src/$1',
+    '^@opentelemetry/auto-instrumentations-node$': '<rootDir>/__mocks__/otel-auto-instrumentations-noop.js',
+    '^@opentelemetry/sdk-node$': '<rootDir>/__mocks__/otel-sdk-noop.js',
   },
   moduleDirectories: [
     'node_modules',
