@@ -29,7 +29,6 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   registrationStatus: overrides.registrationStatus ?? RegistrationStatus.ACTIVE,
   avatarUrl: null,
   isSuperAdmin: false,
-  twoFactorEnabled: false,
   orgRoles: [],
   createdAt: new Date('2024-01-01'),
   updatedAt: new Date('2024-01-01'),
@@ -181,21 +180,21 @@ describe('UsersController', () => {
   describe('findAll', () => {
     it('returns a paginated response with UserResponseDto items', async () => {
       const users = [makeUser(), makeUser({ id: 'user-uuid-2', email: 'other@example.com' })];
-      usersService.findAll.mockResolvedValue({ data: users, total: users.length });
+      usersService.findAll.mockResolvedValue({ data: users, nextCursor: null, hasMore: false });
 
-      const result = await controller.findAll(1, 100);
+      const result = await controller.findAll(100);
 
       expect(result.data).toHaveLength(2);
-      expect(result.total).toBe(2);
+      expect(result.hasMore).toBe(false);
       result.data.forEach((r) => expect(r).toBeInstanceOf(UserResponseDto));
     });
 
     it('returns an empty data array when there are no users', async () => {
-      usersService.findAll.mockResolvedValue({ data: [], total: 0 });
+      usersService.findAll.mockResolvedValue({ data: [], nextCursor: null, hasMore: false });
 
-      const result = await controller.findAll(1, 100);
+      const result = await controller.findAll(100);
       expect(result.data).toEqual([]);
-      expect(result.total).toBe(0);
+      expect(result.hasMore).toBe(false);
     });
   });
 
@@ -222,29 +221,30 @@ describe('UsersController', () => {
   // ─── GET /by-org/:orgId ───────────────────────────────────────────────────
 
   describe('findByOrg', () => {
-    it('returns paginated { data, total } of UserWithOrgRolesDto for the given orgId', async () => {
+    it('returns cursor-paginated UserWithOrgRolesDto items for the given orgId', async () => {
       const user = makeUser();
       const roles = [{ roleId: 'role-uuid-1', roleName: 'ADMIN' }];
 
-      usersService.findByOrg.mockResolvedValue({ data: [{ user, roles, orgRemovedAt: null, isOptionalReviewer: false }], total: 1 });
+      usersService.findByOrg.mockResolvedValue({ data: [{ user, roles, orgRemovedAt: null, isOptionalReviewer: false }], nextCursor: null, hasMore: false });
 
-      const result = await controller.findByOrg('org-uuid-1', 1, 500);
+      const result = await controller.findByOrg('org-uuid-1', 500);
 
-      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-1', 1, 500);
-      expect(result.total).toBe(1);
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-1', 500, undefined);
+      expect(result.hasMore).toBe(false);
       expect(result.data).toHaveLength(1);
       result.data.forEach((r) => expect(r).toBeInstanceOf(UserWithOrgRolesDto));
       expect(result.data[0].roles).toEqual(roles);
       expect(result.data[0].isOptionalReviewer).toBe(false);
     });
 
-    it('returns empty data array and total=0 when no users belong to the org', async () => {
-      usersService.findByOrg.mockResolvedValue({ data: [], total: 0 });
+    it('returns empty data array when no users belong to the org', async () => {
+      usersService.findByOrg.mockResolvedValue({ data: [], nextCursor: null, hasMore: false });
 
-      const result = await controller.findByOrg('org-uuid-empty', 1, 500);
+      const result = await controller.findByOrg('org-uuid-empty', 500);
 
-      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-empty', 1, 500);
-      expect(result).toEqual({ data: [], total: 0 });
+      expect(usersService.findByOrg).toHaveBeenCalledWith('org-uuid-empty', 500, undefined);
+      expect(result.data).toEqual([]);
+      expect(result.hasMore).toBe(false);
     });
   });
 
@@ -442,12 +442,12 @@ describe('UsersController', () => {
   describe('findAllSuperAdmin', () => {
     it('returns paginated UserResponseDto items for super admins', async () => {
       const users = [makeUser({ isSuperAdmin: true })];
-      usersService.findAllSuperAdmin.mockResolvedValue({ data: users, total: 1 });
+      usersService.findAllSuperAdmin.mockResolvedValue({ data: users, nextCursor: null, hasMore: false });
 
-      const result = await controller.findAllSuperAdmin(1, 20);
+      const result = await controller.findAllSuperAdmin(20);
 
-      expect(usersService.findAllSuperAdmin).toHaveBeenCalledWith(1, 20, undefined, undefined);
-      expect(result.total).toBe(1);
+      expect(usersService.findAllSuperAdmin).toHaveBeenCalledWith(20, undefined, undefined, undefined);
+      expect(result.hasMore).toBe(false);
       expect(result.data).toHaveLength(1);
       expect(result.data[0]).toBeInstanceOf(UserResponseDto);
     });

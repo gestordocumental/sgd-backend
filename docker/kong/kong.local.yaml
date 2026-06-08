@@ -1,5 +1,4 @@
 _format_version: "3.0"
-_transform: true
 
 # ── Consumidor SGD ──────────────────────────────────────────────────────────
 # KONG_JWT_SECRET debe coincidir con JWT_SECRET de auth-service (.env)
@@ -14,6 +13,7 @@ consumers:
 plugins:
   # Capa 1 — por IP
   - name: rate-limiting
+    id: b1b2c3d4-0001-0000-0000-000000000001
     config:
       minute: 10000
       limit_by: ip
@@ -23,6 +23,7 @@ plugins:
 
   # Capa 2 — por token JWT (header Authorization)
   - name: rate-limiting
+    id: b1b2c3d4-0002-0000-0000-000000000002
     config:
       minute: 1000
       limit_by: header
@@ -32,6 +33,7 @@ plugins:
       hide_client_headers: false
 
   - name: cors
+    id: b1b2c3d4-0003-0000-0000-000000000003
     config:
       # Listar orígenes explícitos — el estándar CORS prohíbe credentials: true con origins: "*".
       # En dev local el frontend corre en :5173 (Vite dev) o :4173 (Vite preview).
@@ -45,6 +47,7 @@ plugins:
       max_age: 3600
 
   - name: response-transformer
+    id: b1b2c3d4-0004-0000-0000-000000000004
     config:
       add:
         headers:
@@ -52,6 +55,7 @@ plugins:
           - "X-Frame-Options:DENY"
           - "X-XSS-Protection:0"
           - "Referrer-Policy:strict-origin-when-cross-origin"
+          - "Content-Security-Policy:default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 
 # ── Servicios y Rutas ───────────────────────────────────────────────────────
 # Los microservicios corren en el host con npm run start:dev.
@@ -76,6 +80,7 @@ services:
         strip_path: false
     plugins:
       - name: request-termination
+        id: b1b2c3d4-0005-0000-0000-000000000005
         config:
           status_code: 200
           message: "OK"
@@ -137,6 +142,7 @@ services:
         strip_path: false
     plugins:
       - name: rate-limiting
+        id: b1b2c3d4-0006-0000-0000-000000000006
         config:
           minute: 10
           policy: local
@@ -153,6 +159,7 @@ services:
         strip_path: false
     plugins:
       - name: rate-limiting
+        id: b1b2c3d4-0007-0000-0000-000000000007
         config:
           minute: 10
           policy: local
@@ -178,6 +185,7 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0008-0000-0000-000000000008
 
   # ── org-service ────────────────────────────────────────────────────────
   - name: org-service
@@ -189,6 +197,7 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0009-0000-0000-000000000009
 
   # ── user-service: avatares estáticos (sin JWT) ─────────────────────────
   - name: user-avatars
@@ -222,6 +231,7 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0010-0000-0000-000000000010
 
   # ── document-service (con JWT) ─────────────────────────────────────────
   - name: document-service
@@ -233,6 +243,7 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0011-0000-0000-000000000011
 
   # ── workflow-service (con JWT) ─────────────────────────────────────────
   - name: workflow-service
@@ -244,6 +255,7 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0012-0000-0000-000000000012
 
   # ── notification-service: ticket efímero para SSE (JWT en header) ──────
   # El cliente obtiene un ticket de corta vida (30s, un solo uso) antes de
@@ -259,6 +271,7 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0013-0000-0000-000000000013
 
   # ── notification-service: SSE stream (autenticado por ticket efímero) ──
   # EventSource no puede enviar headers; el ticket de corta vida reemplaza
@@ -273,6 +286,7 @@ services:
         strip_path: false
     plugins:
       - name: rate-limiting
+        id: b1b2c3d4-0014-0000-0000-000000000014
         config:
           minute: 30
           policy: local
@@ -288,6 +302,7 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0015-0000-0000-000000000015
 
   # ── audit-service: Swagger docs (sin JWT) ──────────────────────────────
   - name: audit-docs
@@ -308,3 +323,4 @@ services:
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0016-0000-0000-000000000016

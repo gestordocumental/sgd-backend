@@ -18,14 +18,23 @@ function makeId() {
 const PDF_MIME  = 'application/pdf';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+// Minimum valid magic bytes per MIME type so validateMagicBytes() passes in tests.
+const MAGIC_BYTES: Record<string, Buffer> = {
+  [PDF_MIME]:  Buffer.from([0x25, 0x50, 0x44, 0x46]),         // %PDF
+  [DOCX_MIME]: Buffer.from([0x50, 0x4B, 0x03, 0x04]),         // PK\x03\x04 (ZIP/OOXML)
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+               Buffer.from([0x50, 0x4B, 0x03, 0x04]),
+};
+
 function makeFile(overrides: Partial<Express.Multer.File> = {}): Express.Multer.File {
+  const mimetype = overrides.mimetype ?? PDF_MIME;
   return {
     fieldname:    'file',
     originalname: 'test.pdf',
     encoding:     '7bit',
-    mimetype:     PDF_MIME,
+    mimetype,
     size:         1024,
-    buffer:       Buffer.from('fake pdf content'),
+    buffer:       MAGIC_BYTES[mimetype] ?? Buffer.alloc(4),
     destination:  '',
     filename:     '',
     path:         '',

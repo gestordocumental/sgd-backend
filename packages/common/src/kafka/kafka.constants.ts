@@ -8,6 +8,7 @@ export const TOPICS = {
   PASSWORD_RESET: 'auth.password-reset',
   USER_ORG_REMOVED: 'user.org-removed',
   USER_SUPER_ADMIN_REVOKED: 'user.super-admin-revoked',
+  USER_PERMISSIONS_CHANGED: 'user.permissions-changed',
   TYPOLOGY_FILE_UPLOADED: 'typology.file.uploaded',
   TYPOLOGY_METADATA_EXTRACTED: 'typology.metadata.extracted',
   TYPOLOGY_METADATA_EXTRACTION_FAILED: 'typology.metadata.extraction.failed',

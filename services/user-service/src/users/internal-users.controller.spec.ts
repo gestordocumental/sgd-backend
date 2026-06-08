@@ -1,10 +1,8 @@
-import { UnauthorizedException, BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { BadRequestException } from '@nestjs/common';
 import { InternalUsersController } from './internal-users.controller';
 import { UsersService } from './users.service';
 
 describe('InternalUsersController', () => {
-  const internalToken = 'internal-token';
   let controller: InternalUsersController;
   let usersService: jest.Mocked<Pick<UsersService, 'findByPosition' | 'findManyByIds'>>;
 
@@ -14,23 +12,7 @@ describe('InternalUsersController', () => {
       findManyByIds:  jest.fn(),
     };
 
-    controller = new InternalUsersController(
-      usersService as unknown as UsersService,
-      {
-        getOrThrow: jest.fn().mockReturnValue(internalToken),
-        get: jest.fn((key: string) => {
-          if (
-            [
-              'INTERNAL_TOKEN_AUTH_USER',
-              'INTERNAL_TOKEN_NOTIF_USER',
-              'INTERNAL_TOKEN_WORKFLOW_USER',
-              'INTERNAL_TOKEN_ORG_USER',
-            ].includes(key)
-          ) return internalToken;
-          return undefined;
-        }),
-      } as unknown as ConfigService,
-    );
+    controller = new InternalUsersController(usersService as unknown as UsersService);
   });
 
   it('delegates position lookup with all filters, including explicit null areaId', async () => {
@@ -38,7 +20,7 @@ describe('InternalUsersController', () => {
     usersService.findByPosition.mockResolvedValue(users);
 
     await expect(
-      controller.byPosition(internalToken, {
+      controller.byPosition({
         orgId: 'org-uuid-1',
         cargoId: 'cargo-uuid-1',
         areaId: null,
@@ -56,7 +38,7 @@ describe('InternalUsersController', () => {
   it('omits areaId from filters when it is not present in the request body', async () => {
     usersService.findByPosition.mockResolvedValue([]);
 
-    await controller.byPosition(internalToken, {
+    await controller.byPosition({
       orgId: 'org-uuid-1',
       cargoId: 'cargo-uuid-1',
     });
@@ -67,16 +49,6 @@ describe('InternalUsersController', () => {
     });
   });
 
-  it('rejects requests with a missing or invalid internal token', async () => {
-    await expect(
-      controller.byPosition(undefined, { orgId: 'org-uuid-1' }),
-    ).rejects.toThrow(UnauthorizedException);
-
-    await expect(
-      controller.byPosition('wrong-token', { orgId: 'org-uuid-1' }),
-    ).rejects.toThrow(UnauthorizedException);
-  });
-
   describe('batchByIds()', () => {
     it('returns mapped users for valid ids', async () => {
       const users = [
@@ -85,7 +57,7 @@ describe('InternalUsersController', () => {
       ];
       usersService.findManyByIds.mockResolvedValue(users as any);
 
-      const result = await controller.batchByIds(internalToken, { ids: ['u-1', 'u-2'] });
+      const result = await controller.batchByIds({ ids: ['u-1', 'u-2'] });
 
       expect(usersService.findManyByIds).toHaveBeenCalledWith(['u-1', 'u-2']);
       expect(result).toEqual([
@@ -96,27 +68,21 @@ describe('InternalUsersController', () => {
 
     it('throws BadRequestException for an empty ids array', async () => {
       await expect(
-        controller.batchByIds(internalToken, { ids: [] }),
+        controller.batchByIds({ ids: [] }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when ids array exceeds 500 entries', async () => {
       const ids = Array.from({ length: 501 }, (_, i) => `user-${i}`);
       await expect(
-        controller.batchByIds(internalToken, { ids }),
+        controller.batchByIds({ ids }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when any id is an empty string', async () => {
       await expect(
-        controller.batchByIds(internalToken, { ids: ['valid-id', ''] }),
+        controller.batchByIds({ ids: ['valid-id', ''] }),
       ).rejects.toThrow(BadRequestException);
-    });
-
-    it('throws UnauthorizedException with an invalid token', async () => {
-      await expect(
-        controller.batchByIds('wrong-token', { ids: ['u-1'] }),
-      ).rejects.toThrow(UnauthorizedException);
     });
   });
 });

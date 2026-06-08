@@ -53,8 +53,8 @@ export class OrgsController {
     return OrgResponseDto.from(await this.orgsService.create(dto, createdBy));
   }
 
-  @ApiOperation({ summary: 'List all organizations (paginated, with server-side search and status filter)' })
-  @ApiResponse({ status: 200, description: 'Paginated organizations' })
+  @ApiOperation({ summary: 'List all organizations (cursor-paginated, with server-side search and status filter)' })
+  @ApiResponse({ status: 200, description: 'Cursor-paginated organizations' })
   /**
    * List all organizations.
    * Super admin only.
@@ -62,24 +62,23 @@ export class OrgsController {
   @Get()
   @SuperAdminOnly()
   async findAll(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('cursor') cursor?: string,
     @Query('search') search?: string,
     @Query('status') status?: string,
-  ): Promise<{ data: OrgResponseDto[]; total: number }> {
-    if (page < 1) throw new BadRequestException('page must be >= 1');
-    if (limit < 1 || limit > 500) throw new BadRequestException('limit must be between 1 and 500');
+  ): Promise<{ data: OrgResponseDto[]; nextCursor: string | null; hasMore: boolean }> {
+    if (limit < 1 || limit > 100) throw new BadRequestException('limit must be between 1 and 100');
     if (status && !['active', 'inactive', 'deleted'].includes(status)) {
       throw new BadRequestException('status must be one of: active, inactive, deleted');
     }
 
-    const { data, total } = await this.orgsService.findAll({
-      page,
+    const result = await this.orgsService.findAll({
       limit,
+      cursor,
       search,
       status: status as 'active' | 'inactive' | 'deleted' | undefined,
     });
-    return { data: data.map(OrgResponseDto.from), total };
+    return { data: result.data.map(OrgResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore };
   }
 
   @ApiOperation({ summary: 'Resolve org details for a list of IDs (used by profile context-switcher)' })

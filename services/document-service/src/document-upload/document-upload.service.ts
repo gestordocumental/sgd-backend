@@ -6,7 +6,7 @@ import { Typology, TypologyDocument, ExtractionStatus, TypologyStatus } from '..
 import { StorageService } from '../common/storage/storage.service';
 import { AppLogger, KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sgd/common';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
-import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
+import { ALLOWED_MIMETYPES, MAX_FILE_SIZE, validateMagicBytes } from './document-upload.constants';
 
 /**
  * Determine whether `newVer` is exactly one incremental bump above `oldVer`.
@@ -95,6 +95,9 @@ export class DocumentUploadService {
 
     if (file.size > MAX_FILE_SIZE) throw new BadRequestException('File exceeds the maximum allowed size of 20 MB.');
 
+    if (!validateMagicBytes(file.buffer, file.mimetype))
+      throw new BadRequestException({ message: 'File content does not match declared type.', errorCode: 'FILE_CONTENT_MISMATCH' });
+
     const previousDoc = typology.documento?.r2Key ? { ...typology.documento } : null;
     const r2Key = `org/${orgId}/typologies/${typologyId}/${uuidv4()}.${ext}`;
 
@@ -178,6 +181,9 @@ export class DocumentUploadService {
     const ext = ALLOWED_MIMETYPES[file.mimetype];
     if (!ext) throw new BadRequestException('Format not allowed. Use PDF, DOCX or XLSX.');
     if (file.size > MAX_FILE_SIZE) throw new BadRequestException('File exceeds the maximum allowed size of 20 MB.');
+
+    if (!validateMagicBytes(file.buffer, file.mimetype))
+      throw new BadRequestException({ message: 'File content does not match declared type.', errorCode: 'FILE_CONTENT_MISMATCH' });
 
     const newVersion = dto.version ?? null;
     const oldVersion = old.datosDeclarados.version;

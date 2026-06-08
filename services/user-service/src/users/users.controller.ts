@@ -99,16 +99,16 @@ export class UsersController {
     return { ...UserResponseDto.from(user), invitationToken };
   }
 
-  @ApiOperation({ summary: 'List all users (paginated)' })
-  @ApiResponse({ status: 200, description: 'Paginated users' })
+  @ApiOperation({ summary: 'List all users (cursor-paginated)' })
+  @ApiResponse({ status: 200, description: 'Cursor-paginated users' })
   @Get()
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAll(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
-  ): Promise<{ data: UserResponseDto[]; total: number }> {
-    const { data, total } = await this.usersService.findAll(page, limit);
-    return { data: data.map(UserResponseDto.from), total };
+    @Query('cursor') cursor?: string,
+  ): Promise<{ data: UserResponseDto[]; nextCursor: string | null; hasMore: boolean }> {
+    const result = await this.usersService.findAll(limit, cursor);
+    return { data: result.data.map(UserResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore };
   }
 
   @ApiOperation({ summary: 'User counts grouped by organization — super admin only' })
@@ -117,18 +117,18 @@ export class UsersController {
     return this.usersService.getCountsByOrg();
   }
 
-  @ApiOperation({ summary: 'List all super admin users (paginated, with server-side search and status filter)' })
-  @ApiResponse({ status: 200, description: 'Paginated super admin users' })
+  @ApiOperation({ summary: 'List all super admin users (cursor-paginated, with server-side search and status filter)' })
+  @ApiResponse({ status: 200, description: 'Cursor-paginated super admin users' })
   @Get("super-admins")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAllSuperAdmin(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('cursor') cursor?: string,
     @Query('search') search?: string,
     @Query('status') status?: 'active' | 'inactive' | 'deleted' | 'pending',
-  ): Promise<{ data: UserResponseDto[]; total: number }> {
-    const { data, total } = await this.usersService.findAllSuperAdmin(page, limit, search, status);
-    return { data: data.map(UserResponseDto.from), total };
+  ): Promise<{ data: UserResponseDto[]; nextCursor: string | null; hasMore: boolean }> {
+    const result = await this.usersService.findAllSuperAdmin(limit, cursor, search, status);
+    return { data: result.data.map(UserResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore };
   }
 
   @ApiOperation({ summary: 'Find user by email' })
@@ -139,22 +139,23 @@ export class UsersController {
     return UserResponseDto.from(await this.usersService.findByEmail(email));
   }
 
-  @ApiOperation({ summary: 'List users belonging to an organization (paginated)' })
+  @ApiOperation({ summary: 'List users belonging to an organization (cursor-paginated)' })
   @ApiParam({ name: 'orgId', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Paginated users' })
+  @ApiResponse({ status: 200, description: 'Cursor-paginated users' })
   @Get('by-org/:orgId')
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByOrg(
     @Param('orgId', new ParseUUIDPipe({ version: '4' })) orgId: string,
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(500), ParseIntPipe) limit: number,
-  ): Promise<{ data: UserWithOrgRolesDto[]; total: number }> {
-    const { data, total } = await this.usersService.findByOrg(orgId, page, limit);
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+    @Query('cursor') cursor?: string,
+  ): Promise<{ data: UserWithOrgRolesDto[]; nextCursor: string | null; hasMore: boolean }> {
+    const result = await this.usersService.findByOrg(orgId, limit, cursor);
     return {
-      data: data.map(({ user, roles, orgRemovedAt, isOptionalReviewer }) =>
+      data: result.data.map(({ user, roles, orgRemovedAt, isOptionalReviewer }) =>
         UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt, isOptionalReviewer),
       ),
-      total,
+      nextCursor: result.nextCursor,
+      hasMore: result.hasMore,
     };
   }
 

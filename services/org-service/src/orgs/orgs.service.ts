@@ -12,6 +12,20 @@ import { UpdateOrgDto } from './dto/update-org.dto';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 import { UserClientService } from '../common/user-client/user-client.service';
 
+function encodeCursor(createdAt: Date, id: string): string {
+  return Buffer.from(JSON.stringify({ at: createdAt.toISOString(), id })).toString('base64url');
+}
+
+function decodeCursor(raw: string): { at: string; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (typeof parsed.at !== 'string' || typeof parsed.id !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class OrgsService {
   private readonly logger = new Logger(OrgsService.name);
@@ -64,19 +78,20 @@ export class OrgsService {
   }
 
   async findAll(params: {
-    page?: number;
     limit?: number;
+    cursor?: string;
     search?: string;
     status?: 'active' | 'inactive' | 'deleted';
-  } = {}): Promise<{ data: Org[]; total: number }> {
-    const page  = Math.max(1, params.page ?? 1);
-    const limit = Math.min(Math.max(1, params.limit ?? 20), 500);
-    const skip  = (page - 1) * limit;
+  } = {}): Promise<{ data: Org[]; nextCursor: string | null; hasMore: boolean }> {
+    const limit = Math.min(Math.max(1, params.limit ?? 20), 100);
+    const decoded = params.cursor ? decodeCursor(params.cursor) : null;
 
     const qb = this.orgRepo
       .createQueryBuilder('o')
       .withDeleted()
-      .orderBy('o.createdAt', 'ASC');
+      .orderBy('o.createdAt', 'ASC')
+      .addOrderBy('o.id', 'ASC')
+      .take(limit + 1);
 
     if (params.search?.trim()) {
       const q = `%${params.search.trim()}%`;
@@ -91,8 +106,20 @@ export class OrgsService {
       qb.andWhere('o.deletedAt IS NULL').andWhere('o.status != :s', { s: OrgStatus.ACTIVE });
     }
 
-    const [data, total] = await qb.skip(skip).take(limit).getManyAndCount();
-    return { data, total };
+    if (decoded) {
+      qb.andWhere(
+        '(o.createdAt > :at OR (o.createdAt = :at AND o.id > :cursorId))',
+        { at: decoded.at, cursorId: decoded.id },
+      );
+    }
+
+    const rows = await qb.getMany();
+    const hasMore = rows.length > limit;
+    const data = hasMore ? rows.slice(0, limit) : rows;
+    const last = data.at(-1);
+    const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+    return { data, nextCursor, hasMore };
   }
 
   async findOne(id: string): Promise<Org> {

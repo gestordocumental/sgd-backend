@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
   Index,
 } from "typeorm";
 
@@ -12,8 +13,10 @@ export enum CredentialStatus {
   DISABLED = "disabled", // Blocked by admin/security
 }
 
+// Partial unique index: enforces email uniqueness only among non-deleted rows,
+// allowing future soft-deletion of credentials while permitting email reuse.
+@Index("IDX_credentials_email_active", ["email"], { unique: true, where: '"deleted_at" IS NULL' })
 @Entity("credentials")
-@Index(["email"], { unique: true }) // global unique email (one identity per email)
 export class Credential {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
@@ -51,4 +54,7 @@ export class Credential {
 
   @UpdateDateColumn({ name: "updated_at", type: "timestamptz" })
   updatedAt!: Date;
+
+  @DeleteDateColumn({ name: "deleted_at", type: "timestamptz", nullable: true })
+  deletedAt!: Date | null;
 }

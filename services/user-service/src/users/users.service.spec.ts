@@ -41,7 +41,6 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
     overrides.registrationStatus ?? RegistrationStatus.PENDING_CREDENTIALS,
   avatarUrl: null,
   isSuperAdmin: false,
-  twoFactorEnabled: false,
   orgRoles: [],
   createdAt: new Date('2024-01-01'),
   updatedAt: new Date('2024-01-01'),
@@ -71,12 +70,12 @@ describe('UsersService', () => {
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
   let roleRepo: jest.Mocked<Repository<Role>>;
   let authClient: jest.Mocked<AuthClientService>;
-  let redis: { getdel: jest.Mock; setex: jest.Mock };
+  let redis: { getdel: jest.Mock; setex: jest.Mock; del: jest.Mock };
   let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit' | 'emitSafe'>>;
   let orgClient: jest.Mocked<Pick<OrgClientService, 'validateOrgStructure' | 'resolveNamesById'>>;
 
   beforeEach(async () => {
-    redis = { getdel: jest.fn(), setex: jest.fn() };
+    redis = { getdel: jest.fn(), setex: jest.fn(), del: jest.fn().mockResolvedValue(1) };
     kafkaProducer = {
       emit: jest.fn().mockResolvedValue(undefined),
       emitSafe: jest.fn(),
@@ -320,25 +319,38 @@ describe('UsersService', () => {
   // ─── findAll ──────────────────────────────────────────────────────────────
 
   describe('findAll', () => {
-    it('returns all active users from the repository', async () => {
+    function makeUsersQb(rows: User[]) {
+      const qb: Record<string, jest.Mock> = {
+        withDeleted:  jest.fn().mockReturnThis(),
+        orderBy:      jest.fn().mockReturnThis(),
+        addOrderBy:   jest.fn().mockReturnThis(),
+        take:         jest.fn().mockReturnThis(),
+        where:        jest.fn().mockReturnThis(),
+        getMany:      jest.fn().mockResolvedValue(rows),
+      };
+      usersRepo.createQueryBuilder.mockReturnValue(qb as any);
+      return qb;
+    }
+
+    it('returns cursor-paginated users', async () => {
       const users = [makeUser(), makeUser({ id: 'user-uuid-2', email: 'other@example.com' })];
-      usersRepo.findAndCount.mockResolvedValue([users, users.length]);
+      makeUsersQb(users);
 
       const result = await service.findAll();
 
-      expect(usersRepo.findAndCount).toHaveBeenCalledWith({
-        take: 100,
-        skip: 0,
-        order: { createdAt: 'DESC' },
-        withDeleted: true,
-      });
-      expect(result).toEqual({ data: users, total: users.length });
+      expect(result.data).toEqual(users);
+      expect(result.hasMore).toBe(false);
+      expect(result.nextCursor).toBeNull();
     });
 
     it('returns an empty array when there are no users', async () => {
-      usersRepo.findAndCount.mockResolvedValue([[], 0]);
+      makeUsersQb([]);
 
-      expect(await service.findAll()).toEqual({ data: [], total: 0 });
+      const result = await service.findAll();
+
+      expect(result.data).toEqual([]);
+      expect(result.hasMore).toBe(false);
+      expect(result.nextCursor).toBeNull();
     });
   });
 
@@ -776,10 +788,15 @@ describe('UsersService', () => {
   describe('findByOrg', () => {
     function makeUorQb(rows: UserOrgRole[]) {
       const qb: Record<string, jest.Mock> = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where:             jest.fn().mockReturnThis(),
-        withDeleted:       jest.fn().mockReturnThis(),
-        getMany:           jest.fn().mockResolvedValue(rows),
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoinAndSelect:  jest.fn().mockReturnThis(),
+        where:              jest.fn().mockReturnThis(),
+        andWhere:           jest.fn().mockReturnThis(),
+        withDeleted:        jest.fn().mockReturnThis(),
+        orderBy:            jest.fn().mockReturnThis(),
+        addOrderBy:         jest.fn().mockReturnThis(),
+        take:               jest.fn().mockReturnThis(),
+        getMany:            jest.fn().mockResolvedValue(rows),
       };
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
       return qb;
@@ -791,12 +808,12 @@ describe('UsersService', () => {
       const orgRole = makeUor({ user, role: adminRole as any });
 
       makeUorQb([orgRole] as any);
-      usersRepo.find.mockResolvedValue([]);
 
-      const { data, total } = await service.findByOrg('org-uuid-1');
+      const { data, hasMore, nextCursor } = await service.findByOrg('org-uuid-1');
 
       expect(data).toHaveLength(1);
-      expect(total).toBe(1);
+      expect(hasMore).toBe(false);
+      expect(nextCursor).toBeNull();
       expect(data[0].user).toEqual(user);
       expect(data[0].roles).toEqual([
         { roleId: orgRole.roleId, roleName: adminRole.name },
@@ -812,11 +829,11 @@ describe('UsersService', () => {
       const orgRole2 = makeUor({ id: 'uor-uuid-2', userId: user2.id, user: user2, roleId: role2.id, role: role2 as any });
 
       makeUorQb([orgRole1, orgRole2] as any);
-      usersRepo.find.mockResolvedValue([]);
 
-      const { data, total } = await service.findByOrg('org-uuid-1');
+      const { data, hasMore } = await service.findByOrg('org-uuid-1');
 
-      expect(total).toBe(2);
+      expect(hasMore).toBe(false);
+      expect(data).toHaveLength(2);
       expect(data.find((r) => r.user.id === user1.id)?.roles).toEqual([
         { roleId: role1.id, roleName: role1.name },
       ]);
@@ -825,33 +842,32 @@ describe('UsersService', () => {
       ]);
     });
 
-    it('returns an empty data array and total=0 when no users belong to the org', async () => {
+    it('returns an empty data array when no users belong to the org', async () => {
       makeUorQb([]);
-      usersRepo.find.mockResolvedValue([]);
 
-      const { data, total } = await service.findByOrg('org-uuid-empty');
+      const { data, hasMore } = await service.findByOrg('org-uuid-empty');
 
       expect(data).toEqual([]);
-      expect(total).toBe(0);
+      expect(hasMore).toBe(false);
     });
 
-    it('slices the result to the requested page and limit', async () => {
-      const users = Array.from({ length: 10 }, (_, i) =>
+    it('returns hasMore=true and truncates to limit when more rows exist', async () => {
+      const rows = Array.from({ length: 4 }, (_, i) =>
         makeUor({
           id: `uor-${i}`,
           userId: `user-${i}`,
-          user: makeUser({ id: `user-${i}`, email: `u${i}@example.com` }),
+          user: makeUser({ id: `user-${i}`, email: `u${i}@example.com`, createdAt: new Date(`2024-01-0${i + 1}`) }),
           role: makeRole() as any,
         }),
       );
 
-      makeUorQb(users as any);
-      usersRepo.find.mockResolvedValue([]);
+      makeUorQb(rows as any);
 
-      const { data, total } = await service.findByOrg('org-uuid-1', 2, 3);
+      const { data, hasMore, nextCursor } = await service.findByOrg('org-uuid-1', 3);
 
-      expect(total).toBe(10);
+      expect(hasMore).toBe(true);
       expect(data).toHaveLength(3);
+      expect(nextCursor).not.toBeNull();
     });
   });
 
@@ -1107,6 +1123,7 @@ describe('UsersService', () => {
         andWhere: jest.fn().mockReturnThis(),
         execute:  jest.fn().mockResolvedValue({ affected: 3 }),
       };
+      uorRepo.find.mockResolvedValue([]);
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
 
       await service.removeAllFromOrg('org-uuid-1');
@@ -1185,19 +1202,29 @@ describe('UsersService', () => {
   // ─── findByOrg (explicit membership only) ────────────────────────────────
 
   describe('findByOrg (explicit membership only)', () => {
-    it('does not include super admins without explicit org membership', async () => {
+    function makeFullUorQb(rows: any[]) {
       const qb: Record<string, jest.Mock> = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where:             jest.fn().mockReturnThis(),
-        withDeleted:       jest.fn().mockReturnThis(),
-        getMany:           jest.fn().mockResolvedValue([]),
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoinAndSelect:  jest.fn().mockReturnThis(),
+        where:              jest.fn().mockReturnThis(),
+        andWhere:           jest.fn().mockReturnThis(),
+        withDeleted:        jest.fn().mockReturnThis(),
+        orderBy:            jest.fn().mockReturnThis(),
+        addOrderBy:         jest.fn().mockReturnThis(),
+        take:               jest.fn().mockReturnThis(),
+        getMany:            jest.fn().mockResolvedValue(rows),
       };
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+      return qb;
+    }
 
-      const { data, total } = await service.findByOrg('org-uuid-1');
+    it('does not include super admins without explicit org membership', async () => {
+      makeFullUorQb([]);
 
-      expect(total).toBe(0);
+      const { data, hasMore } = await service.findByOrg('org-uuid-1');
+
       expect(data).toEqual([]);
+      expect(hasMore).toBe(false);
       expect(usersRepo.find).not.toHaveBeenCalled();
     });
 
@@ -1218,17 +1245,12 @@ describe('UsersService', () => {
         isOptionalReviewer: false,
       };
 
-      const qb: Record<string, jest.Mock> = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where:             jest.fn().mockReturnThis(),
-        withDeleted:       jest.fn().mockReturnThis(),
-        getMany:           jest.fn().mockResolvedValue([orgRole]),
-      };
-      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+      makeFullUorQb([orgRole]);
 
-      const { data, total } = await service.findByOrg('org-uuid-1');
+      const { data, hasMore } = await service.findByOrg('org-uuid-1');
 
-      expect(total).toBe(1);
+      expect(data).toHaveLength(1);
+      expect(hasMore).toBe(false);
       expect(data[0].user.id).toBe(superAdmin.id);
       expect(data[0].roles).toEqual([{ roleId: 'role-uuid-1', roleName: 'ADMIN' }]);
     });

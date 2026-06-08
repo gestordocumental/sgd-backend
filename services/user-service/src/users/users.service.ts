@@ -27,6 +27,20 @@ import { OrgClientService } from '../common/org-client/org-client.service';
 
 const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
 
+function encodeCursor(createdAt: Date, id: string): string {
+  return Buffer.from(JSON.stringify({ at: createdAt.toISOString(), id })).toString('base64url');
+}
+
+function decodeCursor(raw: string): { at: string; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (typeof parsed.at !== 'string' || typeof parsed.id !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -46,6 +60,11 @@ export class UsersService {
   private static userDisplayName(user: { firstName?: string | null; lastName?: string | null; email: string }): string {
     const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
     return name || user.email;
+  }
+
+  private async invalidatePermissionCache(userId: string, orgId: string): Promise<void> {
+    await this.redis.del(`perms:${userId}:${orgId}`).catch(() => {});
+    this.kafkaProducer.emitSafe(TOPICS.USER_PERMISSIONS_CHANGED, { userId, orgId });
   }
 
   private emitAuditLog(params: {
@@ -219,34 +238,52 @@ export class UsersService {
     return { user, invitationToken: token };
   }
 
-  async findAll(page = 1, limit = 100): Promise<{ data: User[]; total: number }> {
-    const safePage  = Math.max(1, page);
-    const safeLimit = Math.max(1, limit);
-    const take = Math.min(safeLimit, 500);
-    const skip = (safePage - 1) * take;
-    const [data, total] = await this.usersRepository.findAndCount({
-      withDeleted: true,
-      take,
-      skip,
-      order: { createdAt: 'DESC' },
-    });
-    return { data, total };
-  }
-
-  async findAllSuperAdmin(
-    page = 1,
-    limit = 20,
-    search?: string,
-    status?: 'active' | 'inactive' | 'deleted' | 'pending',
-  ): Promise<{ data: User[]; total: number }> {
-    const safePage  = Math.max(1, page);
-    const safeLimit = Math.min(Math.max(1, limit), 500);
-    const skip = (safePage - 1) * safeLimit;
+  async findAll(
+    limit = 100,
+    cursor?: string,
+  ): Promise<{ data: User[]; nextCursor: string | null; hasMore: boolean }> {
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const decoded = cursor ? decodeCursor(cursor) : null;
 
     const qb = this.usersRepository
       .createQueryBuilder('u')
       .withDeleted()
-      .where('u.isSuperAdmin = :isSuperAdmin', { isSuperAdmin: true });
+      .orderBy('u.createdAt', 'DESC')
+      .addOrderBy('u.id', 'DESC')
+      .take(safeLimit + 1);
+
+    if (decoded) {
+      qb.where(
+        '(u.createdAt < :at OR (u.createdAt = :at AND u.id < :cursorId))',
+        { at: decoded.at, cursorId: decoded.id },
+      );
+    }
+
+    const rows = await qb.getMany();
+    const hasMore = rows.length > safeLimit;
+    const data = hasMore ? rows.slice(0, safeLimit) : rows;
+    const last = data.at(-1);
+    const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+    return { data, nextCursor, hasMore };
+  }
+
+  async findAllSuperAdmin(
+    limit = 20,
+    cursor?: string,
+    search?: string,
+    status?: 'active' | 'inactive' | 'deleted' | 'pending',
+  ): Promise<{ data: User[]; nextCursor: string | null; hasMore: boolean }> {
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const decoded = cursor ? decodeCursor(cursor) : null;
+
+    const qb = this.usersRepository
+      .createQueryBuilder('u')
+      .withDeleted()
+      .where('u.isSuperAdmin = :isSuperAdmin', { isSuperAdmin: true })
+      .orderBy('u.createdAt', 'DESC')
+      .addOrderBy('u.id', 'DESC')
+      .take(safeLimit + 1);
 
     if (search?.trim()) {
       const q = `%${search.trim()}%`;
@@ -270,13 +307,20 @@ export class UsersService {
         .andWhere('u.registrationStatus != :rs', { rs: 'pending_credentials' });
     }
 
-    const [data, total] = await qb
-      .skip(skip)
-      .take(safeLimit)
-      .orderBy('u.createdAt', 'DESC')
-      .getManyAndCount();
+    if (decoded) {
+      qb.andWhere(
+        '(u.createdAt < :at OR (u.createdAt = :at AND u.id < :cursorId))',
+        { at: decoded.at, cursorId: decoded.id },
+      );
+    }
 
-    return { data, total };
+    const rows = await qb.getMany();
+    const hasMore = rows.length > safeLimit;
+    const data = hasMore ? rows.slice(0, safeLimit) : rows;
+    const last = data.at(-1);
+    const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+    return { data, nextCursor, hasMore };
   }
 
   async findOne(id: string): Promise<User> {
@@ -582,6 +626,7 @@ export class UsersService {
         resourceName: UsersService.userDisplayName(targetUser),
         metadata:     { changes: { role: { from: oldRole?.name ?? null, to: newRole?.name ?? null } }, orgId: dto.orgId },
       });
+      await this.invalidatePermissionCache(userId, dto.orgId);
       return this.userOrgRoleRepository.findOne({
         where: { id: existing.id },
         relations: ['role'],
@@ -603,53 +648,56 @@ export class UsersService {
       resourceName: UsersService.userDisplayName(targetUser),
       metadata:     { orgId: dto.orgId, roleId },
     });
+    await this.invalidatePermissionCache(userId, dto.orgId);
     return saved;
   }
 
   async findByOrg(
     orgId: string,
-    page = 1,
-    limit = 500,
-  ): Promise<{ data: { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null; isOptionalReviewer: boolean }[]; total: number }> {
-    const safePage  = Math.max(1, page);
-    const safeLimit = Math.min(Math.max(1, limit), 500);
-    const skip = (safePage - 1) * safeLimit;
+    limit = 100,
+    cursor?: string,
+  ): Promise<{
+    data: { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null; isOptionalReviewer: boolean }[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> {
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const decoded = cursor ? decodeCursor(cursor) : null;
 
-    // Use QueryBuilder with withDeleted() so soft-deleted users are loaded
-    // through the relation — find() + withDeleted:true only affects the main
-    // entity, not its joined relations.
-    const orgRoles = await this.userOrgRoleRepository
+    // UserOrgRole has @Unique(['userId', 'orgId']) — one row per user per org.
+    // Paginate directly at DB level; no in-memory grouping needed.
+    const qb = this.userOrgRoleRepository
       .createQueryBuilder('uor')
-      .leftJoinAndSelect('uor.user', 'user')
+      .innerJoinAndSelect('uor.user', 'user')
       .leftJoinAndSelect('uor.role', 'role')
       .where('uor.orgId = :orgId', { orgId })
       .withDeleted()
-      .getMany();
+      .orderBy('user.createdAt', 'ASC')
+      .addOrderBy('user.id', 'ASC')
+      .take(safeLimit + 1);
 
-    // Group by userId. Users with removedAt set were explicitly removed from
-    // the org via the delete button. Users with roleId=null but removedAt=null
-    // simply have no role assigned. Globally soft-deleted users carry a non-null
-    // deletedAt on the user entity.
-    // isOptionalReviewer is taken from the user_org_roles record (per-org) — NOT
-    // from the user entity, which no longer carries this field.
-    const byUser = new Map<string, { user: User; roles: { roleId: string; roleName: string }[]; orgRemovedAt: Date | null; isOptionalReviewer: boolean }>();
-    for (const r of orgRoles) {
-      if (!r.user) continue;
-      if (!byUser.has(r.userId)) {
-        byUser.set(r.userId, {
-          user: r.user,
-          roles: [],
-          orgRemovedAt: r.removedAt,
-          isOptionalReviewer: r.isOptionalReviewer,
-        });
-      }
-      if (r.roleId !== null && r.role !== null) {
-        byUser.get(r.userId)!.roles.push({ roleId: r.roleId, roleName: r.role.name });
-      }
+    if (decoded) {
+      qb.andWhere(
+        '(user.createdAt > :at OR (user.createdAt = :at AND user.id > :cursorId))',
+        { at: decoded.at, cursorId: decoded.id },
+      );
     }
 
-    const all = Array.from(byUser.values());
-    return { data: all.slice(skip, skip + safeLimit), total: all.length };
+    const rows = await qb.getMany();
+    const hasMore = rows.length > safeLimit;
+    const pageRows = hasMore ? rows.slice(0, safeLimit) : rows;
+
+    const data = pageRows.map(r => ({
+      user: r.user,
+      roles: r.roleId && r.role ? [{ roleId: r.roleId, roleName: r.role.name }] : [],
+      orgRemovedAt: r.removedAt,
+      isOptionalReviewer: r.isOptionalReviewer,
+    }));
+
+    const last = data.at(-1);
+    const nextCursor = hasMore && last ? encodeCursor(last.user.createdAt, last.user.id) : null;
+
+    return { data, nextCursor, hasMore };
   }
 
   /**
@@ -743,6 +791,11 @@ export class UsersService {
   }
 
   async removeAllFromOrg(orgId: string): Promise<void> {
+    const affected = await this.userOrgRoleRepository.find({
+      where: { orgId, removedAt: IsNull() },
+      select: { userId: true },
+    });
+
     await this.userOrgRoleRepository
       .createQueryBuilder()
       .update(UserOrgRole)
@@ -754,6 +807,10 @@ export class UsersService {
       .where('org_id = :orgId', { orgId })
       .andWhere('removed_at IS NULL')
       .execute();
+
+    await Promise.allSettled(
+      affected.map((uor) => this.invalidatePermissionCache(uor.userId, orgId)),
+    );
   }
 
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
@@ -768,6 +825,7 @@ export class UsersService {
 
     // Notify the removed user so their active browser session is revoked immediately
     this.kafkaProducer.emitSafe(TOPICS.USER_ORG_REMOVED, { userId, orgId });
+    await this.invalidatePermissionCache(userId, orgId);
 
     if (actorId) {
       this.emitAuditLog({
