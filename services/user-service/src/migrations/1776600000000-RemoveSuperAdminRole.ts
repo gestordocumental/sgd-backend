@@ -99,6 +99,11 @@ export class RemoveSuperAdminRole1776600000000 implements MigrationInterface {
       ON CONFLICT (name, org_id) DO NOTHING
     `);
 
+    // user_org_roles assignments are NOT restored: the original data was
+    // discarded by up() and cannot be reconstructed. This is intentional —
+    // super-admin capability is controlled by User.isSuperAdmin, not by
+    // role assignments. No user loses elevated access by omitting this.
+
     // Re-assign all permissions to SUPER_ADMIN
     await queryRunner.query(`
       INSERT INTO role_permissions (role_id, permission_id)
