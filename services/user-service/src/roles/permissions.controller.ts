@@ -4,11 +4,15 @@ import {
   Query,
   Headers,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import { PermissionsService } from './permissions.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiQuery } from '@nestjs/swagger';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { PermissionModule, PermissionAction } from './entities/permission.entity';
 
 @ApiTags('Permissions')
 @Controller('api/v1/permissions')
@@ -21,7 +25,8 @@ export class PermissionsController {
   @ApiOperation({ summary: 'List all available permissions — used by orgs to build custom roles' })
   @ApiBearerAuth('JWT')
   @ApiResponse({ status: 200, description: 'Array of permissions' })
-  // Returns all available permissions — orgs use this list to build custom roles
+  @UseGuards(PermissionsGuard)
+  @RequirePermission(PermissionModule.ORGS, PermissionAction.READ)
   @Get()
   findAll() {
     return this.permissionsService.findAll();

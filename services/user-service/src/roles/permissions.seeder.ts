@@ -17,9 +17,8 @@ const PERMISSIONS_CATALOG: {
   { module: PermissionModule.DOCUMENTS, action: PermissionAction.READ,     description: 'View documents' },
   { module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE,    description: 'Create and edit documents' },
   { module: PermissionModule.DOCUMENTS, action: PermissionAction.DELETE,   description: 'Delete documents' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.APPROVE,  description: 'Approve documents' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.UPLOAD,   description: 'Upload files' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DOWNLOAD, description: 'Download files' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.UPLOAD,   description: 'Upload documents' },
+  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DOWNLOAD, description: 'Download documents' },
 
   // WORKFLOWS
   { module: PermissionModule.WORKFLOWS, action: PermissionAction.READ,    description: 'View workflows' },
@@ -35,9 +34,13 @@ const PERMISSIONS_CATALOG: {
   { module: PermissionModule.USERS, action: PermissionAction.MANAGE, description: 'Full user management' },
 
   // ORGS
-  { module: PermissionModule.ORGS, action: PermissionAction.READ,   description: 'View organization information' },
-  { module: PermissionModule.ORGS, action: PermissionAction.WRITE,  description: 'Edit organization information' },
-  { module: PermissionModule.ORGS, action: PermissionAction.MANAGE, description: 'Full organization management' },
+  { module: PermissionModule.ORGS, action: PermissionAction.READ,  description: 'View organization information' },
+  { module: PermissionModule.ORGS, action: PermissionAction.WRITE, description: 'Edit organization information' },
+
+  // ORG_STRUCTURE
+  { module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.READ,   description: 'View organizational structure' },
+  { module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.WRITE,  description: 'Edit organizational structure' },
+  { module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.DELETE, description: 'Delete organizational structure elements' },
 
   // AUDIT
   { module: PermissionModule.AUDIT, action: PermissionAction.READ, description: 'View audit records' },

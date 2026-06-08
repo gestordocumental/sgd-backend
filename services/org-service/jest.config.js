@@ -14,6 +14,7 @@ module.exports = {
     '!**/*.module.{ts,js}',
     '!main.{ts,js}',
     '!data-source.{ts,js}',
+    '!instrument.{ts,js}',
   ],
   coverageDirectory: '../coverage',
   testEnvironment: 'node',

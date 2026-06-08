@@ -20,9 +20,15 @@ import { RedisModule } from './common/redis/redis.module';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const dbPort = Number(config.get<string>('DB_PORT'));
-        if (!Number.isInteger(dbPort)) {
-          throw new Error(`Invalid DB_PORT value: "${config.get('DB_PORT')}"`);
+        const dbPortRaw = config.get<string>('DB_PORT') ?? '5432';
+        const dbPort = Number(dbPortRaw);
+        if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
+          throw new Error(`Invalid DB_PORT value: "${dbPortRaw}"`);
+        }
+        const poolSizeRaw = config.get<string>('DB_POOL_SIZE') ?? '15';
+        const poolSize = Number(poolSizeRaw);
+        if (!Number.isInteger(poolSize) || poolSize <= 0) {
+          throw new Error(`Invalid DB_POOL_SIZE value: "${poolSizeRaw}"`);
         }
         return {
           type: 'postgres',
@@ -38,6 +44,7 @@ import { RedisModule } from './common/redis/redis.module';
           extra: {
             keepAlive: true,
             keepAliveInitialDelayMillis: 10000,
+            max: poolSize,
           },
         };
       },

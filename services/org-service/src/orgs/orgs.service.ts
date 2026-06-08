@@ -2,16 +2,15 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
 import { Org, OrgStatus } from './entities/org.entity';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
+import { UserClientService } from '../common/user-client/user-client.service';
 
 @Injectable()
 export class OrgsService {
@@ -20,8 +19,8 @@ export class OrgsService {
   constructor(
     @InjectRepository(Org)
     private readonly orgRepo: Repository<Org>,
-    private readonly configService: ConfigService,
     private readonly kafkaProducer: KafkaProducerService,
+    private readonly userClient: UserClientService,
   ) {}
 
   private emitAuditLog(
@@ -146,7 +145,7 @@ export class OrgsService {
     await this.orgRepo.softRemove(org);
 
     try {
-      await this.revokeOrgAccess(id);
+      await this.userClient.revokeOrgAccess(id);
     } catch (err) {
       this.logger.error(
         `revokeOrgAccess failed for org ${id} — compensating by restoring the record`,
@@ -169,33 +168,6 @@ export class OrgsService {
   async findByIds(ids: string[]): Promise<Org[]> {
     if (ids.length === 0) return [];
     return this.orgRepo.findBy({ id: In(ids) });
-  }
-
-  private async revokeOrgAccess(orgId: string): Promise<void> {
-    const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
-    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER');
-    const url = `${userServiceUrl}/api/v1/users/internal/orgs/${orgId}/users`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
-    try {
-      const res = await fetch(url, {
-        method: 'DELETE',
-        signal: controller.signal,
-        headers: { 'x-internal-token': internalToken },
-      });
-      if (!res.ok && res.status !== 404) {
-        this.logger.error(`Failed to revoke org access for ${orgId}: HTTP ${res.status}`);
-        throw new InternalServerErrorException('Failed to revoke user access after org deletion');
-      }
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        this.logger.error(`Timeout revoking org access for ${orgId}`);
-        throw new InternalServerErrorException('Timeout revoking user access after org deletion');
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeout);
-    }
   }
 
   async restore(id: string, actorId?: string): Promise<Org> {

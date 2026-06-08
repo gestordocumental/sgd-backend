@@ -8,6 +8,7 @@ set -eu
 : "${FRONTEND_URL:?FRONTEND_URL is required}"
 : "${AUTH_SENSITIVE_RATE_LIMIT:?AUTH_SENSITIVE_RATE_LIMIT is required}"
 : "${AUTH_SESSION_RATE_LIMIT:?AUTH_SESSION_RATE_LIMIT is required}"
+: "${USER_RATE_LIMIT:?USER_RATE_LIMIT is required}"
 
 # Railway inyecta PORT. Kong debe escuchar en ese puerto.
 # Si PORT no está seteado (local), usar 8000 como fallback.
@@ -22,12 +23,14 @@ jwt_secret_escaped="$(escape_sed_replacement "${KONG_JWT_SECRET}")"
 frontend_url_escaped="$(escape_sed_replacement "${FRONTEND_URL}")"
 auth_sensitive_rate_limit_escaped="$(escape_sed_replacement "${AUTH_SENSITIVE_RATE_LIMIT}")"
 auth_session_rate_limit_escaped="$(escape_sed_replacement "${AUTH_SESSION_RATE_LIMIT}")"
+user_rate_limit_escaped="$(escape_sed_replacement "${USER_RATE_LIMIT}")"
 
 sed \
   -e "s|\${KONG_JWT_SECRET}|${jwt_secret_escaped}|g" \
   -e "s|\${FRONTEND_URL}|${frontend_url_escaped}|g" \
   -e "s|\${AUTH_SENSITIVE_RATE_LIMIT}|${auth_sensitive_rate_limit_escaped}|g" \
   -e "s|\${AUTH_SESSION_RATE_LIMIT}|${auth_session_rate_limit_escaped}|g" \
+  -e "s|\${USER_RATE_LIMIT}|${user_rate_limit_escaped}|g" \
   /etc/kong/kong.yaml.template > /etc/kong/kong.yaml
 
 export KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yaml

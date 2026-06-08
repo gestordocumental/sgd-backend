@@ -62,10 +62,11 @@ export class StorageService implements OnModuleInit {
     key: string,
     filename?: string,
     mimeType?: string,
+    forceAttachment = false,
   ): Promise<{ url: string; expiresAt: Date }> {
     const disposition = filename
       ? (() => {
-          const mode = mimeType === 'application/pdf' ? 'inline' : 'attachment';
+          const mode = (!forceAttachment && mimeType === 'application/pdf') ? 'inline' : 'attachment';
           const isAscii = /^[\x20-\x7E]*$/.test(filename);
           if (isAscii) {
             return `${mode}; filename="${filename.replace(/"/g, '\\"')}"`;

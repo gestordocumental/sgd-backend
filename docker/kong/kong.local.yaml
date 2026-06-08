@@ -12,6 +12,25 @@ consumers:
 
 # ── Plugins globales ────────────────────────────────────────────────────────
 plugins:
+  # Capa 1 — por IP
+  - name: rate-limiting
+    config:
+      minute: 10000
+      limit_by: ip
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # Capa 2 — por token JWT (header Authorization)
+  - name: rate-limiting
+    config:
+      minute: 1000
+      limit_by: header
+      header_name: Authorization
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
   - name: cors
     config:
       # Listar orígenes explícitos — el estándar CORS prohíbe credentials: true con origins: "*".

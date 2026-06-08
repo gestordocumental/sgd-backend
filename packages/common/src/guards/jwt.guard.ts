@@ -30,6 +30,16 @@ function verifyAndDecodeJwt(token: string, secret: string): Record<string, unkno
   }
 }
 
+function extractKidFromToken(token: string): string | undefined {
+  try {
+    const headerJson = Buffer.from(token.split('.')[0], 'base64url').toString('utf8');
+    const header = JSON.parse(headerJson) as Record<string, unknown>;
+    return typeof header['kid'] === 'string' ? header['kid'] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 @Injectable()
 export class JwtGuard implements CanActivate {
   constructor(
@@ -82,10 +92,23 @@ export class JwtGuard implements CanActivate {
     const auth = request.headers['authorization'];
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing token');
 
-    const payload = verifyAndDecodeJwt(
-      auth.split(' ')[1],
-      this.configService.getOrThrow<string>('JWT_SECRET'),
-    );
+    const token = auth.split(' ')[1];
+    const kid = extractKidFromToken(token);
+    const activeKid    = this.configService.get<string>('JWT_SECRET_KID') ?? 'v1';
+    const activeSecret = this.configService.getOrThrow<string>('JWT_SECRET');
+    const graceKid     = this.configService.get<string>('JWT_SECRET_PREV_KID');
+    const graceSecret  = this.configService.get<string>('JWT_SECRET_PREV');
+
+    let jwtSecret: string;
+    if (!kid || kid === activeKid) {
+      jwtSecret = activeSecret;
+    } else if (graceKid && kid === graceKid && graceSecret) {
+      jwtSecret = graceSecret;
+    } else {
+      throw new UnauthorizedException('Unknown token key ID');
+    }
+
+    const payload = verifyAndDecodeJwt(token, jwtSecret);
 
     request.user = payload;
 

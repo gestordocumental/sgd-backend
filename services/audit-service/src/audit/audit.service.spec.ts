@@ -49,13 +49,17 @@ function makeHit(id: string, source: object) {
 
 describe('AuditService', () => {
   let service: AuditService;
-  let es: ReturnType<typeof makeEs>;
+  let writeEs: ReturnType<typeof makeEs>;
+  let readEs: ReturnType<typeof makeEs>;
+  let es: ReturnType<typeof makeEs>; // alias — tests that don't care which client just use this
   let logger: MockLogger;
 
   beforeEach(() => {
-    es      = makeEs();
+    writeEs = makeEs();
+    readEs  = makeEs();
+    es      = writeEs; // index() and onModuleInit() go through writeClient
     logger  = makeLogger();
-    service = new AuditService(es as any, logger as any);
+    service = new AuditService(writeEs as any, readEs as any, logger as any);
     jest.clearAllMocks();
     // Reset the correlation mock to a known default
     const ctx = require('@sgd/common');
@@ -183,7 +187,7 @@ describe('AuditService', () => {
     it('uses match_all when no filters are provided', async () => {
       await service.query({});
 
-      const call = es.search.mock.calls[0][0];
+      const call = readEs.search.mock.calls[0][0];
       expect(call.query).toEqual({ match_all: {} });
     });
 
@@ -204,7 +208,7 @@ describe('AuditService', () => {
 
       const result = await service.query(dto);
 
-      const call = es.search.mock.calls[0][0];
+      const call = readEs.search.mock.calls[0][0];
       expect(call.query.bool.must).toHaveLength(8); // 7 terms + 1 range
       expect(call.from).toBe(10);    // (2-1)*10
       expect(call.size).toBe(10);
@@ -215,7 +219,7 @@ describe('AuditService', () => {
     it('adds only range filter when only from/to provided', async () => {
       await service.query({ from: '2024-01-01T00:00:00Z', to: '2024-06-30T23:59:59Z' });
 
-      const call = es.search.mock.calls[0][0];
+      const call = readEs.search.mock.calls[0][0];
       expect(call.query.bool.must).toHaveLength(1);
       expect(call.query.bool.must[0]).toEqual({
         range: { timestamp: { gte: '2024-01-01T00:00:00Z', lte: '2024-06-30T23:59:59Z' } },
@@ -223,7 +227,7 @@ describe('AuditService', () => {
     });
 
     it('handles numeric total from Elasticsearch response', async () => {
-      es.search.mockResolvedValue({ hits: { hits: [], total: 42 } });
+      readEs.search.mockResolvedValue({ hits: { hits: [], total: 42 } });
 
       const result = await service.query({});
 
@@ -231,7 +235,7 @@ describe('AuditService', () => {
     });
 
     it('handles total.value from Elasticsearch response', async () => {
-      es.search.mockResolvedValue({ hits: { hits: [], total: { value: 15 } } });
+      readEs.search.mockResolvedValue({ hits: { hits: [], total: { value: 15 } } });
 
       const result = await service.query({});
 
@@ -240,7 +244,7 @@ describe('AuditService', () => {
 
     it('maps hits to AuditLogDocuments', async () => {
       const source = { ...validEvent, indexedAt: '2024-01-01T01:00:00Z', correlationId: null, ip: null };
-      es.search.mockResolvedValue({ hits: { hits: [makeHit('doc-1', source)], total: { value: 1 } } });
+      readEs.search.mockResolvedValue({ hits: { hits: [makeHit('doc-1', source)], total: { value: 1 } } });
 
       const result = await service.query({});
 
@@ -252,7 +256,7 @@ describe('AuditService', () => {
     it('applies default page=1 and limit=50 when not specified', async () => {
       await service.query({});
 
-      const call = es.search.mock.calls[0][0];
+      const call = readEs.search.mock.calls[0][0];
       expect(call.from).toBe(0);
       expect(call.size).toBe(50);
     });
@@ -262,11 +266,11 @@ describe('AuditService', () => {
 
   describe('export', () => {
     it('starts from 0 and uses default limit 1000', async () => {
-      es.search.mockResolvedValue({ hits: { hits: [], total: { value: 0 } } });
+      readEs.search.mockResolvedValue({ hits: { hits: [], total: { value: 0 } } });
 
       await service.export({});
 
-      const call = es.search.mock.calls[0][0];
+      const call = readEs.search.mock.calls[0][0];
       expect(call.from).toBe(0);
       expect(call.size).toBe(1000);
       expect(call.query).toEqual({ match_all: {} });
@@ -274,7 +278,7 @@ describe('AuditService', () => {
 
     it('applies all supported filters', async () => {
       const source = { ...validEvent, indexedAt: 'now', correlationId: null, ip: null };
-      es.search.mockResolvedValue({ hits: { hits: [makeHit('e-1', source)], total: { value: 1 } } });
+      readEs.search.mockResolvedValue({ hits: { hits: [makeHit('e-1', source)], total: { value: 1 } } });
 
       const dto: AuditExportDto = {
         orgId:         'org-1',
@@ -291,7 +295,7 @@ describe('AuditService', () => {
 
       const result = await service.export(dto);
 
-      const call = es.search.mock.calls[0][0];
+      const call = readEs.search.mock.calls[0][0];
       expect(call.size).toBe(500);
       expect(call.query.bool.must).toHaveLength(8); // 7 terms + 1 range
       expect(result).toHaveLength(1);
@@ -300,7 +304,7 @@ describe('AuditService', () => {
 
     it('maps hit._id to id field', async () => {
       const source = { ...validEvent, indexedAt: 'now', correlationId: null, ip: null };
-      es.search.mockResolvedValue({ hits: { hits: [makeHit('exported-1', source)] } });
+      readEs.search.mockResolvedValue({ hits: { hits: [makeHit('exported-1', source)] } });
 
       const result = await service.export({});
 
@@ -313,7 +317,7 @@ describe('AuditService', () => {
   describe('findById', () => {
     it('returns the document when found', async () => {
       const source = { ...validEvent, indexedAt: 'now', correlationId: null, ip: null };
-      es.get.mockResolvedValue({ found: true, _id: 'doc-1', _source: source });
+      readEs.get.mockResolvedValue({ found: true, _id: 'doc-1', _source: source });
 
       const result = await service.findById('doc-1');
 
@@ -323,7 +327,7 @@ describe('AuditService', () => {
     });
 
     it('returns null when found=false', async () => {
-      es.get.mockResolvedValue({ found: false, _id: 'doc-1' });
+      readEs.get.mockResolvedValue({ found: false, _id: 'doc-1' });
 
       const result = await service.findById('doc-1');
 
@@ -331,7 +335,7 @@ describe('AuditService', () => {
     });
 
     it('returns null for a 404 error status', async () => {
-      es.get.mockRejectedValue({ meta: { statusCode: 404 } });
+      readEs.get.mockRejectedValue({ meta: { statusCode: 404 } });
 
       const result = await service.findById('not-exists');
 
@@ -340,14 +344,14 @@ describe('AuditService', () => {
 
     it('rethrows errors with non-404 status codes', async () => {
       const err = { meta: { statusCode: 500 } };
-      es.get.mockRejectedValue(err);
+      readEs.get.mockRejectedValue(err);
 
       await expect(service.findById('doc-1')).rejects.toEqual(err);
     });
 
     it('rethrows errors without meta.statusCode', async () => {
       const err = new Error('Network error');
-      es.get.mockRejectedValue(err);
+      readEs.get.mockRejectedValue(err);
 
       await expect(service.findById('doc-1')).rejects.toThrow('Network error');
     });

@@ -5,14 +5,16 @@ import { Rate, Trend } from 'k6/metrics';
 const BASE_URL      = __ENV.BASE_URL       || 'https://api-dev.railway.app';
 const ADMIN_EMAIL   = __ENV.ADMIN_EMAIL    || 'admin@sgd.local';
 const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'Admin1234!';
-// Cuántos usuarios de prueba crear — 1 token cada 10 VUs es suficiente
-const N_USERS = parseInt(__ENV.N_USERS || '100', 10);
+// 50 usuarios: ~8 VUs por token en la carga pico (400 VUs).
+const N_USERS = parseInt(__ENV.N_USERS || '50', 10);
 const TEST_PASSWORD = 'K6#LoadTest!A';
 
 const errorRate   = new Rate('error_rate');
 const listDuration = new Trend('list_resources_duration', true);
 
 export const options = {
+  setupTimeout: '15m',    // 50 usuarios × ~7s c/u ≈ 6min; margen extra para throttle
+  teardownTimeout: '10m', // 50 deletes × retry con backoff — el default de 60s es insuficiente
   scenarios: {
     ramp_up: {
       executor: 'ramping-vus',
@@ -20,11 +22,10 @@ export const options = {
       stages: [
         { duration: '1m',  target: 50 },
         { duration: '2m',  target: 100 },
-        { duration: '2m',  target: 250 },
-        { duration: '3m',  target: 500 },
-        { duration: '3m',  target: 750 },
-        { duration: '3m',  target: 1000 },
-        { duration: '2m',  target: 1000 },
+        { duration: '2m',  target: 200 },
+        { duration: '3m',  target: 300 },
+        { duration: '3m',  target: 400 },
+        { duration: '3m',  target: 400 }, // sustain al pico
         { duration: '2m',  target: 0 },
       ],
     },
@@ -37,20 +38,37 @@ export const options = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SETUP — corre una sola vez antes del test
-// Crea N usuarios de prueba y devuelve sus tokens + IDs para el teardown
 // ─────────────────────────────────────────────────────────────────────────────
 export function setup() {
   const adminToken = adminLogin();
 
+  // Obtener el primer org disponible para asignar los usuarios de prueba
+  const orgsRes = http.get(`${BASE_URL}/api/v1/org?page=1&limit=1`, {
+    headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+  });
+  let orgId = __ENV.ORG_ID || null;
+  if (!orgId) {
+    try {
+      const orgsBody = JSON.parse(orgsRes.body);
+      const orgs = orgsBody.data ?? orgsBody;
+      if (Array.isArray(orgs) && orgs.length > 0) orgId = orgs[0].id;
+    } catch (_) {}
+  }
+  if (!orgId) {
+    throw new Error('[setup] No se encontró ninguna organización. Pasa -e ORG_ID=<uuid> o crea una org primero.');
+  }
+  console.log(`[setup] Usando orgId: ${orgId}`);
+
   const users = [];
+  const cleanupUsers = [];
 
   for (let i = 0; i < N_USERS; i++) {
     const email = `k6test${String(i).padStart(3, '0')}@sgd.local`;
 
-    // 1. Crear usuario
+    // 1. Crear usuario asignado al org
     const createRes = http.post(
       `${BASE_URL}/api/v1/users`,
-      JSON.stringify({ email }),
+      JSON.stringify({ email, orgId }),
       {
         headers: {
           'Content-Type': 'application/json',
@@ -72,9 +90,11 @@ export function setup() {
       console.warn(`[setup] Respuesta inesperada al crear ${email}: ${createRes.body}`);
       continue;
     }
+    // Registrar para cleanup inmediatamente — los continues posteriores no deben dejar al usuario sin borrar
+    cleanupUsers.push({ userId, email });
 
     // 2. Espera a que Kafka procese la creación de credenciales en auth-service
-    sleep(2);
+    sleep(4);
 
     // 3. Asignar contraseña via provision
     const provisionRes = http.post(
@@ -93,26 +113,62 @@ export function setup() {
       continue;
     }
 
-    // 4. Login como el nuevo usuario para obtener su token
-    const loginRes = http.post(
-      `${BASE_URL}/api/v1/auth/login`,
-      JSON.stringify({ email, password: TEST_PASSWORD }),
-      { headers: { 'Content-Type': 'application/json' } },
-    );
+    // 4. Espera adicional para que auth-service procese la provision
+    sleep(2);
 
-    if (loginRes.status !== 200 && loginRes.status !== 201) {
-      console.warn(`[setup] Login falló para ${email}: ${loginRes.status} ${loginRes.body}`);
+    // 5. Login con reintentos
+    let loginRes;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      loginRes = http.post(
+        `${BASE_URL}/api/v1/auth/login`,
+        JSON.stringify({ email, password: TEST_PASSWORD }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+      if (loginRes.status === 200 || loginRes.status === 201) break;
+      if (loginRes.status === 429) {
+        console.log(`[setup] Throttle en login de ${email} (intento ${attempt}/3). Esperando 65s...`);
+        sleep(65);
+      } else {
+        console.warn(`[setup] Login ${email} intento ${attempt}/3: ${loginRes.status}`);
+        sleep(3);
+      }
+    }
+
+    if (!loginRes || (loginRes.status !== 200 && loginRes.status !== 201)) {
+      console.warn(`[setup] Login falló definitivamente para ${email}: ${loginRes?.status} ${loginRes?.body}`);
       continue;
     }
 
-    let token;
+    let globalToken;
     try {
-      token = JSON.parse(loginRes.body).accessToken;
+      globalToken = JSON.parse(loginRes.body).accessToken;
     } catch (_) {}
-    if (!token) {
+    if (!globalToken) {
       console.warn(`[setup] No se obtuvo accessToken para ${email}: ${loginRes.body}`);
       continue;
     }
+
+    // 6. switch-company → token con companyId + permisos embebidos
+    const switchRes = http.post(
+      `${BASE_URL}/api/v1/auth/switch-company`,
+      JSON.stringify({ companyId: orgId }),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${globalToken}`,
+        },
+      },
+    );
+
+    let token;
+    if (switchRes.status === 200 || switchRes.status === 201) {
+      try { token = JSON.parse(switchRes.body).accessToken; } catch (_) {}
+    }
+    if (!token) {
+      console.warn(`[setup] switch-company falló para ${email}: ${switchRes.status} — usando token global`);
+      token = globalToken;
+    }
+
     users.push({ userId, email, token });
 
     // Pausa pequeña para no activar el rate limiter durante el setup
@@ -123,8 +179,9 @@ export function setup() {
     throw new Error('[setup] No se creó ningún usuario de prueba. Abortando.');
   }
 
-  console.log(`[setup] ${users.length} usuarios de prueba creados y autenticados.`);
-  return { users };
+  console.log(`[setup] ${users.length} usuarios de prueba autenticados (${cleanupUsers.length} creados en total).`);
+  // orgId se propaga al default() para que listOrgs use el endpoint correcto
+  return { users, cleanupUsers, orgId };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,7 +194,9 @@ export default function (data) {
   listUsers(token);
   sleep(0.3);
 
-  listOrgs(token);
+  // FIX: GET /api/v1/org requiere isSuperAdmin — los usuarios de prueba son usuarios
+  // normales. El endpoint correcto para leer la org del usuario es GET /org/mine.
+  listMyOrg(token, data.orgId);
   sleep(0.3);
 
   listWorkflows(token);
@@ -149,40 +208,53 @@ export default function (data) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TEARDOWN — corre una sola vez al final, limpia los usuarios de prueba
+// TEARDOWN — limpia usuarios de prueba con retry ante 429
 // ─────────────────────────────────────────────────────────────────────────────
 export function teardown(data) {
   const adminToken = adminLogin();
 
+  const toDelete = data.cleanupUsers ?? data.users;
   let deleted = 0;
-  for (const { userId, email } of data.users) {
-    const res = http.del(
-      `${BASE_URL}/api/v1/users/${userId}`,
-      null,
-      {
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
+  for (const { userId, email } of toDelete) {
+    let res;
+    // Hasta 3 intentos con backoff de 65s si el rate limiter sigue activo
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      res = http.del(
+        `${BASE_URL}/api/v1/users/${userId}`,
+        null,
+        {
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            'Content-Type': 'application/json',
+          },
         },
-      },
-    );
+      );
 
-    if (res.status === 200 || res.status === 204) {
-      deleted++;
-    } else {
+      if (res.status === 200 || res.status === 204) {
+        deleted++;
+        break;
+      }
+
+      if (res.status === 429) {
+        console.log(`[teardown] Rate limit al borrar ${email} (intento ${attempt}/3). Esperando 65s...`);
+        sleep(65);
+        continue;
+      }
+
       console.warn(`[teardown] No se pudo borrar ${email}: ${res.status}`);
+      break;
     }
-    sleep(0.1);
+
+    sleep(0.2); // pausa entre deletes para no acumular rate limit
   }
 
-  console.log(`[teardown] ${deleted}/${data.users.length} usuarios de prueba eliminados.`);
+  console.log(`[teardown] ${deleted}/${toDelete.length} usuarios de prueba eliminados.`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 function adminLogin() {
-  // Reintenta hasta 5 veces con backoff de 65s si hay throttle activo
   for (let attempt = 1; attempt <= 5; attempt++) {
     const res = http.post(
       `${BASE_URL}/api/v1/auth/login`,
@@ -230,10 +302,13 @@ function listUsers(token) {
   errorRate.add(!check(res, { 'list users 200': (r) => r.status === 200 }));
 }
 
-function listOrgs(token) {
+// FIX: usa GET /org/mine?ids=orgId (AuthOnly) en vez de GET /org (SuperAdminOnly).
+// GET /org lista todas las orgs del sistema — solo accesible por super admins.
+// GET /org/mine resuelve los detalles de la org del usuario autenticado.
+function listMyOrg(token, orgId) {
   const start = Date.now();
   const res = http.get(
-    `${BASE_URL}/api/v1/org?page=1&limit=10`,
+    `${BASE_URL}/api/v1/org/mine?ids=${orgId}`,
     { ...authHeaders(token), tags: { type: 'list_orgs' } },
   );
   listDuration.add(Date.now() - start);

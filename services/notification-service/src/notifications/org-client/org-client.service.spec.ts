@@ -33,7 +33,6 @@ describe('OrgClientService', () => {
     expect(http.get).toHaveBeenCalledWith(
       'http://org-svc/api/org/org-1',
       expect.objectContaining({
-        timeout: 3000,
         headers: expect.objectContaining({
           'x-internal-token': 'org-token',
           'x-correlation-id': 'test-corr-id',

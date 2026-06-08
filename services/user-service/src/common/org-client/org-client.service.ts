@@ -3,17 +3,20 @@ import {
   BadRequestException,
   InternalServerErrorException,
   GatewayTimeoutException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import { AppLogger, CORRELATION_ID_HEADER, getCorrelationId } from '@sgd/common';
+import CircuitBreaker = require('opossum');
 
 @Injectable()
 export class OrgClientService {
   private readonly orgServiceUrl: string | undefined;
   private readonly internalToken: string | undefined;
   private readonly timeoutMs: number;
+  private readonly cb: CircuitBreaker;
 
   constructor(
     private readonly httpService: HttpService,
@@ -22,9 +25,9 @@ export class OrgClientService {
   ) {
     this.orgServiceUrl = this.config.get<string>('ORG_SERVICE_URL');
     this.internalToken = this.config.get<string>('INTERNAL_TOKEN_USER_ORG');
-    const rawTimeout = this.config.get<string | number>('ORG_SERVICE_TIMEOUT_MS');
+    const rawTimeout   = this.config.get<string | number>('ORG_SERVICE_TIMEOUT_MS');
     const parsedTimeout = rawTimeout == null ? 5_000 : Number(rawTimeout);
-    this.timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 5_000;
+    this.timeoutMs      = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 5_000;
 
     if (!this.orgServiceUrl) {
       this.logger.warn(
@@ -32,11 +35,30 @@ export class OrgClientService {
         'OrgClientService',
       );
     }
+
+    this.cb = new CircuitBreaker(
+      (fn: () => Promise<unknown>) => fn(),
+      {
+        name:                     'org-service',
+        timeout:                  false,   // RxJS timeout() handles per-request timeouts
+        errorThresholdPercentage: 50,
+        resetTimeout:             30_000,
+        volumeThreshold:          3,
+        errorFilter: (err: any) => {
+          const s = err?.response?.status;
+          return typeof s === 'number' && s >= 400 && s < 500;
+        },
+      },
+    );
+
+    this.cb.on('open',     () => this.logger.warn('[circuit] org-service OPEN — failing fast', 'OrgClientService'));
+    this.cb.on('halfOpen', () => this.logger.log('[circuit] org-service HALF-OPEN — probing',  'OrgClientService'));
+    this.cb.on('close',    () => this.logger.log('[circuit] org-service CLOSED — recovered',   'OrgClientService'));
   }
 
   /**
    * Resolves human-readable names for org-structure UUIDs.
-   * Returns null silently on any error (non-configured, deleted entities, timeout)
+   * Returns null silently on any error (non-configured, deleted entities, timeout, circuit open)
    * so callers can fall back to raw IDs rather than failing the main operation.
    */
   async resolveNamesById(
@@ -52,23 +74,25 @@ export class OrgClientService {
     if (!this.orgServiceUrl || !this.internalToken) return null;
     try {
       const correlationId = getCorrelationId();
-      const response = await firstValueFrom(
-        this.httpService
-          .post<{
-            departamentoNombre: string;
-            areaNombre: string | null;
-            cargoNombre: string | null;
-          }>(
-            `${this.orgServiceUrl}/internal/structure/resolve-by-ids`,
-            { orgId, departamentoId, areaId: areaId ?? undefined, cargoId: cargoId ?? undefined },
-            {
-              headers: {
-                'x-internal-token': this.internalToken,
-                [CORRELATION_ID_HEADER]: correlationId,
+      const response = await this.fireWithCb(() =>
+        firstValueFrom(
+          this.httpService
+            .post<{
+              departamentoNombre: string;
+              areaNombre: string | null;
+              cargoNombre: string | null;
+            }>(
+              `${this.orgServiceUrl}/internal/structure/resolve-by-ids`,
+              { orgId, departamentoId, areaId: areaId ?? undefined, cargoId: cargoId ?? undefined },
+              {
+                headers: {
+                  'x-internal-token': this.internalToken,
+                  [CORRELATION_ID_HEADER]: correlationId,
+                },
               },
-            },
-          )
-          .pipe(timeout(this.timeoutMs)),
+            )
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
       return response.data;
     } catch {
@@ -93,66 +117,65 @@ export class OrgClientService {
     const url = `${this.orgServiceUrl}/internal/structure/resolve-by-ids`;
 
     this.logger.http({
-      type: 'internal-request',
-      target: 'org-service',
-      url,
-      correlationId,
+      type: 'internal-request', target: 'org-service', url, correlationId,
       message: `→ [org-service] POST /internal/structure/resolve-by-ids (validate)`,
     });
 
     try {
-      await firstValueFrom(
-        this.httpService
-          .post(
-            url,
-            { orgId, departamentoId, areaId, cargoId },
-            {
-              headers: {
-                'x-internal-token': this.internalToken,
-                [CORRELATION_ID_HEADER]: correlationId,
+      await this.fireWithCb(() =>
+        firstValueFrom(
+          this.httpService
+            .post(
+              url,
+              { orgId, departamentoId, areaId, cargoId },
+              {
+                headers: {
+                  'x-internal-token': this.internalToken,
+                  [CORRELATION_ID_HEADER]: correlationId,
+                },
               },
-            },
-          )
-          .pipe(timeout(this.timeoutMs)),
+            )
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
 
       this.logger.http({
-        type: 'internal-response',
-        target: 'org-service',
-        statusCode: 200,
-        correlationId,
+        type: 'internal-response', target: 'org-service', statusCode: 200, correlationId,
         message: `← [org-service] POST /internal/structure/resolve-by-ids 200`,
       });
     } catch (error: any) {
+      if (error instanceof ServiceUnavailableException) throw error;
+
       if (error instanceof TimeoutError) {
         this.logger.http({
-          type: 'internal-response',
-          target: 'org-service',
-          statusCode: 504,
-          correlationId,
+          type: 'internal-response', target: 'org-service', statusCode: 504, correlationId,
           message: `← [org-service] POST /internal/structure/resolve-by-ids 504: timed out after ${this.timeoutMs}ms`,
         });
         throw new GatewayTimeoutException('org-service did not respond in time');
       }
 
-      const status = error?.response?.status;
-      const message: string = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
+      const status  = error?.response?.status;
+      const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
 
       this.logger.http({
-        type: 'internal-response',
-        target: 'org-service',
-        statusCode: status ?? 500,
-        correlationId,
+        type: 'internal-response', target: 'org-service',
+        statusCode: status ?? 500, correlationId,
         message: `← [org-service] POST /internal/structure/resolve-by-ids ${status ?? 500}: ${message}`,
       });
 
-      if (status === 400) {
-        throw new BadRequestException(message);
-      }
+      if (status === 400) throw new BadRequestException(message);
+      throw new InternalServerErrorException(`Could not validate org structure: ${message}`);
+    }
+  }
 
-      throw new InternalServerErrorException(
-        `Could not validate org structure: ${message}`,
-      );
+  private async fireWithCb<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await this.cb.fire(fn) as T;
+    } catch (err: any) {
+      if (err?.code === 'EOPENBREAKER') {
+        throw new ServiceUnavailableException('org-service is temporarily unavailable');
+      }
+      throw err;
     }
   }
 }

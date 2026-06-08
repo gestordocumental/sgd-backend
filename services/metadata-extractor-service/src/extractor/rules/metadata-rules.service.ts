@@ -36,11 +36,9 @@ export class MetadataRulesService {
     /\bv([\d]+(?:[.,]\d+)?)\b/i,
   ];
 
-  // ─── Nombre / Title ——————————————————————————————————————————————————————
-  private readonly nombreLabelPatterns = [
-    // eslint-disable-next-line no-useless-escape, security/detect-unsafe-regex
-    /(?:nombre(?:\s+del?\s+documento)?|title|t[ií]tulo|proceso|formato)\s*[:\-]\s*(.+)/i,
-  ];
+  // ─── Nombre / Title — document-type words used in pass 2 of header analysis ─
+  private readonly docTypeWords =
+    /manual|procedimiento|instructivo|formato|pol[ií]tica|gu[ií]a|protocolo|plan\s+de|reglamento|contrato|acuerdo/i;
 
   // Company suffix heuristic — lines containing these are likely company names
   private readonly companySuffixRe =
@@ -84,19 +82,85 @@ export class MetadataRulesService {
     fullText: string,
     orgName: string | null,
   ): string | null {
-    // 1. Title cell extracted directly from header — no filtering needed
+    // 1. Structured title cell from DOCX/XLSX header — highest confidence
     if (titleCell?.trim()) return titleCell.trim().substring(0, 255);
-    // 2. Left cell contains company + title mixed — filter company lines
+    // 2. Left cell (DOCX/XLSX) with company name filtering
     if (leftCell) {
       const title = this.extractTitleFromLeftCell(leftCell, orgName);
       if (title) return title;
     }
-    // 3. Label pattern in full text
-    const fromLabel = this.applyPatterns(fullText, this.nombreLabelPatterns);
-    if (fromLabel) return fromLabel;
-    // 4. Last resort — first substantial line of the document
-    const firstLine = fullText.split('\n').map((l) => l.trim()).find((l) => l.length >= 10);
-    return firstLine ? firstLine.substring(0, 255) : null;
+    // 3. Header analysis on plain text (PDF and any unstructured document):
+    //    ignore company names, codes, versions, dates and table headers;
+    //    prefer lines that carry the official document name.
+    return this.extractTitleFromText(fullText, orgName);
+  }
+
+  /**
+   * Extracts the document title from plain text by applying three passes:
+   *
+   * Pass 1 — explicit label  : "Nombre del documento: X", "Título: X"
+   * Pass 2 — document type   : "Formato de X", "Manual de X", "Procedimiento de X"…
+   *                            Works anywhere in the text — pdf-parse sometimes places
+   *                            body content before header content in the stream.
+   * Pass 3 — elimination     : first line that is NOT a company name, code, version,
+   *                            date, or table-column header.
+   */
+  private extractTitleFromText(text: string, orgName: string | null): string | null {
+    const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length >= 3);
+
+    // Pass 1 — explicit label ("Nombre del documento: Política de Seguridad")
+    for (const line of lines) {
+      const m = line.match(
+        // eslint-disable-next-line security/detect-unsafe-regex
+        /(?:nombre(?:\s+del?\s+documento)?|t[ií]tulo|title)\s*[:-]\s*(.{5,150})/i,
+      );
+      if (m?.[1]) return m[1].trim().substring(0, 255);
+    }
+
+    // Pass 2 — document-type word followed by "de / del / para"
+    // ("Formato de Requisición de Compras", "Manual de Calidad", etc.)
+    // Uses (?:^|\s) so it matches even when merged on the same line as the company name.
+    // Stops at ":" or "#" to avoid capturing trailing code/column text.
+    // eslint-disable-next-line security/detect-unsafe-regex
+    const docTypePattern = new RegExp(
+      `(?:^|\\s)((?:${this.docTypeWords.source})\\s+(?:de[l]?|para)\\s+[^#:\\n]{5,})`,
+      'im',
+    );
+    for (const line of lines) {
+      const m = line.match(docTypePattern);
+      if (m?.[1]) return m[1].trim().substring(0, 255);
+    }
+
+    // Pass 3 — elimination: skip every line that is clearly metadata, then return the first
+    // remaining candidate of at least 10 characters.
+    for (const line of lines) {
+      if (line.length >= 10 && !this.looksLikeTableHeader(line) && !this.isMetadataLine(line, orgName)) {
+        return line.substring(0, 255);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Returns true when a line is recognisable as document metadata rather than a title:
+   * company names, standalone codes, version labels, dates, or page indicators.
+   */
+  private isMetadataLine(line: string, orgName: string | null): boolean {
+    if (this.looksLikeCompanyLine(line, orgName)) return true;
+    // Standalone document code: "AD-C-F-002"
+    // eslint-disable-next-line security/detect-unsafe-regex
+    if (/^[A-ZÁÉÍÓÚÑ]{1,8}(?:-[A-ZÁÉÍÓÚÑ0-9]{1,8}){1,6}$/.test(line)) return true;
+    // Labeled metadata fields: "Código: …", "Versión: …", "Fecha: …"
+    if (/^(?:c[oó]digo|versi[oó]n|version|fecha|date|rev(?:isi[oó]n)?|elabor|aprob|vigencia)\s*[:-]/i.test(line)) return true;
+    // Raw date value: "16/04/2026", "2026-04-16"
+    if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(line)) return true;
+    // Version-only line: "V10", "v1.0", "10"
+    // eslint-disable-next-line security/detect-unsafe-regex
+    if (/^v\.?\s*\d+(?:[.,]\d+)?$/i.test(line) || /^\d+(?:[.,]\d+)?$/.test(line)) return true;
+    // Page indicators: "Página 1", "1 de 5"
+    if (/^(?:p[aá]gina|page)\s*\d|^\d+\s*(?:de|of)\s*\d+$/i.test(line)) return true;
+    return false;
   }
 
   /**
@@ -127,6 +191,24 @@ export class MetadataRulesService {
     // All-caps 1-2 token text: company abbreviation (e.g. "ACME", "GD CORP").
     // Capped at 2 tokens so multi-word titles in uppercase (e.g. "MANUAL DE CALIDAD") are not discarded.
     if (line === line.toUpperCase() && line.split(/\s+/).length <= 2 && line.length < 30) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Returns true for lines that look like table/form column headers rather than document titles.
+   * Used to skip false positives in the first-line fallback.
+   */
+  private looksLikeTableHeader(line: string): boolean {
+    // Contains a standalone # — column ordinal marker (e.g. "Nombre Ítem #CANTIDAD")
+    if (line.includes('#')) return true;
+    // 3+ tokens all in UPPERCASE with no lowercase letters — typical column header row
+    const tokens = line.split(/\s+/).filter(Boolean);
+    if (
+      tokens.length >= 3 &&
+      tokens.every((t) => t === t.toUpperCase() && /^[A-ZÁÉÍÓÚÑ/\d]{2,}$/.test(t))
+    ) {
       return true;
     }
     return false;

@@ -3,6 +3,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { JwtModule } from "@nestjs/jwt";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { JwtKeyService } from "./jwt-key.service";
 import { Credential } from "./entities/credential.entity";
 import { UserClientModule } from "../user-client/user-client.module";
 import { CredentialSeeder } from "./credential.seeder";
@@ -17,6 +18,6 @@ import { AppLogger, KafkaModule } from "@sgd/common";
     KafkaModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, CredentialSeeder, AppLogger],
+  providers: [AuthService, JwtKeyService, CredentialSeeder, AppLogger],
 })
 export class AuthModule {}

@@ -5,6 +5,7 @@ import {
   Query,
   NotFoundException,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -13,13 +14,14 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth, JwtPayloadParam, JwtPayload } from '@sgd/common';
+import { Auth, JwtPayloadParam, JwtPayload, PermissionsGuard, RequirePermission } from '@sgd/common';
 import { AuditService } from './audit.service';
 import { AuditQueryDto, AuditExportDto } from './dto/audit-query.dto';
 
 @ApiTags('Audit')
 @ApiBearerAuth('JWT')
 @Controller('api/v1/audit')
+@UseGuards(PermissionsGuard)
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
@@ -30,6 +32,7 @@ export class AuditController {
    * - Usuario normal: solo puede ver eventos de su propia organización (orgId = companyId del token).
    */
   @Auth()
+  @RequirePermission('AUDIT', 'READ')
   @Get('logs')
   @ApiOperation({ summary: 'Consultar registro de auditoría (paginado)' })
   @ApiOkResponse({ description: 'Lista paginada de eventos de auditoría' })
@@ -56,6 +59,7 @@ export class AuditController {
   }
 
   @Auth()
+  @RequirePermission('AUDIT', 'READ')
   @Get('logs/export')
   @ApiOperation({ summary: 'Exportar eventos de auditoría (máx. 5000 registros)' })
   @ApiOkResponse({ description: 'Lista plana de eventos para exportar a Excel' })
@@ -79,6 +83,7 @@ export class AuditController {
    * Super admin: puede acceder a cualquier evento. Org user: solo eventos de su org.
    */
   @Auth()
+  @RequirePermission('AUDIT', 'READ')
   @Get('logs/:id')
   @ApiOperation({ summary: 'Obtener un evento de auditoría por ID' })
   @ApiOkResponse({ description: 'Evento de auditoría' })

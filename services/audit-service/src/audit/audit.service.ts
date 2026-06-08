@@ -1,5 +1,5 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { ElasticsearchService } from '@nestjs/elasticsearch';
+import { Injectable, OnModuleInit, Inject } from '@nestjs/common';
+import { Client } from '@elastic/elasticsearch';
 import { AppLogger, getCorrelationId } from '@sgd/common';
 import { AuditLogEvent } from './dto/audit-log-event.dto';
 import {
@@ -8,25 +8,28 @@ import {
   AuditExportDto,
   PaginatedAuditLogs,
 } from './dto/audit-query.dto';
+import { ES_WRITE_CLIENT, ES_READ_CLIENT } from './es-client.tokens';
 
 const INDEX = 'audit-logs';
 
 @Injectable()
 export class AuditService implements OnModuleInit {
   constructor(
-    private readonly es: ElasticsearchService,
+    @Inject(ES_WRITE_CLIENT) private readonly writeClient: Client,
+    @Inject(ES_READ_CLIENT)  private readonly readClient: Client,
     private readonly logger: AppLogger,
   ) {}
 
   /**
    * Crea el índice en Elasticsearch si no existe al arrancar el servicio.
    * El mapping define los tipos de los campos más importantes para búsquedas eficientes.
+   * Usa writeClient porque la creación de índices requiere permisos de escritura/admin.
    */
   async onModuleInit() {
     try {
-      const exists = await this.es.indices.exists({ index: INDEX });
+      const exists = await this.writeClient.indices.exists({ index: INDEX });
       if (!exists) {
-        await this.es.indices.create({
+        await this.writeClient.indices.create({
           index: INDEX,
           mappings: {
             properties: {
@@ -75,7 +78,7 @@ export class AuditService implements OnModuleInit {
       indexedAt:     new Date().toISOString(),
     };
 
-    await this.es.index({ index: INDEX, document: doc });
+    await this.writeClient.index({ index: INDEX, document: doc });
 
     this.logger.log(
       `Indexed audit event: service=${event.service} action=${event.action} resource=${event.resourceType}/${event.resourceId}`,
@@ -149,7 +152,7 @@ export class AuditService implements OnModuleInit {
 
     const must = this.buildMustClauses(dto, superAdminScope);
 
-    const response = await this.es.search<AuditLogDocument>({
+    const response = await this.readClient.search<AuditLogDocument>({
       index: INDEX,
       from,
       size:  limit,
@@ -174,7 +177,7 @@ export class AuditService implements OnModuleInit {
     const limit = dto.limit ?? 1000;
     const must  = this.buildMustClauses(dto, superAdminScope);
 
-    const response = await this.es.search<AuditLogDocument>({
+    const response = await this.readClient.search<AuditLogDocument>({
       index: INDEX,
       from:  0,
       size:  limit,
@@ -190,7 +193,7 @@ export class AuditService implements OnModuleInit {
 
   async findById(id: string): Promise<AuditLogDocument | null> {
     try {
-      const response = await this.es.get<AuditLogDocument>({ index: INDEX, id });
+      const response = await this.readClient.get<AuditLogDocument>({ index: INDEX, id });
       if (!response.found) return null;
       return { id: response._id, ...response._source } as AuditLogDocument;
     } catch (err: unknown) {

@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { OrgsService } from './orgs.service';
 import { Org, OrgStatus } from './entities/org.entity';
 import { KafkaProducerService } from '@sgd/common';
+import { UserClientService } from '../common/user-client/user-client.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -37,6 +38,8 @@ const makeOrg = (overrides: Partial<Org> = {}): Org => ({
 describe('OrgsService', () => {
   let service: OrgsService;
   let repo: MockRepo<Org>;
+  let kafkaProducer: { emitSafe: jest.Mock };
+  let userClient: { revokeOrgAccess: jest.Mock };
   const originalFetch = global.fetch;
 
   beforeAll(() => {
@@ -53,10 +56,14 @@ describe('OrgsService', () => {
       create: jest.fn(),
       save: jest.fn(),
       find: jest.fn(),
+      findBy: jest.fn(),
       softRemove: jest.fn(),
       restore: jest.fn(),
       createQueryBuilder: jest.fn(),
     };
+
+    kafkaProducer = { emitSafe: jest.fn() };
+    userClient = { revokeOrgAccess: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -73,7 +80,11 @@ describe('OrgsService', () => {
         },
         {
           provide: KafkaProducerService,
-          useValue: { emitSafe: jest.fn() },
+          useValue: kafkaProducer,
+        },
+        {
+          provide: UserClientService,
+          useValue: userClient,
         },
       ],
     }).compile();
@@ -214,5 +225,67 @@ describe('OrgsService', () => {
     repo.findOne!.mockResolvedValue(null);
 
     await expect(service.restore('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  it('filters active organizations when status is "active"', async () => {
+    const qb = makeQbMock([makeOrg()], 1);
+    repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+    await service.findAll({ status: 'active' });
+
+    expect(qb['andWhere']).toHaveBeenCalledWith('o.deletedAt IS NULL');
+    expect(qb['andWhere']).toHaveBeenCalledWith('o.status = :s', { s: OrgStatus.ACTIVE });
+  });
+
+  it('filters inactive organizations when status is "inactive"', async () => {
+    const qb = makeQbMock([], 0);
+    repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+    await service.findAll({ status: 'inactive' });
+
+    expect(qb['andWhere']).toHaveBeenCalledWith('o.deletedAt IS NULL');
+    expect(qb['andWhere']).toHaveBeenCalledWith('o.status != :s', { s: OrgStatus.ACTIVE });
+  });
+
+  it('emits audit log on update when actorId is provided', async () => {
+    const org = makeOrg();
+    const saved = makeOrg({ name: 'New Name' });
+    repo.findOne!
+      .mockResolvedValueOnce(org)
+      .mockResolvedValueOnce(null);
+    repo.save!.mockResolvedValue(saved);
+
+    await service.update(org.id, { name: 'New Name' }, 'actor-1');
+
+    expect(kafkaProducer.emitSafe).toHaveBeenCalled();
+  });
+
+  it('compensates by restoring org when revokeOrgAccess fails during remove', async () => {
+    const org = makeOrg();
+    repo.findOne!.mockResolvedValue(org);
+    repo.softRemove!.mockResolvedValue(undefined);
+    repo.restore!.mockResolvedValue({ affected: 1 });
+    userClient.revokeOrgAccess.mockRejectedValueOnce(new Error('Service unavailable'));
+
+    await expect(service.remove(org.id)).rejects.toThrow('Service unavailable');
+
+    expect(repo.softRemove).toHaveBeenCalledWith(org);
+    expect(repo.restore).toHaveBeenCalledWith(org.id);
+  });
+
+  it('returns empty array from findByIds when ids list is empty', async () => {
+    const result = await service.findByIds([]);
+
+    expect(result).toEqual([]);
+    expect(repo.findBy).not.toHaveBeenCalled();
+  });
+
+  it('returns organizations by id list from findByIds', async () => {
+    const orgs = [makeOrg()];
+    repo.findBy!.mockResolvedValue(orgs);
+
+    const result = await service.findByIds([orgs[0].id]);
+
+    expect(result).toBe(orgs);
   });
 });

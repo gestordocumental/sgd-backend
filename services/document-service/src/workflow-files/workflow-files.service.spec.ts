@@ -159,7 +159,7 @@ describe('WorkflowFilesService', () => {
 
       const result = await service.getSignedUrl('org-1', key);
 
-      expect(storage.getSignedDownloadUrl).toHaveBeenCalledWith(key, undefined, undefined);
+      expect(storage.getSignedDownloadUrl).toHaveBeenCalledWith(key, undefined, undefined, true);
       expect(result.signedUrl).toBe('https://signed.url');
       expect(result.expiresAt).toBeInstanceOf(Date);
     });

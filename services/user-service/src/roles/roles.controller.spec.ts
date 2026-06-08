@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RolesController } from './roles.controller';
 import { RolesService } from './roles.service';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Role, RoleScope } from './entities/role.entity';
 import { Permission, PermissionModule, PermissionAction } from './entities/permission.entity';
 
@@ -53,7 +54,10 @@ describe('RolesController', () => {
           },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(PermissionsGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get(RolesController);
     rolesService = module.get(RolesService);

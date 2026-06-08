@@ -1,0 +1,2 @@
+export const ES_WRITE_CLIENT = 'ES_WRITE_CLIENT';
+export const ES_READ_CLIENT  = 'ES_READ_CLIENT';

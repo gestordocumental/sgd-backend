@@ -1057,6 +1057,18 @@ describe('UsersService', () => {
   // ─── getEffectivePermissions ──────────────────────────────────────────────
 
   describe('getEffectivePermissions', () => {
+    function mockPermissionsQb(rows: unknown[]) {
+      const qb = {
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoinAndSelect:  jest.fn().mockReturnThis(),
+        where:              jest.fn().mockReturnThis(),
+        andWhere:           jest.fn().mockReturnThis(),
+        getMany:            jest.fn().mockResolvedValue(rows),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+      return qb;
+    }
+
     it('returns flat deduplicated permissions from all org roles', async () => {
       const uor = makeUor({
         role: {
@@ -1068,7 +1080,7 @@ describe('UsersService', () => {
           ],
         } as any,
       });
-      uorRepo.find.mockResolvedValue([uor] as any);
+      mockPermissionsQb([uor]);
 
       const result = await service.getEffectivePermissions('user-uuid-1', 'org-uuid-1');
 
@@ -1079,7 +1091,7 @@ describe('UsersService', () => {
     });
 
     it('returns empty array when user has no roles in the org', async () => {
-      uorRepo.find.mockResolvedValue([]);
+      mockPermissionsQb([]);
       expect(await service.getEffectivePermissions('user-uuid-1', 'org-uuid-1')).toEqual([]);
     });
   });
