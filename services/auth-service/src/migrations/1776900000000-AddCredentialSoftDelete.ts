@@ -33,6 +33,18 @@ export class AddCredentialSoftDelete1776900000000 implements MigrationInterface 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_credentials_email_active"`);
 
+    // Soft-deleted rows cannot exist in the pre-migration schema (the column is
+    // about to be dropped), and they may share an email with an active row —
+    // which would violate the global unique constraint we are about to recreate.
+    // Permanently remove them before restoring the constraint.
+    //
+    // ⚠️  WARNING: this rollback is destructive in production.
+    // Do not run it if retaining soft-deleted credential records matters.
+    await queryRunner.query(`
+      DELETE FROM "credentials"
+      WHERE "deleted_at" IS NOT NULL
+    `);
+
     await queryRunner.query(`
       DO $$ BEGIN
         ALTER TABLE "credentials"

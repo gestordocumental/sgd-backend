@@ -14,8 +14,18 @@ import { INTERNAL_TOKEN_KEYS_META } from '../decorators/internal-token.decorator
 
 // ── CIDR helpers (IPv4 only; extend if IPv6 private ranges are needed) ────────
 
-function ipv4ToUint32(ip: string): number {
-  return ip.split('.').reduce((acc, octet) => ((acc << 8) | parseInt(octet, 10)) >>> 0, 0) >>> 0;
+function ipv4ToUint32(ip: string): number | null {
+  const octets = ip.split('.');
+  if (octets.length !== 4) return null;
+
+  let acc = 0;
+  for (const octet of octets) {
+    if (!/^\d+$/.test(octet)) return null;
+    const n = Number(octet);
+    if (n < 0 || n > 255) return null;
+    acc = ((acc << 8) | n) >>> 0;
+  }
+  return acc >>> 0;
 }
 
 /**
@@ -34,12 +44,17 @@ function cidrContains(cidr: string, ip: string): boolean {
   if (!cidr.includes('.')) return cidr === ip || cidr === normalizedIp; // bare IPv6 literal
 
   const [rangeIp, prefixStr] = cidr.includes('/') ? cidr.split('/') : [cidr, '32'];
-  const prefix = parseInt(prefixStr, 10);
+  const prefix = Number(prefixStr);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false;
 
   if (!normalizedIp.includes('.')) return false; // IPv6 src, IPv4 CIDR — no match
 
+  const src  = ipv4ToUint32(normalizedIp);
+  const base = ipv4ToUint32(rangeIp);
+  if (src === null || base === null) return false;
+
   const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
-  return (ipv4ToUint32(normalizedIp) & mask) === (ipv4ToUint32(rangeIp) & mask);
+  return (src & mask) === (base & mask);
 }
 
 // ── Guard ─────────────────────────────────────────────────────────────────────

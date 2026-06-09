@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersController } from './users.controller';
@@ -450,6 +450,14 @@ describe('UsersController', () => {
       expect(result.hasMore).toBe(false);
       expect(result.data).toHaveLength(1);
       expect(result.data[0]).toBeInstanceOf(UserResponseDto);
+    });
+
+    it('throws BadRequestException when status is not a valid enum value', async () => {
+      await expect(
+        controller.findAllSuperAdmin(20, undefined, undefined, 'unknown' as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(usersService.findAllSuperAdmin).not.toHaveBeenCalled();
     });
   });
 

@@ -1,4 +1,4 @@
-﻿import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -134,6 +134,18 @@ describe('OrgsService', () => {
     expect(repo.createQueryBuilder).toHaveBeenCalledWith('o');
     expect(qb['withDeleted']).toHaveBeenCalled();
     expect(qb['getMany']).toHaveBeenCalled();
+  });
+
+  it('throws BadRequestException when cursor is malformed (garbled base64)', async () => {
+    await expect(service.findAll({ cursor: 'not!!valid~~base64url' })).rejects.toThrow(BadRequestException);
+  });
+
+  it('throws BadRequestException when cursor decodes to valid JSON but contains non-UUID id', async () => {
+    const bad = Buffer.from(
+      JSON.stringify({ at: new Date().toISOString(), id: 'not-a-uuid' }),
+    ).toString('base64url');
+
+    await expect(service.findAll({ cursor: bad })).rejects.toThrow(BadRequestException);
   });
 
   it('applies search filter via ILIKE when search param is provided', async () => {

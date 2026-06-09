@@ -127,6 +127,9 @@ export class UsersController {
     @Query('search') search?: string,
     @Query('status') status?: 'active' | 'inactive' | 'deleted' | 'pending',
   ): Promise<{ data: UserResponseDto[]; nextCursor: string | null; hasMore: boolean }> {
+    if (status && !['active', 'inactive', 'deleted', 'pending'].includes(status)) {
+      throw new BadRequestException('status must be one of: active, inactive, deleted, pending');
+    }
     const result = await this.usersService.findAllSuperAdmin(limit, cursor, search, status);
     return { data: result.data.map(UserResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore };
   }

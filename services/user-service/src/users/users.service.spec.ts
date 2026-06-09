@@ -352,6 +352,34 @@ describe('UsersService', () => {
       expect(result.hasMore).toBe(false);
       expect(result.nextCursor).toBeNull();
     });
+
+    it('throws BadRequestException when cursor is malformed', async () => {
+      await expect(service.findAll(100, 'not-a-valid-cursor!!')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when cursor decodes to valid JSON but contains non-UUID id', async () => {
+      const bad = Buffer.from(
+        JSON.stringify({ at: new Date().toISOString(), id: 'not-a-uuid' }),
+      ).toString('base64url');
+
+      await expect(service.findAll(100, bad)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ─── findAllSuperAdmin ────────────────────────────────────────────────────
+
+  describe('findAllSuperAdmin', () => {
+    it('throws BadRequestException when cursor is malformed', async () => {
+      await expect(service.findAllSuperAdmin(20, 'garbage~~cursor')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when cursor has valid JSON but non-UUID id', async () => {
+      const bad = Buffer.from(
+        JSON.stringify({ at: new Date().toISOString(), id: 'not-a-uuid' }),
+      ).toString('base64url');
+
+      await expect(service.findAllSuperAdmin(20, bad)).rejects.toThrow(BadRequestException);
+    });
   });
 
   // ─── findOne ──────────────────────────────────────────────────────────────
@@ -868,6 +896,18 @@ describe('UsersService', () => {
       expect(hasMore).toBe(true);
       expect(data).toHaveLength(3);
       expect(nextCursor).not.toBeNull();
+    });
+
+    it('throws BadRequestException when cursor is malformed', async () => {
+      await expect(service.findByOrg('org-uuid-1', 100, 'not-valid!!')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when cursor has valid JSON but non-UUID id', async () => {
+      const bad = Buffer.from(
+        JSON.stringify({ at: new Date().toISOString(), id: 'not-a-uuid' }),
+      ).toString('base64url');
+
+      await expect(service.findByOrg('org-uuid-1', 100, bad)).rejects.toThrow(BadRequestException);
     });
   });
 
