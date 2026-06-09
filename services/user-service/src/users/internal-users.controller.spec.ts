@@ -97,7 +97,7 @@ describe('InternalUsersController', () => {
 
     describe('declarative metadata', () => {
       it('applies @UseGuards(InternalGuard) at controller class level', () => {
-        const guards = (Reflect.getMetadata('__guards__', InternalUsersController) ?? []) as Function[];
+        const guards = (Reflect.getMetadata('__guards__', InternalUsersController) ?? []) as (new (...args: unknown[]) => unknown)[];
         expect(guards).toContain(InternalGuard);
       });
 
