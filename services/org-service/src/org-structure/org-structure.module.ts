@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AppLogger, KafkaModule } from '@sgd/common';
+import { AppLogger, KafkaModule, InternalGuard } from '@sgd/common';
 import { Departamento } from './entities/departamento.entity';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
@@ -18,7 +18,6 @@ import { BulkStructureController } from './bulk-structure.controller';
 import { InternalStructureController } from './internal-structure.controller';
 import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
-import { InternalGuard } from '../common/guards/internal.guard';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Departamento, Area, Cargo]), KafkaModule],

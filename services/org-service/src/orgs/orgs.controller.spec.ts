@@ -67,11 +67,11 @@ describe('OrgsController', () => {
 
   it('maps findAll results to response DTOs', async () => {
     const orgs = [makeOrg()];
-    service.findAll.mockResolvedValue({ data: orgs, total: 1 });
+    service.findAll.mockResolvedValue({ data: orgs, nextCursor: null, hasMore: false });
 
-    const result = await controller.findAll(1, 20);
+    const result = await controller.findAll(20);
 
-    expect(result.total).toBe(1);
+    expect(result.hasMore).toBe(false);
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toMatchObject({ id: orgs[0].id, name: orgs[0].name });
   });

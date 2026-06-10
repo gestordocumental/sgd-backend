@@ -32,6 +32,7 @@ export { runWithCorrelation, withDlt } from './kafka/kafka-consumer.util';
 // Guards
 export { JwtGuard, SUPER_ADMIN_REVOCATION_CHECKER } from './guards/jwt.guard';
 export { PermissionsGuard } from './guards/permissions.guard';
+export { InternalGuard } from './guards/internal.guard';
 
 // Decorators
 export { OrgMember, SuperAdminOnly, Auth, AUTH_KEY } from './decorators/auth.decorator';

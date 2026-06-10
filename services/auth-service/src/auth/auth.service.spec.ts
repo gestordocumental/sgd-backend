@@ -30,10 +30,10 @@ const makeCredential = (overrides: Partial<Credential> = {}): Credential =>
     email: 'user@test.com',
     passwordHash: '$2a$10$hashed',
     status: CredentialStatus.ACTIVE,
-    refreshTokenHash: null,
     lockedUntil: null,
     createdAt: new Date('2024-01-01'),
     updatedAt: new Date('2024-01-01'),
+    deletedAt: null,
     ...overrides,
   });
 

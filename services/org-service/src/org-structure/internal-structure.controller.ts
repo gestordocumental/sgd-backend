@@ -6,7 +6,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
-import { InternalGuard } from '../common/guards/internal.guard';
+import { InternalGuard, AllowInternalTokens } from '@sgd/common';
 import { BulkStructureService } from './bulk-structure.service';
 import { ResolveStructureRequestDto } from './dto/resolve-structure-request.dto';
 import { ResolveStructureResponseDto } from './dto/resolve-structure-response.dto';
@@ -16,6 +16,7 @@ import { ResolveByIdRequestDto, ResolveByIdResponseDto } from './dto/resolve-by-
 @ApiSecurity('internal-token')
 @Controller('internal')
 @UseGuards(InternalGuard)
+@AllowInternalTokens('INTERNAL_TOKEN_NOTIF_ORG', 'INTERNAL_TOKEN_DOC_ORG', 'INTERNAL_TOKEN_USER_ORG')
 export class InternalStructureController {
   constructor(private readonly service: BulkStructureService) {}
 

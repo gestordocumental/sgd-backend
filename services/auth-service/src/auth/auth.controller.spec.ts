@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { InternalGuard } from '@sgd/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
@@ -49,6 +50,8 @@ describe('AuthController', () => {
     })
       .overrideGuard(ThrottlerGuard)
       .useValue({ canActivate: jest.fn().mockReturnValue(true) })
+      .overrideGuard(InternalGuard)
+      .useValue({ canActivate: jest.fn().mockReturnValue(true) })
       .compile();
 
     controller = module.get(AuthController);
@@ -57,85 +60,44 @@ describe('AuthController', () => {
   afterEach(() => jest.clearAllMocks());
 
   // ── provisionCredentials ──────────────────────────────────────────────────
+  // Token validation is handled by InternalGuard (overridden in tests).
 
   describe('POST /api/v1/auth/credentials/provision', () => {
     const dto = { userId: 'user-id', email: 'user@test.com', password: 'pass1234' };
 
-    it('provisions credentials when internal token is valid', async () => {
-      const result = await controller.provisionCredentials(INTERNAL_TOKEN, dto);
+    it('provisions credentials and delegates to authService', async () => {
+      const result = await controller.provisionCredentials(dto);
 
       expect(authService.provisionCredentials).toHaveBeenCalledWith(dto);
       expect(result).toEqual({ ok: true });
-    });
-
-    it('throws UnauthorizedException when internal token is wrong', () => {
-      // validateInternalToken throws synchronously — use toThrow, not rejects.toThrow
-      expect(() => controller.provisionCredentials('wrong-token', dto))
-        .toThrow(UnauthorizedException);
-
-      expect(authService.provisionCredentials).not.toHaveBeenCalled();
-    });
-
-    it('throws UnauthorizedException when internal token is missing (empty string)', () => {
-      expect(() => controller.provisionCredentials('', dto))
-        .toThrow(UnauthorizedException);
-    });
-
-    it('throws when the expected internal token is blank', () => {
-      configService.getOrThrow.mockReturnValue('   ');
-
-      expect(() => controller.provisionCredentials('', dto))
-        .toThrow('INTERNAL_TOKEN_USER_AUTH must be a non-empty string');
-      expect(authService.provisionCredentials).not.toHaveBeenCalled();
     });
   });
 
   // ── disableCredential ─────────────────────────────────────────────────────
 
   describe('PATCH /api/v1/auth/credentials/:userId/disable', () => {
-    it('disables credential when internal token is valid', async () => {
-      await controller.disableCredential(INTERNAL_TOKEN, 'user-id');
+    it('disables credential and delegates to authService', async () => {
+      await controller.disableCredential('user-id');
 
       expect(authService.disableCredential).toHaveBeenCalledWith('user-id');
-    });
-
-    it('throws UnauthorizedException when internal token is invalid', () => {
-      expect(() => controller.disableCredential('bad-token', 'user-id'))
-        .toThrow(UnauthorizedException);
-
-      expect(authService.disableCredential).not.toHaveBeenCalled();
     });
   });
 
   describe('PATCH /api/v1/auth/credentials/:userId/revoke-tokens', () => {
-    it('revokes all refresh tokens when internal token is valid', async () => {
-      await controller.revokeAllRefreshTokens(INTERNAL_TOKEN, 'user-id');
+    it('revokes all refresh tokens and delegates to authService', async () => {
+      await controller.revokeAllRefreshTokens('user-id');
 
       expect(authService.revokeAllRefreshTokens).toHaveBeenCalledWith('user-id');
-    });
-
-    it('throws UnauthorizedException when internal token is invalid', () => {
-      expect(() => controller.revokeAllRefreshTokens('bad-token', 'user-id'))
-        .toThrow(UnauthorizedException);
-
-      expect(authService.revokeAllRefreshTokens).not.toHaveBeenCalled();
     });
   });
 
   // ── enableCredential ──────────────────────────────────────────────────────
 
   describe('PATCH /api/v1/auth/credentials/:userId/enable', () => {
-    it('enables credential when internal token is valid', async () => {
-      await controller.enableCredential(INTERNAL_TOKEN, 'user-id');
+    it('enables credential and delegates to authService', async () => {
+      await controller.enableCredential('user-id');
 
       expect(authService.enableCredential).toHaveBeenCalledWith('user-id');
-    });
-
-    it('throws UnauthorizedException when internal token is invalid', () => {
-      expect(() => controller.enableCredential('bad-token', 'user-id'))
-        .toThrow(UnauthorizedException);
-
-      expect(authService.enableCredential).not.toHaveBeenCalled();
     });
   });
 

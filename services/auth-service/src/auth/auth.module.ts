@@ -7,7 +7,7 @@ import { JwtKeyService } from "./jwt-key.service";
 import { Credential } from "./entities/credential.entity";
 import { UserClientModule } from "../user-client/user-client.module";
 import { CredentialSeeder } from "./credential.seeder";
-import { AppLogger, KafkaModule } from "@sgd/common";
+import { AppLogger, KafkaModule, InternalGuard } from "@sgd/common";
 
 @Module({
   imports: [
@@ -18,6 +18,6 @@ import { AppLogger, KafkaModule } from "@sgd/common";
     KafkaModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtKeyService, CredentialSeeder, AppLogger],
+  providers: [AuthService, JwtKeyService, CredentialSeeder, AppLogger, InternalGuard],
 })
 export class AuthModule {}

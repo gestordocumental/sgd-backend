@@ -3,43 +3,23 @@ import {
   Get,
   Param,
   Query,
-  UnauthorizedException,
   BadRequestException,
-  Req,
-  OnModuleInit,
+  UseGuards,
 } from '@nestjs/common';
-import { timingSafeEqual } from 'crypto';
-import { Request } from 'express';
+import { InternalGuard, AllowInternalTokens } from '@sgd/common';
 import { TypologiesService } from './typologies.service';
 
 @Controller('internal/typologies')
-export class InternalTypologiesController implements OnModuleInit {
-  private internalToken!: string;
-
+@UseGuards(InternalGuard)
+@AllowInternalTokens('INTERNAL_TOKEN_WORKFLOW_DOC')
+export class InternalTypologiesController {
   constructor(private readonly typologiesService: TypologiesService) {}
-
-  onModuleInit() {
-    // Only workflow-service is allowed to call document-service internal endpoints.
-    const token = process.env['INTERNAL_TOKEN_WORKFLOW_DOC'];
-    if (!token) throw new Error('INTERNAL_TOKEN_WORKFLOW_DOC env var is not set');
-    this.internalToken = token;
-  }
 
   @Get(':id/public-info')
   async getPublicInfo(
     @Param('id') id: string,
     @Query('orgId') orgId: string,
-    @Req() req: Request,
   ) {
-    const provided = req.headers['x-internal-token'];
-    if (typeof provided !== 'string') throw new UnauthorizedException('Missing internal token');
-
-    const expected = Buffer.from(this.internalToken);
-    const buf = Buffer.from(provided);
-    if (buf.length !== expected.length || !timingSafeEqual(expected, buf)) {
-      throw new UnauthorizedException('Invalid internal token');
-    }
-
     if (!orgId) throw new BadRequestException('orgId query param is required');
 
     const doc = await this.typologiesService.findByIdPublic(orgId, id);

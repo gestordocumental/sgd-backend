@@ -10,13 +10,14 @@ import {
   HttpStatus,
   ParseUUIDPipe,
   Res,
+  UseGuards,
   UnauthorizedException,
 } from "@nestjs/common";
 import type { Response } from "express";
 import { ConfigService } from "@nestjs/config";
 import { timingSafeEqual, randomUUID } from "crypto";
 import { SkipThrottle } from '@nestjs/throttler';
-import { Auth, JwtPayload, JwtPayloadParam } from '@sgd/common';
+import { Auth, JwtPayload, JwtPayloadParam, InternalGuard, AllowInternalTokens } from '@sgd/common';
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
@@ -39,22 +40,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
-
-  private validateInternalToken(internalToken: string): void {
-    // Only user-service is allowed to call auth-service internal endpoints.
-    const rawExpected = this.configService
-      .getOrThrow<string>('INTERNAL_TOKEN_USER_AUTH')
-      .trim();
-    if (!rawExpected) {
-      throw new Error('INTERNAL_TOKEN_USER_AUTH must be a non-empty string');
-    }
-    const expected = Buffer.from(rawExpected);
-    const provided = Buffer.from(internalToken ?? '');
-    const isValid =
-      provided.length === expected.length &&
-      timingSafeEqual(expected, provided);
-    if (!isValid) throw new UnauthorizedException();
-  }
 
   private setRefreshCookie(res: Response | undefined, refreshToken: string): string {
     const csrfToken = randomUUID();
@@ -153,12 +138,10 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid internal token' })
   @ApiResponse({ status: 409, description: 'Email already registered for another account' })
   @SkipThrottle()
+  @UseGuards(InternalGuard)
+  @AllowInternalTokens('INTERNAL_TOKEN_USER_AUTH')
   @Post("credentials/provision")
-  provisionCredentials(
-    @Headers("x-internal-token") internalToken: string,
-    @Body() dto: ProvisionCredentialDto,
-  ) {
-    this.validateInternalToken(internalToken);
+  provisionCredentials(@Body() dto: ProvisionCredentialDto) {
     return this.authService.provisionCredentials(dto);
   }
 
@@ -168,13 +151,11 @@ export class AuthController {
   @ApiResponse({ status: 204, description: 'Credentials disabled' })
   @ApiResponse({ status: 401, description: 'Invalid internal token' })
   @SkipThrottle()
+  @UseGuards(InternalGuard)
+  @AllowInternalTokens('INTERNAL_TOKEN_USER_AUTH')
   @Patch("credentials/:userId/disable")
   @HttpCode(HttpStatus.NO_CONTENT)
-  disableCredential(
-    @Headers("x-internal-token") internalToken: string,
-    @Param("userId", new ParseUUIDPipe({ version: '4' })) userId: string,
-  ) {
-    this.validateInternalToken(internalToken);
+  disableCredential(@Param("userId", new ParseUUIDPipe({ version: '4' })) userId: string) {
     return this.authService.disableCredential(userId);
   }
 
@@ -184,13 +165,11 @@ export class AuthController {
   @ApiResponse({ status: 204, description: 'All refresh tokens revoked' })
   @ApiResponse({ status: 401, description: 'Invalid internal token' })
   @SkipThrottle()
+  @UseGuards(InternalGuard)
+  @AllowInternalTokens('INTERNAL_TOKEN_USER_AUTH')
   @Patch("credentials/:userId/revoke-tokens")
   @HttpCode(HttpStatus.NO_CONTENT)
-  revokeAllRefreshTokens(
-    @Headers("x-internal-token") internalToken: string,
-    @Param("userId", new ParseUUIDPipe({ version: '4' })) userId: string,
-  ) {
-    this.validateInternalToken(internalToken);
+  revokeAllRefreshTokens(@Param("userId", new ParseUUIDPipe({ version: '4' })) userId: string) {
     return this.authService.revokeAllRefreshTokens(userId);
   }
 
@@ -200,13 +179,11 @@ export class AuthController {
   @ApiResponse({ status: 204, description: 'Credentials enabled' })
   @ApiResponse({ status: 401, description: 'Invalid internal token' })
   @SkipThrottle()
+  @UseGuards(InternalGuard)
+  @AllowInternalTokens('INTERNAL_TOKEN_USER_AUTH')
   @Patch("credentials/:userId/enable")
   @HttpCode(HttpStatus.NO_CONTENT)
-  enableCredential(
-    @Headers("x-internal-token") internalToken: string,
-    @Param("userId", new ParseUUIDPipe({ version: '4' })) userId: string,
-  ) {
-    this.validateInternalToken(internalToken);
+  enableCredential(@Param("userId", new ParseUUIDPipe({ version: '4' })) userId: string) {
     return this.authService.enableCredential(userId);
   }
 

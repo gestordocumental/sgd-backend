@@ -4,7 +4,7 @@ import { posix as pathPosix } from 'path';
 import archiver = require('archiver');
 import { v4 as uuidv4 } from 'uuid';
 import { StorageService } from '../common/storage/storage.service';
-import { MAX_FILE_SIZE } from '../document-upload/document-upload.constants';
+import { MAX_FILE_SIZE, validateMagicBytes } from '../document-upload/document-upload.constants';
 import { WorkflowFileUploadResponseDto } from './dto/workflow-file-upload-response.dto';
 import type { ZipFileEntryDto } from './dto/download-zip.dto';
 
@@ -35,6 +35,9 @@ export class WorkflowFilesService {
 
     const ext = WORKFLOW_ALLOWED_MIMETYPES[file.mimetype];
     if (!ext) throw new BadRequestException('Formato no permitido. Use PDF, DOCX, XLSX o imagen (PNG, JPG, WEBP, GIF, BMP, TIFF).');
+
+    if (!validateMagicBytes(file.buffer, file.mimetype))
+      throw new BadRequestException({ message: 'File content does not match declared type.', errorCode: 'FILE_CONTENT_MISMATCH' });
 
     const storageKey = `org/${orgId}/workflow-uploads/${uuidv4()}.${ext}`;
     await this.storage.upload(storageKey, file.buffer, file.mimetype);

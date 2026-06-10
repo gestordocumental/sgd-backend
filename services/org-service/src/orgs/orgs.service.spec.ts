@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -10,14 +10,14 @@ import { UserClientService } from '../common/user-client/user-client.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
-/** Returns a chainable QueryBuilder mock whose getManyAndCount resolves to [rows, total]. */
-function makeQbMock(rows: Org[], total: number) {
+/** Returns a chainable QueryBuilder mock whose getMany resolves to rows. */
+function makeQbMock(rows: Org[]) {
   const qb: Record<string, jest.Mock> = {};
   const chain = () => qb as unknown as ReturnType<Repository<Org>['createQueryBuilder']>;
-  ['withDeleted', 'orderBy', 'where', 'andWhere', 'skip', 'take'].forEach((m) => {
+  ['withDeleted', 'orderBy', 'addOrderBy', 'where', 'andWhere', 'take'].forEach((m) => {
     qb[m] = jest.fn().mockReturnValue(chain());
   });
-  qb['getManyAndCount'] = jest.fn().mockResolvedValue([rows, total]);
+  qb['getMany'] = jest.fn().mockResolvedValue(rows);
   return qb;
 }
 
@@ -44,10 +44,12 @@ describe('OrgsService', () => {
 
   beforeAll(() => {
     global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as jest.Mock;
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   });
 
   afterAll(() => {
     global.fetch = originalFetch;
+    jest.restoreAllMocks();
   });
 
   beforeEach(async () => {
@@ -121,22 +123,34 @@ describe('OrgsService', () => {
     await expect(service.create({ name: 'Acme' }, 'user-1')).rejects.toThrow(ConflictException);
   });
 
-  it('returns paginated organizations with total count', async () => {
+  it('returns paginated organizations with cursor pagination', async () => {
     const orgs = [makeOrg(), makeOrg({ id: 'a66cf75e-49d0-4c12-b3e3-af941da7f8f1', name: 'Beta' })];
-    const qb = makeQbMock(orgs, 2);
+    const qb = makeQbMock(orgs);
     repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
-    const result = await service.findAll({ page: 1, limit: 20 });
+    const result = await service.findAll({ limit: 20 });
 
-    expect(result).toEqual({ data: orgs, total: 2 });
+    expect(result).toMatchObject({ data: orgs, hasMore: false, nextCursor: null });
     expect(repo.createQueryBuilder).toHaveBeenCalledWith('o');
     expect(qb['withDeleted']).toHaveBeenCalled();
-    expect(qb['getManyAndCount']).toHaveBeenCalled();
+    expect(qb['getMany']).toHaveBeenCalled();
+  });
+
+  it('throws BadRequestException when cursor is malformed (garbled base64)', async () => {
+    await expect(service.findAll({ cursor: 'not!!valid~~base64url' })).rejects.toThrow(BadRequestException);
+  });
+
+  it('throws BadRequestException when cursor decodes to valid JSON but contains non-UUID id', async () => {
+    const bad = Buffer.from(
+      JSON.stringify({ at: new Date().toISOString(), id: 'not-a-uuid' }),
+    ).toString('base64url');
+
+    await expect(service.findAll({ cursor: bad })).rejects.toThrow(BadRequestException);
   });
 
   it('applies search filter via ILIKE when search param is provided', async () => {
     const orgs = [makeOrg()];
-    const qb = makeQbMock(orgs, 1);
+    const qb = makeQbMock(orgs);
     repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
     await service.findAll({ search: 'acme' });
@@ -148,7 +162,7 @@ describe('OrgsService', () => {
   });
 
   it('filters deleted organizations when status is "deleted"', async () => {
-    const qb = makeQbMock([], 0);
+    const qb = makeQbMock([]);
     repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
     await service.findAll({ status: 'deleted' });
@@ -228,7 +242,7 @@ describe('OrgsService', () => {
   });
 
   it('filters active organizations when status is "active"', async () => {
-    const qb = makeQbMock([makeOrg()], 1);
+    const qb = makeQbMock([makeOrg()]);
     repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
     await service.findAll({ status: 'active' });
@@ -238,7 +252,7 @@ describe('OrgsService', () => {
   });
 
   it('filters inactive organizations when status is "inactive"', async () => {
-    const qb = makeQbMock([], 0);
+    const qb = makeQbMock([]);
     repo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
     await service.findAll({ status: 'inactive' });

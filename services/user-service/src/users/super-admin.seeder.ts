@@ -44,7 +44,6 @@ export class SuperAdminSeeder implements OnApplicationBootstrap {
         departamentoId:     null,
         areaId:             null,
         cargoId:            null,
-        twoFactorEnabled:   false,
       })
       .orIgnore() // ON CONFLICT DO NOTHING — idempotent on every restart
       .execute();

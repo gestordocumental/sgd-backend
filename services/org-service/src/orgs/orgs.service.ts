@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ConflictException,
@@ -11,6 +12,29 @@ import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 import { UserClientService } from '../common/user-client/user-client.service';
+
+function encodeCursor(createdAt: Date, id: string): string {
+  return Buffer.from(JSON.stringify({ at: createdAt.toISOString(), id })).toString('base64url');
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function decodeCursor(raw: string): { at: string; id: string } {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (
+      typeof parsed.at !== 'string' ||
+      Number.isNaN(Date.parse(parsed.at)) ||
+      typeof parsed.id !== 'string' ||
+      !UUID_RE.test(parsed.id)
+    ) {
+      throw new BadRequestException('Invalid cursor');
+    }
+    return parsed;
+  } catch {
+    throw new BadRequestException('Invalid cursor');
+  }
+}
 
 @Injectable()
 export class OrgsService {
@@ -64,19 +88,20 @@ export class OrgsService {
   }
 
   async findAll(params: {
-    page?: number;
     limit?: number;
+    cursor?: string;
     search?: string;
     status?: 'active' | 'inactive' | 'deleted';
-  } = {}): Promise<{ data: Org[]; total: number }> {
-    const page  = Math.max(1, params.page ?? 1);
-    const limit = Math.min(Math.max(1, params.limit ?? 20), 500);
-    const skip  = (page - 1) * limit;
+  } = {}): Promise<{ data: Org[]; nextCursor: string | null; hasMore: boolean }> {
+    const limit = Math.min(Math.max(1, params.limit ?? 20), 100);
+    const decoded = params.cursor ? decodeCursor(params.cursor) : null;
 
     const qb = this.orgRepo
       .createQueryBuilder('o')
       .withDeleted()
-      .orderBy('o.createdAt', 'ASC');
+      .orderBy('o.createdAt', 'ASC')
+      .addOrderBy('o.id', 'ASC')
+      .take(limit + 1);
 
     if (params.search?.trim()) {
       const q = `%${params.search.trim()}%`;
@@ -91,8 +116,20 @@ export class OrgsService {
       qb.andWhere('o.deletedAt IS NULL').andWhere('o.status != :s', { s: OrgStatus.ACTIVE });
     }
 
-    const [data, total] = await qb.skip(skip).take(limit).getManyAndCount();
-    return { data, total };
+    if (decoded) {
+      qb.andWhere(
+        '(o.createdAt > :at OR (o.createdAt = :at AND o.id > :cursorId))',
+        { at: decoded.at, cursorId: decoded.id },
+      );
+    }
+
+    const rows = await qb.getMany();
+    const hasMore = rows.length > limit;
+    const data = hasMore ? rows.slice(0, limit) : rows;
+    const last = data.at(-1);
+    const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+    return { data, nextCursor, hasMore };
   }
 
   async findOne(id: string): Promise<Org> {

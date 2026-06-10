@@ -2,13 +2,11 @@ import {
   Controller,
   Post,
   Body,
-  Headers,
-  UnauthorizedException,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
-import { ConfigService } from '@nestjs/config';
-import { timingSafeEqual } from 'crypto';
+import { InternalGuard, AllowInternalTokens } from '@sgd/common';
 import { UsersService } from './users.service';
 
 class ByPositionDto {
@@ -20,35 +18,15 @@ class ByPositionDto {
 
 @ApiTags('Internal')
 @Controller('internal/users')
+@UseGuards(InternalGuard)
 export class InternalUsersController {
-  constructor(
-    private readonly usersService: UsersService,
-    private readonly configService: ConfigService,
-  ) {}
-
-  private verifyToken(token: string | undefined, keys: string[]): void {
-    const allowed = keys
-      .map((k) => this.configService.get<string>(k))
-      .filter((t): t is string => !!t)
-      .map((t) => Buffer.from(t));
-
-    const provided = Buffer.from(token ?? '');
-    const valid = allowed.some(
-      (expected) =>
-        provided.length === expected.length && timingSafeEqual(expected, provided),
-    );
-    if (!valid) throw new UnauthorizedException();
-  }
+  constructor(private readonly usersService: UsersService) {}
 
   @ApiOperation({ summary: 'Fetch multiple users by IDs in a single call (internal only)' })
   @ApiSecurity('internal-token')
+  @AllowInternalTokens('INTERNAL_TOKEN_NOTIF_USER')
   @Post('batch-by-ids')
-  async batchByIds(
-    @Headers('x-internal-token') token: string | undefined,
-    @Body() body: { ids: string[] },
-  ) {
-    // Only notification-service is authorized to call this endpoint
-    this.verifyToken(token, ['INTERNAL_TOKEN_NOTIF_USER']);
+  async batchByIds(@Body() body: { ids: string[] }) {
     if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
       throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
     }
@@ -65,13 +43,9 @@ export class InternalUsersController {
 
   @ApiOperation({ summary: 'Find users by org position (internal only)' })
   @ApiSecurity('internal-token')
+  @AllowInternalTokens('INTERNAL_TOKEN_WORKFLOW_USER')
   @Post('by-position')
-  async byPosition(
-    @Headers('x-internal-token') token: string | undefined,
-    @Body() dto: ByPositionDto,
-  ) {
-    // Only workflow-service is authorized to call this endpoint
-    this.verifyToken(token, ['INTERNAL_TOKEN_WORKFLOW_USER']);
+  async byPosition(@Body() dto: ByPositionDto) {
     const { orgId, cargoId, departamentoId } = dto;
     const filters: { cargoId?: string; areaId?: string | null; departamentoId?: string } = { cargoId, departamentoId };
     if (dto.areaId !== undefined) filters.areaId = dto.areaId;
