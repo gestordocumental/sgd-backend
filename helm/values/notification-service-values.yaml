@@ -1,0 +1,34 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install notification-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/notification-service-values.yaml
+
+image:
+  repository: ghcr.io/your-org/notification-service   # replace with real registry
+  tag: "latest"
+  pullPolicy: Always
+
+# readinessProbe checks: PostgreSQL
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "300m"
+    memory: "256Mi"
+
+envFrom:
+  - secretRef:
+      name: notification-service-secret
+  - configMapRef:
+      name: notification-service-config

@@ -50,7 +50,10 @@ describe('UserClientService', () => {
     service = module.get(UserClientService);
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.useRealTimers();
+  });
 
   it('calls the user-service DELETE endpoint with the correct URL and token', async () => {
     httpService.delete.mockReturnValue(of({ status: 200, data: {} }));
@@ -68,25 +71,17 @@ describe('UserClientService', () => {
   it('resolves without error when user-service returns 404 (already revoked — idempotent)', async () => {
     httpService.delete.mockReturnValue(throwError(() => ({ response: { status: 404 } })));
 
+    // 404 is treated as success and is not retried
     await expect(service.revokeOrgAccess('org-1')).resolves.toBeUndefined();
+    expect(httpService.delete).toHaveBeenCalledTimes(1);
   });
 
-  it('throws GatewayTimeoutException when the request exceeds the timeout', async () => {
+  it('throws GatewayTimeoutException on timeout without retrying', async () => {
     httpService.delete.mockReturnValue(throwError(() => new TimeoutError()));
 
+    // Timeouts are not retried — deterministic slow service
     await expect(service.revokeOrgAccess('org-1')).rejects.toBeInstanceOf(GatewayTimeoutException);
-  });
-
-  it('throws InternalServerErrorException on unexpected 5xx errors', async () => {
-    httpService.delete.mockReturnValue(throwError(() => ({ response: { status: 500 } })));
-
-    await expect(service.revokeOrgAccess('org-1')).rejects.toBeInstanceOf(InternalServerErrorException);
-  });
-
-  it('throws InternalServerErrorException when the error has no HTTP status', async () => {
-    httpService.delete.mockReturnValue(throwError(() => new Error('network error')));
-
-    await expect(service.revokeOrgAccess('org-1')).rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(httpService.delete).toHaveBeenCalledTimes(1);
   });
 
   it('throws ServiceUnavailableException when the circuit breaker is open', async () => {
@@ -94,5 +89,46 @@ describe('UserClientService', () => {
     jest.spyOn((service as any).cb, 'fire').mockRejectedValueOnce(openError);
 
     await expect(service.revokeOrgAccess('org-1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  // ── Retry behavior ────────────────────────────────────────────────────────────
+  // These tests involve exponential backoff delays so they use fake timers.
+
+  it('retries on 5xx and throws InternalServerErrorException after exhausting all retries', async () => {
+    jest.useFakeTimers();
+    httpService.delete.mockReturnValue(throwError(() => ({ response: { status: 500 } })));
+
+    const promise = service.revokeOrgAccess('org-1');
+    // Advance past the two retry delays: 500ms + 1000ms = 1500ms
+    await jest.advanceTimersByTimeAsync(1600);
+
+    await expect(promise).rejects.toBeInstanceOf(InternalServerErrorException);
+    // Initial attempt + 2 retries = 3 total calls
+    expect(httpService.delete).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries on network error and throws InternalServerErrorException after exhausting all retries', async () => {
+    jest.useFakeTimers();
+    httpService.delete.mockReturnValue(throwError(() => new Error('network error')));
+
+    const promise = service.revokeOrgAccess('org-1');
+    await jest.advanceTimersByTimeAsync(1600);
+
+    await expect(promise).rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(httpService.delete).toHaveBeenCalledTimes(3);
+  });
+
+  it('succeeds on the second attempt when the first call returns a transient 5xx', async () => {
+    jest.useFakeTimers();
+    httpService.delete
+      .mockReturnValueOnce(throwError(() => ({ response: { status: 503 } })))
+      .mockReturnValue(of({ status: 200, data: {} }));
+
+    const promise = service.revokeOrgAccess('org-1');
+    // Advance past the first retry delay (500ms)
+    await jest.advanceTimersByTimeAsync(600);
+
+    await expect(promise).resolves.toBeUndefined();
+    expect(httpService.delete).toHaveBeenCalledTimes(2);
   });
 });

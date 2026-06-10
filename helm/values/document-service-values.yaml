@@ -1,0 +1,34 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install document-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/document-service-values.yaml
+
+image:
+  repository: ghcr.io/your-org/document-service   # replace with real registry
+  tag: "latest"
+  pullPolicy: Always
+
+# readinessProbe checks: MongoDB
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "192Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+envFrom:
+  - secretRef:
+      name: document-service-secret
+  - configMapRef:
+      name: document-service-config

@@ -4,7 +4,9 @@ process.env.SERVICE_NAME = 'user-service';
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
+  // Pact tests run separately via jest.pact.config.js
   testRegex: '.*\\.spec\\.ts$',
+  testPathIgnorePatterns: ['\\.pact\\.spec\\.ts$', '\\.provider\\.spec\\.ts$'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },

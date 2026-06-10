@@ -1,0 +1,34 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install user-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/user-service-values.yaml
+
+image:
+  repository: ghcr.io/your-org/user-service   # replace with real registry
+  tag: "latest"
+  pullPolicy: Always
+
+# readinessProbe checks: PostgreSQL
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+envFrom:
+  - secretRef:
+      name: user-service-secret
+  - configMapRef:
+      name: user-service-config

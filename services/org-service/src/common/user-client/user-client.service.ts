@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
+import { firstValueFrom, retry, throwError, timer, timeout, TimeoutError } from 'rxjs';
 import { CORRELATION_ID_HEADER, getCorrelationId } from '@sgd/common';
 import CircuitBreaker = require('opossum');
 
@@ -50,11 +50,15 @@ export class UserClientService {
   /**
    * Revokes all user memberships for a deleted org.
    * 404 is treated as success (already revoked — idempotent).
-   * Throws on timeout or 5xx so the caller can compensate (restore the soft-deleted org).
+   * Retries up to 2 times with exponential backoff on 5xx and network errors before
+   * allowing the caller to compensate (restore the soft-deleted org).
+   * Timeouts and 4xx errors are not retried — they are deterministic failures.
    */
   async revokeOrgAccess(orgId: string): Promise<void> {
     const correlationId = getCorrelationId();
     const url = `${this.userServiceUrl}/api/v1/users/internal/orgs/${orgId}/users`;
+    const RETRY_COUNT   = 2;
+    const RETRY_BASE_MS = 500;
 
     try {
       await this.fireWithCb(() =>
@@ -66,7 +70,27 @@ export class UserClientService {
                 [CORRELATION_ID_HEADER]: correlationId,
               },
             })
-            .pipe(timeout(this.timeoutMs)),
+            .pipe(
+              timeout(this.timeoutMs),
+              retry({
+                count: RETRY_COUNT,
+                delay: (error: any, attempt: number) => {
+                  // Don't retry on timeout — service is unresponsive, not transiently failing
+                  if (error instanceof TimeoutError) return throwError(() => error);
+                  // Don't retry on 4xx — deterministic client/business errors
+                  const status = error?.response?.status;
+                  if (typeof status === 'number' && status >= 400 && status < 500) {
+                    return throwError(() => error);
+                  }
+                  // Retry 5xx and network errors with exponential backoff
+                  const delayMs = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+                  this.logger.warn(
+                    `revokeOrgAccess for ${orgId} failed (attempt ${attempt + 1}/${RETRY_COUNT + 1}), retrying in ${delayMs}ms`,
+                  );
+                  return timer(delayMs);
+                },
+              }),
+            ),
         ),
       );
     } catch (error: any) {

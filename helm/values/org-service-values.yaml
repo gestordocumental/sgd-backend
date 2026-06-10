@@ -1,0 +1,34 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install org-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/org-service-values.yaml
+
+image:
+  repository: ghcr.io/your-org/org-service   # replace with real registry
+  tag: "latest"
+  pullPolicy: Always
+
+# readinessProbe checks: PostgreSQL
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "400m"
+    memory: "384Mi"
+
+envFrom:
+  - secretRef:
+      name: org-service-secret
+  - configMapRef:
+      name: org-service-config

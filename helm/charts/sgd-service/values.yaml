@@ -1,0 +1,81 @@
+# Default values for any SGD microservice.
+# Override per-service with helm/values/{service}-values.yaml.
+
+replicaCount: 1
+
+image:
+  repository: ""       # e.g. ghcr.io/your-org/auth-service
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 3000
+
+containerPort: 3000
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# ── Probes ─────────────────────────────────────────────────────────────────────
+#
+# All three endpoints are exposed by every NestJS service via @nestjs/terminus:
+#   /health/startup  → always 200 (process is alive)
+#   /health/live     → always 200 (event loop is running)
+#   /health/ready    → 200/503    (DB / Redis / Kafka connectivity)
+#
+# startupProbe runs first and gates the other two probes.
+# It allows up to failureThreshold × periodSeconds = 90 s for TypeORM
+# migrations to complete before Kubernetes considers the pod failed.
+
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 18   # 18 × 5 s = 90 s maximum migration window
+  successThreshold: 1
+  timeoutSeconds: 3
+
+# livenessProbe kicks in only after startupProbe succeeds.
+# Restarts the pod if the event loop becomes completely unresponsive.
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  periodSeconds: 15
+  failureThreshold: 3    # restart after 45 s of consecutive failures
+  successThreshold: 1
+  timeoutSeconds: 5
+
+# readinessProbe checks real dependencies (DB, Redis, Kafka).
+# A failing pod is removed from the Service endpoints until deps recover.
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3    # remove from load-balancing after 30 s
+  successThreshold: 1
+  timeoutSeconds: 5
+
+env: []
+envFrom: []
+
+podAnnotations: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
