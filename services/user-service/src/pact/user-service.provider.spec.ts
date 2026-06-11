@@ -87,11 +87,10 @@ describe('user-service provider — satisfies auth-service consumer expectations
   let app: INestApplication;
 
   beforeAll(async () => {
-    // The Pact Rust FFI (reqwest) tries IPv6 (::1) first when given "localhost".
-    // On this machine the loopback server binds to IPv4 only, so the IPv6 attempt
-    // times out after ~20 s before falling back to 127.0.0.1 — making every
-    // request 20 s slower.  Bypassing the proxy and binding/connecting via the
-    // literal IPv4 address eliminates that delay entirely.
+    // The Pact Rust FFI (reqwest) attempts IPv6 (::1) first when resolving "localhost".
+    // When the server binds to IPv4 only, the IPv6 connection attempt times out
+    // after ~20 s before falling back to 127.0.0.1. Using the literal IPv4 address
+    // for both binding and connection eliminates this delay entirely.
     process.env['NO_PROXY']   = '127.0.0.1,localhost';
     process.env['no_proxy']   = '127.0.0.1,localhost';
     process.env['PACT_DO_NOT_TRACK'] = 'true';
