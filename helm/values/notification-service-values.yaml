@@ -5,9 +5,9 @@
 #     --values helm/values/notification-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/notification-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: notification-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
 
 # readinessProbe checks: PostgreSQL
 readinessProbe:
@@ -26,9 +26,3 @@ resources:
   limits:
     cpu: "300m"
     memory: "256Mi"
-
-envFrom:
-  - secretRef:
-      name: notification-service-secret
-  - configMapRef:
-      name: notification-service-config

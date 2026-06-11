@@ -5,9 +5,9 @@
 #     --values helm/values/metadata-extractor-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/metadata-extractor-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: metadata-extractor-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
 
 # readinessProbe: no external dependencies — always returns 200.
 # startupProbe failureThreshold reduced (no migrations, fast startup).
@@ -30,6 +30,9 @@ readinessProbe:
   successThreshold: 1
   timeoutSeconds: 3   # no DB ping — response is immediate
 
+# Document parsing libraries (e.g. pdf-parse, mammoth) write to /tmp — keep
+# readOnlyRootFilesystem: false (inherits the base default, do NOT override to true here).
+
 resources:
   requests:
     cpu: "200m"
@@ -37,9 +40,3 @@ resources:
   limits:
     cpu: "1000m"
     memory: "1Gi"     # document parsing can be memory-intensive
-
-envFrom:
-  - secretRef:
-      name: metadata-extractor-service-secret
-  - configMapRef:
-      name: metadata-extractor-service-config

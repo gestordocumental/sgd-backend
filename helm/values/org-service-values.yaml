@@ -5,9 +5,9 @@
 #     --values helm/values/org-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/org-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: org-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
 
 # readinessProbe checks: PostgreSQL
 readinessProbe:
@@ -26,9 +26,3 @@ resources:
   limits:
     cpu: "400m"
     memory: "384Mi"
-
-envFrom:
-  - secretRef:
-      name: org-service-secret
-  - configMapRef:
-      name: org-service-config

@@ -5,9 +5,9 @@
 #     --values helm/values/auth-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/auth-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: auth-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
 
 # readinessProbe checks: PostgreSQL + Redis
 # Both must be reachable before the pod accepts traffic.
@@ -27,9 +27,3 @@ resources:
   limits:
     cpu: "500m"
     memory: "512Mi"
-
-envFrom:
-  - secretRef:
-      name: auth-service-secret
-  - configMapRef:
-      name: auth-service-config

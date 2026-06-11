@@ -5,9 +5,9 @@
 #     --values helm/values/document-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/document-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: document-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
 
 # readinessProbe checks: MongoDB
 readinessProbe:
@@ -26,9 +26,3 @@ resources:
   limits:
     cpu: "500m"
     memory: "512Mi"
-
-envFrom:
-  - secretRef:
-      name: document-service-secret
-  - configMapRef:
-      name: document-service-config

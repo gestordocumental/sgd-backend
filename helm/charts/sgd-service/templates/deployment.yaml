@@ -19,10 +19,22 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ include "sgd-service.fullname" . }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.imageRegistry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}
@@ -31,10 +43,14 @@ spec:
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.envFrom }}
           envFrom:
+            - secretRef:
+                name: {{ include "sgd-service.fullname" . }}-secret
+            - configMapRef:
+                name: {{ include "sgd-service.fullname" . }}-config
+            {{- with .Values.envFrom }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
 
           # ── Probes ────────────────────────────────────────────────────────────
           # startupProbe runs first; liveness and readiness are gated behind it.

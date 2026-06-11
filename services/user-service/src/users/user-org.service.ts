@@ -83,6 +83,13 @@ export class UserOrgService {
     const targetUser = await this.findUser(userId);
     const roleId = dto.roleId ?? null;
 
+    // Validate roleId before either branch can write a dangling FK reference.
+    // Fetching here also lets both branches reuse the role name in audit logs.
+    const newRole = roleId
+      ? await this.roleRepository.findOne({ where: { id: roleId } })
+      : null;
+    if (roleId && !newRole) throw new NotFoundException(`Role ${roleId} not found`);
+
     const existing = await this.userOrgRoleRepository.findOne({
       where: { userId, orgId: dto.orgId },
     });
@@ -91,10 +98,9 @@ export class UserOrgService {
       if (existing.roleId === roleId && existing.removedAt === null) {
         throw new ConflictException('User already has this role in this org');
       }
-      const [oldRole, newRole] = await Promise.all([
-        existing.roleId ? this.roleRepository.findOne({ where: { id: existing.roleId } }) : null,
-        roleId ? this.roleRepository.findOne({ where: { id: roleId } }) : null,
-      ]);
+      const oldRole = existing.roleId
+        ? await this.roleRepository.findOne({ where: { id: existing.roleId } })
+        : null;
       await this.userOrgRoleRepository.update(existing.id, { roleId, assignedBy, removedAt: null });
       this.emitAuditLog({
         actorId:      assignedBy,

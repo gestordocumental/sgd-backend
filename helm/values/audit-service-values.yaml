@@ -5,9 +5,21 @@
 #     --values helm/values/audit-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/audit-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: audit-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
+
+# No TypeORM migrations — reduce the startup window vs. the base default (300 s).
+# ES + Kafka connections can take a few seconds but not minutes.
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 18   # 90 s — sufficient without migration overhead
+  successThreshold: 1
+  timeoutSeconds: 3
 
 # readinessProbe checks: Elasticsearch + Kafka
 # Both can be slower than a DB ping, so timeoutSeconds is raised to 10.
@@ -27,9 +39,3 @@ resources:
   limits:
     cpu: "500m"
     memory: "512Mi"
-
-envFrom:
-  - secretRef:
-      name: audit-service-secret
-  - configMapRef:
-      name: audit-service-config

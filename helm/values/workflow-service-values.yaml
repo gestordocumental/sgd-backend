@@ -5,9 +5,9 @@
 #     --values helm/values/workflow-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/workflow-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: workflow-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
 
 # readinessProbe checks: PostgreSQL
 readinessProbe:
@@ -26,9 +26,3 @@ resources:
   limits:
     cpu: "500m"
     memory: "512Mi"
-
-envFrom:
-  - secretRef:
-      name: workflow-service-secret
-  - configMapRef:
-      name: workflow-service-config

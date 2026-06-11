@@ -3,6 +3,7 @@ import { PactV3, MatchersV3 } from '@pact-foundation/pact';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
+import { NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { UserClientService } from './user-client.service';
 import { AppLogger } from '@sgd/common';
 
@@ -124,6 +125,101 @@ describe('auth-service → user-service (consumer contract)', () => {
         const result = await svc.getUserInfo(USER_ID);
         expect(result).toHaveProperty('isSuperAdmin');
         expect(typeof result.isSuperAdmin).toBe('boolean');
+      }),
+  );
+
+  // ── Error cases ─────────────────────────────────────────────────────────────
+
+  it('GET /:id/companies returns 404 when user does not exist → consumer throws NotFoundException', () =>
+    provider
+      .addInteraction({
+        states: [{ description: 'user does not exist' }],
+        uponReceiving: 'a companies request for a non-existent user',
+        withRequest: {
+          method: 'GET',
+          path: `/api/v1/users/${USER_ID}/companies`,
+          headers: { 'x-internal-token': like('pact-test-token') },
+        },
+        willRespondWith: {
+          status: 404,
+          headers: { 'Content-Type': like('application/json') },
+          body: like({ message: like('Not Found') }),
+        },
+      })
+      .executeTest(async (mockServer) => {
+        const module = await createModule(mockServer.url);
+        const svc = module.get(UserClientService);
+        await expect(svc.getUserCompanies(USER_ID)).rejects.toThrow(NotFoundException);
+      }),
+  );
+
+  it('GET /:id/effective-permissions returns 404 when user does not exist → consumer throws NotFoundException', () =>
+    provider
+      .addInteraction({
+        states: [{ description: 'user does not exist' }],
+        uponReceiving: 'an effective-permissions request for a non-existent user',
+        withRequest: {
+          method: 'GET',
+          path: `/api/v1/users/${USER_ID}/effective-permissions`,
+          query: { companyId: ORG_ID },
+          headers: { 'x-internal-token': like('pact-test-token') },
+        },
+        willRespondWith: {
+          status: 404,
+          headers: { 'Content-Type': like('application/json') },
+          body: like({ message: like('Not Found') }),
+        },
+      })
+      .executeTest(async (mockServer) => {
+        const module = await createModule(mockServer.url);
+        const svc = module.get(UserClientService);
+        await expect(svc.getUserEffectivePermissions(USER_ID, ORG_ID)).rejects.toThrow(NotFoundException);
+      }),
+  );
+
+  it('GET /:id returns 404 when user does not exist → consumer throws NotFoundException', () =>
+    provider
+      .addInteraction({
+        states: [{ description: 'user does not exist' }],
+        uponReceiving: 'a profile info request for a non-existent user',
+        withRequest: {
+          method: 'GET',
+          path: `/api/v1/users/${USER_ID}`,
+          headers: { 'x-internal-token': like('pact-test-token') },
+        },
+        willRespondWith: {
+          status: 404,
+          headers: { 'Content-Type': like('application/json') },
+          body: like({ message: like('Not Found') }),
+        },
+      })
+      .executeTest(async (mockServer) => {
+        const module = await createModule(mockServer.url);
+        const svc = module.get(UserClientService);
+        await expect(svc.getUserInfo(USER_ID)).rejects.toThrow(NotFoundException);
+      }),
+  );
+
+  it('GET /:id returns 401 when internal token is rejected → consumer throws InternalServerErrorException', () =>
+    provider
+      .addInteraction({
+        states: [{ description: 'internal token is invalid' }],
+        uponReceiving: 'a profile info request with an invalid internal token',
+        withRequest: {
+          method: 'GET',
+          path: `/api/v1/users/${USER_ID}`,
+          headers: { 'x-internal-token': like('pact-test-token') },
+        },
+        willRespondWith: {
+          status: 401,
+          headers: { 'Content-Type': like('application/json') },
+          body: like({ message: like('Unauthorized') }),
+        },
+      })
+      .executeTest(async (mockServer) => {
+        const module = await createModule(mockServer.url);
+        const svc = module.get(UserClientService);
+        await expect(svc.getUserInfo(USER_ID)).rejects.toThrow(InternalServerErrorException);
       }),
   );
 });

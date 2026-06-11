@@ -102,7 +102,7 @@ export class UserRegistrationService {
       if (existing.registrationStatus === RegistrationStatus.PENDING_CREDENTIALS) {
         if (orgId) {
           const membership = await this.userOrgRoleRepository.findOne({
-            where: { userId: existing.id, orgId },
+            where: { userId: existing.id, orgId, removedAt: IsNull() },
           });
           if (!membership) {
             throw new ConflictException({
@@ -120,6 +120,21 @@ export class UserRegistrationService {
       });
     }
 
+    // Resolve roleId before persisting the user so a missing role aborts the request cleanly.
+    let roleId: string | null = null;
+    if (dto.orgId) {
+      if (dto.roleId) {
+        const role = await this.roleRepository.findOne({ where: { id: dto.roleId } });
+        if (!role) throw new NotFoundException(`Role ${dto.roleId} not found`);
+        roleId = role.id;
+      } else {
+        const adminRole = await this.roleRepository.findOne({
+          where: { name: SystemRoleName.ADMIN, scope: RoleScope.SYSTEM, orgId: IsNull() },
+        });
+        if (adminRole) roleId = adminRole.id;
+      }
+    }
+
     const user = this.usersRepository.create(dto);
     await this.usersRepository.save(user);
 
@@ -132,29 +147,14 @@ export class UserRegistrationService {
       metadata:     { isSuperAdmin: user.isSuperAdmin },
     });
 
-    if (dto.orgId) {
-      let roleId: string | null = null;
-
-      if (dto.roleId) {
-        const role = await this.roleRepository.findOne({ where: { id: dto.roleId } });
-        if (!role) throw new NotFoundException(`Role ${dto.roleId} not found`);
-        roleId = role.id;
-      } else {
-        const adminRole = await this.roleRepository.findOne({
-          where: { name: SystemRoleName.ADMIN, scope: RoleScope.SYSTEM, orgId: IsNull() },
-        });
-        if (adminRole) roleId = adminRole.id;
-      }
-
-      if (roleId) {
-        const record = this.userOrgRoleRepository.create({
-          userId: user.id,
-          orgId: dto.orgId,
-          roleId,
-          assignedBy: null,
-        });
-        await this.userOrgRoleRepository.save(record);
-      }
+    if (dto.orgId && roleId) {
+      const record = this.userOrgRoleRepository.create({
+        userId: user.id,
+        orgId: dto.orgId,
+        roleId,
+        assignedBy: null,
+      });
+      await this.userOrgRoleRepository.save(record);
     }
 
     return this.generateAndEmitInvitation(user);
@@ -173,7 +173,7 @@ export class UserRegistrationService {
 
     if (callerOrgId) {
       const membership = await this.userOrgRoleRepository.findOne({
-        where: { userId: user.id, orgId: callerOrgId },
+        where: { userId: user.id, orgId: callerOrgId, removedAt: IsNull() },
       });
       if (!membership) {
         throw new ConflictException('You can only resend invitations for users in your organization');
@@ -198,10 +198,14 @@ export class UserRegistrationService {
 
   async completeRegistration(dto: CompleteRegistrationDto): Promise<UserResponseDto> {
     const tokenHash = createHash('sha256').update(dto.token).digest('hex');
-    let userId = await this.redis.getdel(`invitation:${tokenHash}`);
+    const hashKey  = `invitation:${tokenHash}`;
+    const plainKey = `invitation:${dto.token}`;
+
+    // Read without consuming so any downstream failure leaves the token intact for retry.
+    let userId = await this.redis.get(hashKey);
     if (!userId) {
       // Fallback: invitations issued before hashing was introduced stored the plaintext token.
-      userId = await this.redis.getdel(`invitation:${dto.token}`);
+      userId = await this.redis.get(plainKey);
     }
     if (!userId) {
       throw new NotFoundException('Invitation token invalid or expired');
@@ -209,14 +213,6 @@ export class UserRegistrationService {
 
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException(`User ${userId} not found`);
-
-    // Update profile fields inline — no org-structure validation needed for registration.
-    Object.assign(user, {
-      firstName: dto.firstName,
-      lastName:  dto.lastName,
-      idNumber:  dto.idNumber,
-    });
-    await this.usersRepository.save(user);
 
     try {
       await this.authClientService.provisionCredentials({
@@ -235,11 +231,23 @@ export class UserRegistrationService {
       throw new InternalServerErrorException('Error creating access credentials');
     }
 
+    // Profile fields + activation in a single atomic write.
     await this.usersRepository.manager.transaction(async (manager) => {
-      user.registrationStatus = RegistrationStatus.ACTIVE;
-      user.isActive = true;
+      Object.assign(user, {
+        firstName:          dto.firstName,
+        lastName:           dto.lastName,
+        idNumber:           dto.idNumber,
+        registrationStatus: RegistrationStatus.ACTIVE,
+        isActive:           true,
+      });
       await manager.save(user);
     });
+
+    // Consume the token only after the DB transaction commits.
+    await Promise.all([
+      this.redis.del(hashKey),
+      this.redis.del(plainKey),
+    ]);
 
     const completedUser = await this.usersRepository.findOne({ where: { id: user.id } });
     if (!completedUser) throw new NotFoundException(`User ${user.id} not found`);

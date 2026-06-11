@@ -313,7 +313,10 @@ export class UsersController {
     @JwtPayloadParam() caller: JwtPayload,
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
-    return this.usersService.remove(id, caller.companyId, caller.sub);
+    if (caller.companyId) {
+      return this.usersService.removeFromOrg(id, caller.companyId, caller.sub);
+    }
+    return this.usersService.globalRemove(id, caller.sub);
   }
 
   @ApiOperation({ summary: 'Restore a previously deleted user' })

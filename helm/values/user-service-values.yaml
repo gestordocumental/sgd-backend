@@ -5,9 +5,9 @@
 #     --values helm/values/user-service-values.yaml
 
 image:
-  repository: ghcr.io/your-org/user-service   # replace with real registry
-  tag: "latest"
-  pullPolicy: Always
+  repository: user-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
 
 # readinessProbe checks: PostgreSQL
 readinessProbe:
@@ -19,6 +19,13 @@ readinessProbe:
   successThreshold: 1
   timeoutSeconds: 5
 
+# Baseline conservador — validar con datos reales antes de ajustar.
+# Este servicio es facade sobre 3 sub-servicios + Redis (permisos en caché).
+# Señales para subir límites tras el primer despliegue en producción:
+#   - CPU throttling sostenido (container_cpu_cfs_throttled_seconds_total)
+#   - OOMKilled o memoria cerca del límite (container_memory_working_set_bytes)
+#   - Latencia P99 elevada en /users/* coincidente con alta carga de Redis
+# Dashboard de referencia: Grafana → Kubernetes / Compute Resources / Pod
 resources:
   requests:
     cpu: "100m"
@@ -26,9 +33,3 @@ resources:
   limits:
     cpu: "500m"
     memory: "512Mi"
-
-envFrom:
-  - secretRef:
-      name: user-service-secret
-  - configMapRef:
-      name: user-service-config

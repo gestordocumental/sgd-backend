@@ -58,8 +58,7 @@ export class UsersService {
     return this.profile.uploadAvatar(userId, avatarUrl);
   }
 
-  remove(id: string, callerOrgId?: string, actorId?: string): Promise<void> {
-    if (callerOrgId) return this.org.removeFromOrg(id, callerOrgId, actorId);
+  globalRemove(id: string, actorId?: string): Promise<void> {
     return this.profile.globalRemove(id, actorId);
   }
 

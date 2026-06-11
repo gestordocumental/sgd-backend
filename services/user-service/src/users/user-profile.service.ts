@@ -157,26 +157,28 @@ export class UserProfileService {
   async update(id: string, dto: UpdateUserDto, actorId?: string, orgId?: string): Promise<User> {
     const user = await this.findOne(id);
 
-    const settingAnyOrgField =
-      ('departamentoId' in dto && dto.departamentoId !== null && dto.departamentoId !== undefined) ||
-      ('areaId' in dto && dto.areaId !== null && dto.areaId !== undefined) ||
-      ('cargoId' in dto && dto.cargoId !== null && dto.cargoId !== undefined);
+    const touchingAnyOrgField =
+      'departamentoId' in dto ||
+      'areaId' in dto ||
+      'cargoId' in dto;
 
-    if (settingAnyOrgField && orgId) {
+    if (touchingAnyOrgField && orgId) {
       const effectiveDeptId = 'departamentoId' in dto ? dto.departamentoId : user.departamentoId;
       const effectiveAreaId = 'areaId' in dto ? dto.areaId : user.areaId;
       const effectiveCargoId = 'cargoId' in dto ? dto.cargoId : user.cargoId;
 
-      if (effectiveDeptId === null || effectiveDeptId === undefined) {
+      if ((effectiveAreaId != null || effectiveCargoId != null) && effectiveDeptId == null) {
         throw new BadRequestException('departamentoId is required when assigning an area or cargo');
       }
 
-      await this.orgClientService.validateOrgStructure(
-        orgId,
-        effectiveDeptId,
-        effectiveAreaId ?? undefined,
-        effectiveCargoId ?? undefined,
-      );
+      if (effectiveDeptId != null) {
+        await this.orgClientService.validateOrgStructure(
+          orgId,
+          effectiveDeptId,
+          effectiveAreaId ?? undefined,
+          effectiveCargoId ?? undefined,
+        );
+      }
     }
 
     const before: Record<string, unknown> = {};
@@ -247,8 +249,13 @@ export class UserProfileService {
 
   async globalRemove(id: string, actorId?: string): Promise<void> {
     const user = await this.findOne(id);
-    await this.usersRepository.softRemove(user);
     await this.authClientService.disableCredentials(user.id);
+    try {
+      await this.usersRepository.softRemove(user);
+    } catch (err) {
+      await this.authClientService.enableCredentials(user.id).catch(() => {});
+      throw err;
+    }
     if (actorId) {
       this.emitAuditLog({
         actorId,
@@ -260,8 +267,13 @@ export class UserProfileService {
   }
 
   async restore(id: string, actorId?: string): Promise<User> {
-    await this.usersRepository.restore(id);
     await this.authClientService.enableCredentials(id);
+    try {
+      await this.usersRepository.restore(id);
+    } catch (err) {
+      await this.authClientService.disableCredentials(id).catch(() => {});
+      throw err;
+    }
     const restored = await this.findOne(id);
     this.emitAuditLog({
       actorId,
@@ -276,7 +288,10 @@ export class UserProfileService {
     id: string,
     caller: { actorId?: string; companyId?: string; isSuperAdmin?: boolean },
   ): Promise<User> {
-    if (!caller.isSuperAdmin && caller.companyId) {
+    if (!caller.isSuperAdmin) {
+      if (!caller.companyId) {
+        throw new ForbiddenException('Organization context required to disable users');
+      }
       const membership = await this.userOrgRoleRepository.findOne({
         where: { userId: id, orgId: caller.companyId },
       });
@@ -288,24 +303,32 @@ export class UserProfileService {
     if (user.registrationStatus !== RegistrationStatus.ACTIVE) {
       throw new ConflictException('Only registered users can be disabled');
     }
-    user.isActive = false;
-    const saved = await this.usersRepository.save(user);
     await this.authClientService.disableCredentials(id);
     await this.authClientService.revokeAllTokens(id);
-    this.emitAuditLog({
-      actorId:      caller.actorId,
-      action:       'USER_DISABLED',
-      resourceId:   id,
-      resourceName: userDisplayName(user),
-    });
-    return saved;
+    user.isActive = false;
+    try {
+      const saved = await this.usersRepository.save(user);
+      this.emitAuditLog({
+        actorId:      caller.actorId,
+        action:       'USER_DISABLED',
+        resourceId:   id,
+        resourceName: userDisplayName(user),
+      });
+      return saved;
+    } catch (err) {
+      await this.authClientService.enableCredentials(id).catch(() => {});
+      throw err;
+    }
   }
 
   async enable(
     id: string,
     caller: { actorId?: string; companyId?: string; isSuperAdmin?: boolean },
   ): Promise<User> {
-    if (!caller.isSuperAdmin && caller.companyId) {
+    if (!caller.isSuperAdmin) {
+      if (!caller.companyId) {
+        throw new ForbiddenException('Organization context required to enable users');
+      }
       const membership = await this.userOrgRoleRepository.findOne({
         where: { userId: id, orgId: caller.companyId },
       });
@@ -317,16 +340,21 @@ export class UserProfileService {
     if (user.registrationStatus !== RegistrationStatus.ACTIVE) {
       throw new ConflictException('Only registered users can be enabled');
     }
-    user.isActive = true;
-    const saved = await this.usersRepository.save(user);
     await this.authClientService.enableCredentials(id);
-    this.emitAuditLog({
-      actorId:      caller.actorId,
-      action:       'USER_ENABLED',
-      resourceId:   id,
-      resourceName: userDisplayName(user),
-    });
-    return saved;
+    user.isActive = true;
+    try {
+      const saved = await this.usersRepository.save(user);
+      this.emitAuditLog({
+        actorId:      caller.actorId,
+        action:       'USER_ENABLED',
+        resourceId:   id,
+        resourceName: userDisplayName(user),
+      });
+      return saved;
+    } catch (err) {
+      await this.authClientService.disableCredentials(id).catch(() => {});
+      throw err;
+    }
   }
 
   async setSuperAdmin(id: string, enabled: boolean, actorId?: string): Promise<User> {

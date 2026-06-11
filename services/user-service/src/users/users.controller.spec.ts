@@ -73,14 +73,14 @@ describe('UsersController', () => {
             getMyOrgRoles: jest.fn(),
             uploadAvatar: jest.fn(),
             update: jest.fn(),
-            remove: jest.fn(),
+            removeFromOrg: jest.fn(),
+            globalRemove: jest.fn(),
             restore: jest.fn(),
             getCompanies: jest.fn(),
             provision: jest.fn(),
             setSuperAdmin: jest.fn(),
             assignOrg: jest.fn(),
             getOrgRoles: jest.fn(),
-            removeFromOrg: jest.fn(),
             setOptionalReviewer: jest.fn(),
             completeRegistration: jest.fn(),
             resendInvitation: jest.fn(),
@@ -313,20 +313,22 @@ describe('UsersController', () => {
   // ─── DELETE /:id ──────────────────────────────────────────────────────────
 
   describe('remove', () => {
-    it('passes companyId from JWT when caller has org context (org-scoped delete)', async () => {
-      usersService.remove.mockResolvedValue(undefined);
+    it('calls removeFromOrg when caller has org context', async () => {
+      usersService.removeFromOrg.mockResolvedValue(undefined);
 
       await controller.remove({ sub: 'caller-id', companyId: 'org-uuid' } as any, 'user-uuid-1');
 
-      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', 'org-uuid', 'caller-id');
+      expect(usersService.removeFromOrg).toHaveBeenCalledWith('user-uuid-1', 'org-uuid', 'caller-id');
+      expect(usersService.globalRemove).not.toHaveBeenCalled();
     });
 
-    it('passes undefined companyId when caller is super admin (global delete)', async () => {
-      usersService.remove.mockResolvedValue(undefined);
+    it('calls globalRemove when caller is super admin (no companyId)', async () => {
+      usersService.globalRemove.mockResolvedValue(undefined);
 
       await controller.remove({ sub: 'caller-id', isSuperAdmin: true } as any, 'user-uuid-1');
 
-      expect(usersService.remove).toHaveBeenCalledWith('user-uuid-1', undefined, 'caller-id');
+      expect(usersService.globalRemove).toHaveBeenCalledWith('user-uuid-1', 'caller-id');
+      expect(usersService.removeFromOrg).not.toHaveBeenCalled();
     });
   });
 
