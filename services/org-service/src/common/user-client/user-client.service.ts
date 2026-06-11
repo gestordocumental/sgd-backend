@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { firstValueFrom, retry, throwError, timer, timeout, TimeoutError } from 'rxjs';
+import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import { CORRELATION_ID_HEADER, getCorrelationId } from '@sgd/common';
 import CircuitBreaker = require('opossum');
 
@@ -50,8 +50,7 @@ export class UserClientService {
   /**
    * Revokes all user memberships for a deleted org.
    * 404 is treated as success (already revoked — idempotent).
-   * Retries up to 2 times with exponential backoff on 5xx and network errors before
-   * allowing the caller to compensate (restore the soft-deleted org).
+   * Retries up to 2 times with exponential backoff on 5xx and network errors.
    * Timeouts and 4xx errors are not retried — they are deterministic failures.
    */
   async revokeOrgAccess(orgId: string): Promise<void> {
@@ -60,53 +59,50 @@ export class UserClientService {
     const RETRY_COUNT   = 2;
     const RETRY_BASE_MS = 500;
 
-    try {
-      await this.fireWithCb(() =>
-        firstValueFrom(
-          this.httpService
-            .delete(url, {
-              headers: {
-                'x-internal-token':      this.internalToken,
-                [CORRELATION_ID_HEADER]: correlationId,
-              },
-            })
-            .pipe(
-              timeout(this.timeoutMs),
-              retry({
-                count: RETRY_COUNT,
-                delay: (error: any, attempt: number) => {
-                  // Don't retry on timeout — service is unresponsive, not transiently failing
-                  if (error instanceof TimeoutError) return throwError(() => error);
-                  // Don't retry on 4xx — deterministic client/business errors
-                  const status = error?.response?.status;
-                  if (typeof status === 'number' && status >= 400 && status < 500) {
-                    return throwError(() => error);
-                  }
-                  // Retry 5xx and network errors with exponential backoff
-                  const delayMs = RETRY_BASE_MS * Math.pow(2, attempt - 1);
-                  this.logger.warn(
-                    `revokeOrgAccess for ${orgId} failed (attempt ${attempt + 1}/${RETRY_COUNT + 1}), retrying in ${delayMs}ms`,
-                  );
-                  return timer(delayMs);
+    for (let attempt = 0; attempt <= RETRY_COUNT; attempt++) {
+      try {
+        await this.fireWithCb(() =>
+          firstValueFrom(
+            this.httpService
+              .delete(url, {
+                headers: {
+                  'x-internal-token':      this.internalToken,
+                  [CORRELATION_ID_HEADER]: correlationId,
                 },
-              }),
-            ),
-        ),
-      );
-    } catch (error: any) {
-      if (error instanceof ServiceUnavailableException) throw error;
+              })
+              .pipe(timeout(this.timeoutMs)),
+          ),
+        );
+        return; // success
+      } catch (error: any) {
+        if (error instanceof ServiceUnavailableException) throw error;
 
-      if (error instanceof TimeoutError) {
-        this.logger.error(`Timeout revoking org access for ${orgId}`);
-        throw new GatewayTimeoutException('Timeout revoking user access after org deletion');
+        if (error instanceof TimeoutError) {
+          this.logger.error(`Timeout revoking org access for ${orgId}`);
+          throw new GatewayTimeoutException('Timeout revoking user access after org deletion');
+        }
+
+        const status = error?.response?.status;
+        if (status === 404) return; // already revoked — idempotent
+
+        // 4xx errors are deterministic — don't retry
+        const retryable = typeof status !== 'number' || status >= 500;
+        if (!retryable || attempt === RETRY_COUNT) {
+          this.logger.error(`Failed to revoke org access for ${orgId}: HTTP ${status ?? 'N/A'}`);
+          throw new InternalServerErrorException('Failed to revoke user access after org deletion');
+        }
+
+        const delayMs = RETRY_BASE_MS * Math.pow(2, attempt);
+        this.logger.warn(
+          `revokeOrgAccess for ${orgId} failed (attempt ${attempt + 1}/${RETRY_COUNT + 1}), retrying in ${delayMs}ms`,
+        );
+        await this.sleep(delayMs);
       }
-
-      const status = error?.response?.status;
-      if (status === 404) return; // already revoked — idempotent
-
-      this.logger.error(`Failed to revoke org access for ${orgId}: HTTP ${status ?? 'N/A'}`);
-      throw new InternalServerErrorException('Failed to revoke user access after org deletion');
     }
+  }
+
+  protected sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private async fireWithCb<T>(fn: () => Promise<T>): Promise<T> {

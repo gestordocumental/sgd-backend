@@ -92,43 +92,40 @@ describe('UserClientService', () => {
   });
 
   // ── Retry behavior ────────────────────────────────────────────────────────────
-  // These tests involve exponential backoff delays so they use fake timers.
+  // sleep() is spied on so retries complete synchronously without fake timers.
 
   it('retries on 5xx and throws InternalServerErrorException after exhausting all retries', async () => {
-    jest.useFakeTimers();
+    jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
     httpService.delete.mockReturnValue(throwError(() => ({ response: { status: 500 } })));
 
-    const promise = service.revokeOrgAccess('org-1');
-    // Advance past the two retry delays: 500ms + 1000ms = 1500ms
-    await jest.advanceTimersByTimeAsync(1600);
-
-    await expect(promise).rejects.toBeInstanceOf(InternalServerErrorException);
+    await expect(service.revokeOrgAccess('org-1')).rejects.toBeInstanceOf(InternalServerErrorException);
     // Initial attempt + 2 retries = 3 total calls
     expect(httpService.delete).toHaveBeenCalledTimes(3);
+    // Backoff: 500ms, then 1000ms
+    expect((service as any).sleep).toHaveBeenCalledTimes(2);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(1, 500);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(2, 1000);
   });
 
   it('retries on network error and throws InternalServerErrorException after exhausting all retries', async () => {
-    jest.useFakeTimers();
+    jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
     httpService.delete.mockReturnValue(throwError(() => new Error('network error')));
 
-    const promise = service.revokeOrgAccess('org-1');
-    await jest.advanceTimersByTimeAsync(1600);
-
-    await expect(promise).rejects.toBeInstanceOf(InternalServerErrorException);
+    await expect(service.revokeOrgAccess('org-1')).rejects.toBeInstanceOf(InternalServerErrorException);
     expect(httpService.delete).toHaveBeenCalledTimes(3);
+    expect((service as any).sleep).toHaveBeenCalledTimes(2);
   });
 
   it('succeeds on the second attempt when the first call returns a transient 5xx', async () => {
-    jest.useFakeTimers();
+    jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
     httpService.delete
       .mockReturnValueOnce(throwError(() => ({ response: { status: 503 } })))
       .mockReturnValue(of({ status: 200, data: {} }));
 
-    const promise = service.revokeOrgAccess('org-1');
-    // Advance past the first retry delay (500ms)
-    await jest.advanceTimersByTimeAsync(600);
-
-    await expect(promise).resolves.toBeUndefined();
+    await expect(service.revokeOrgAccess('org-1')).resolves.toBeUndefined();
     expect(httpService.delete).toHaveBeenCalledTimes(2);
+    // Only one retry delay (500ms for the first attempt)
+    expect((service as any).sleep).toHaveBeenCalledTimes(1);
+    expect((service as any).sleep).toHaveBeenCalledWith(500);
   });
 });

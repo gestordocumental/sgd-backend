@@ -4,6 +4,9 @@ import { BadRequestException, ConflictException, HttpException, InternalServerEr
 import { IsNull, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 import { UsersService } from './users.service';
+import { UserProfileService } from './user-profile.service';
+import { UserOrgService } from './user-org.service';
+import { UserRegistrationService } from './user-registration.service';
 import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role, RoleScope, SystemRoleName } from '../roles/entities/role.entity';
@@ -84,6 +87,9 @@ describe('UsersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
+        UserProfileService,
+        UserOrgService,
+        UserRegistrationService,
         {
           provide: getRepositoryToken(User),
           useValue: {
