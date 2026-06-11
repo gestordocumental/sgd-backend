@@ -72,6 +72,11 @@ run() {
   fi
 }
 
+# ── Validar herramientas ──────────────────────────────────────────────────────
+
+command -v kubectl >/dev/null 2>&1 || die "kubectl no encontrado. Instálalo primero."
+command -v helm    >/dev/null 2>&1 || die "helm no encontrado. Instálalo primero."
+
 # ── Pre-flight: validar Secrets y ConfigMaps ──────────────────────────────────
 
 log "Validating pre-requisites in namespace '$NAMESPACE'..."

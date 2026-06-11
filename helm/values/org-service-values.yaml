@@ -9,6 +9,18 @@ image:
   tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
   pullPolicy: IfNotPresent
 
+# 4 TypeORM migrations — includes CREATE INDEX CONCURRENTLY (pg_trgm GIN).
+# CONCURRENTLY avoids lock contention but adds a few extra seconds vs. blocking indexes.
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 36   # 180 s — allows for concurrent index build on fresh schema
+  successThreshold: 1
+  timeoutSeconds: 3
+
 # readinessProbe checks: PostgreSQL
 readinessProbe:
   httpGet:

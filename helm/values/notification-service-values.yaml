@@ -9,6 +9,17 @@ image:
   tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
   pullPolicy: IfNotPresent
 
+# 2 TypeORM migrations — small schema additions, no heavy data transforms.
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 24   # 120 s — covers fast migrations + PG connection init
+  successThreshold: 1
+  timeoutSeconds: 3
+
 # readinessProbe checks: PostgreSQL
 readinessProbe:
   httpGet:
