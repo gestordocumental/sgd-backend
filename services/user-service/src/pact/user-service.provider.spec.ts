@@ -58,7 +58,13 @@ const mockUsersService: Partial<UsersService> = {
 class PactStateController {
   @Post()
   setupState(@Body() body: { state?: string; action?: string }): void {
-    if (body.action === 'teardown') return;
+    if (body.action === 'teardown') {
+      configGet.mockReturnValue(PACT_TOKEN);
+      svcFindOne.mockResolvedValue(mockUser);
+      svcGetCompanies.mockResolvedValue([ORG_ID]);
+      svcGetEffectivePermissions.mockResolvedValue([{ module: 'documents', action: 'read' }]);
+      return;
+    }
 
     switch (body.state) {
       case 'user does not exist': {
