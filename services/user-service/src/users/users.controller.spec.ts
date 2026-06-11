@@ -255,7 +255,7 @@ describe('UsersController', () => {
       const user = makeUser();
       usersService.findOne.mockResolvedValue(user);
 
-      const result = await controller.findOne(user.id);
+      const result = await controller.findOne(undefined, user.id);
 
       expect(usersService.findOne).toHaveBeenCalledWith(user.id);
       expect(result).toBeInstanceOf(UserResponseDto);
@@ -264,7 +264,21 @@ describe('UsersController', () => {
     it('propagates NotFoundException from the service', async () => {
       usersService.findOne.mockRejectedValue(new NotFoundException());
 
-      await expect(controller.findOne('bad-id')).rejects.toThrow(NotFoundException);
+      await expect(controller.findOne(undefined, 'bad-id')).rejects.toThrow(NotFoundException);
+    });
+
+    it('resolves when a valid internal token is provided', async () => {
+      const user = makeUser();
+      usersService.findOne.mockResolvedValue(user);
+
+      const result = await controller.findOne(INTERNAL_TOKEN, user.id);
+
+      expect(usersService.findOne).toHaveBeenCalledWith(user.id);
+      expect(result).toBeInstanceOf(UserResponseDto);
+    });
+
+    it('throws UnauthorizedException when an invalid internal token is provided', async () => {
+      await expect(controller.findOne('wrong-token', 'some-id')).rejects.toThrow(UnauthorizedException);
     });
   });
 
