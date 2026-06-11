@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { Test } from '@nestjs/testing';
-import { INestApplication, CanActivate } from '@nestjs/common';
+import { INestApplication, CanActivate, NotFoundException, Controller, Post, Body } from '@nestjs/common';
 import { Verifier } from '@pact-foundation/pact';
 import { ConfigService } from '@nestjs/config';
 import { UsersController } from '../users/users.controller';
@@ -38,29 +38,70 @@ const mockUser: User = {
 // Bypass JWT / permissions check — the pact only tests API shape, not auth
 const allowAll: CanActivate = { canActivate: () => true };
 
+// Mutable so the PactStateController can flip behaviour between interactions
+const configGet = jest.fn().mockReturnValue(PACT_TOKEN);
+const configMock = { get: configGet, getOrThrow: configGet };
+
+const svcFindOne                 = jest.fn().mockResolvedValue(mockUser);
+const svcGetCompanies            = jest.fn().mockResolvedValue([ORG_ID]);
+const svcGetEffectivePermissions = jest.fn().mockResolvedValue([{ module: 'documents', action: 'read' }]);
+
 const mockUsersService: Partial<UsersService> = {
-  getCompanies:            jest.fn().mockResolvedValue([ORG_ID]),
-  getEffectivePermissions: jest.fn().mockResolvedValue([{ module: 'documents', action: 'read' }]),
-  findOne:                 jest.fn().mockResolvedValue(mockUser),
+  findOne:                 svcFindOne,
+  getCompanies:            svcGetCompanies,
+  getEffectivePermissions: svcGetEffectivePermissions,
 };
+
+// The Pact Rust core calls POST /_pactSetup before each interaction to set up provider state.
+// This lightweight controller receives those calls and configures the mocks accordingly.
+@Controller('_pactSetup')
+class PactStateController {
+  @Post()
+  setupState(@Body() body: { state?: string; action?: string }): void {
+    if (body.action === 'teardown') return;
+
+    switch (body.state) {
+      case 'user does not exist': {
+        configGet.mockReturnValue(PACT_TOKEN);
+        const notFound = new NotFoundException(`User ${USER_ID} not found`);
+        svcFindOne.mockRejectedValue(notFound);
+        svcGetCompanies.mockRejectedValue(notFound);
+        svcGetEffectivePermissions.mockRejectedValue(notFound);
+        break;
+      }
+      case 'internal token is invalid':
+        // Return a different token so verifyInternalToken() throws UnauthorizedException
+        configGet.mockReturnValue('wrong-token');
+        svcFindOne.mockResolvedValue(mockUser);
+        break;
+      default:
+        configGet.mockReturnValue(PACT_TOKEN);
+        svcFindOne.mockResolvedValue(mockUser);
+        svcGetCompanies.mockResolvedValue([ORG_ID]);
+        svcGetEffectivePermissions.mockResolvedValue([{ module: 'documents', action: 'read' }]);
+    }
+  }
+}
 
 describe('user-service provider — satisfies auth-service consumer expectations', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    // The Pact Rust FFI (reqwest) tries IPv6 (::1) first when given "localhost".
+    // On this machine the loopback server binds to IPv4 only, so the IPv6 attempt
+    // times out after ~20 s before falling back to 127.0.0.1 — making every
+    // request 20 s slower.  Bypassing the proxy and binding/connecting via the
+    // literal IPv4 address eliminates that delay entirely.
+    process.env['NO_PROXY']   = '127.0.0.1,localhost';
+    process.env['no_proxy']   = '127.0.0.1,localhost';
+    process.env['PACT_DO_NOT_TRACK'] = 'true';
+
     const moduleRef = await Test.createTestingModule({
-      controllers: [UsersController],
+      controllers: [UsersController, PactStateController],
       providers: [
         { provide: UsersService, useValue: mockUsersService },
         { provide: StorageService, useValue: {} },
-        {
-          provide: ConfigService,
-          useValue: {
-            // verifyInternalToken() calls configService.get(key)
-            get: () => PACT_TOKEN,
-            getOrThrow: () => PACT_TOKEN,
-          },
-        },
+        { provide: ConfigService, useValue: configMock },
       ],
     })
       .overrideGuard(PermissionsGuard)
@@ -68,7 +109,10 @@ describe('user-service provider — satisfies auth-service consumer expectations
       .compile();
 
     app = moduleRef.createNestApplication();
-    await app.listen(0);
+    // Bind to the IPv4 loopback explicitly so the server is never reachable
+    // on ::1, which prevents the Pact Rust FFI from making a 20-second
+    // IPv6-connect-timeout attempt before each request.
+    await app.listen(0, '127.0.0.1');
   });
 
   afterAll(() => app.close());
@@ -85,10 +129,14 @@ describe('user-service provider — satisfies auth-service consumer expectations
 
     const pactFile = path.resolve(pactDir, 'auth-service-user-service.json');
 
+    // Use the literal IPv4 address to avoid DNS round-trips that resolve
+    // "localhost" to ::1 and trigger the 20-second IPv6 fallback in the
+    // Pact Rust FFI HTTP client.
     return new Verifier({
-      provider: 'user-service',
-      providerBaseUrl: `http://localhost:${port}`,
-      pactUrls: [pactFile],
+      provider:               'user-service',
+      providerBaseUrl:        `http://127.0.0.1:${port}`,
+      pactUrls:               [pactFile],
+      providerStatesSetupUrl: `http://127.0.0.1:${port}/_pactSetup`,
     }).verifyProvider();
-  });
+  }, 120_000);
 });

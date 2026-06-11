@@ -283,7 +283,14 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User found', type: UserResponseDto })
   @Get(":id")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
-  async findOne(@Param("id", new ParseUUIDPipe({ version: '4' })) id: string): Promise<UserResponseDto> {
+  async findOne(
+    @Headers("x-internal-token") internalToken: string | undefined,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<UserResponseDto> {
+    // Service-to-service callers (e.g. auth-service) authenticate via internal token
+    if (internalToken !== undefined) {
+      this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
+    }
     return UserResponseDto.from(await this.usersService.findOne(id));
   }
 
