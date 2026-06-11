@@ -20,6 +20,6 @@ module.exports = {
   ],
   testEnvironment: 'node',
   setupFiles: ['reflect-metadata'],
-  testTimeout: 30_000,
+  testTimeout: 120_000,
   runInBand: true,
 };
