@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 CHART="helm/charts/sgd-service"
-TIMEOUT="5m"
+TIMEOUT="7m"   # 300 s startupProbe + ~120 s de margen para image pull y scheduling
 
 # Build --set overrides for registry and tag if provided
 EXTRA_SETS=()
