@@ -104,10 +104,11 @@ export class UserOrgService {
       await this.userOrgRoleRepository.update(existing.id, { roleId, assignedBy, removedAt: null });
       this.emitAuditLog({
         actorId:      assignedBy,
+        orgId:        dto.orgId,
         action:       'USER_ORG_ROLE_UPDATED',
         resourceId:   userId,
         resourceName: userDisplayName(targetUser),
-        metadata:     { changes: { role: { from: oldRole?.name ?? null, to: newRole?.name ?? null } }, orgId: dto.orgId },
+        metadata:     { changes: { role: { from: oldRole?.name ?? null, to: newRole?.name ?? null } } },
       });
       await this.invalidatePermissionCache(userId, dto.orgId);
       return this.userOrgRoleRepository.findOne({

@@ -201,20 +201,39 @@ export class WorkflowsService {
     const userId = user.sub!;
     const orgId  = user.companyId!;
 
-    const workflows = await this.workflowRepo
-      .createQueryBuilder('w')
-      .leftJoinAndSelect('w.approvalSteps', 'steps')
-      .where('w.org_id = :orgId', { orgId })
-      .andWhere('w.current_assigned_user_id = :userId', { userId })
-      .andWhere('w.status IN (:...statuses)', {
-        statuses: [WorkflowStatus.PENDING_APPROVAL, WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS, WorkflowStatus.PENDING_REVIEW_CYCLE],
-      })
-      .andWhere('w.deleted_at IS NULL')
-      .orderBy('w.updatedAt', 'DESC')
-      .take(100)
-      .getMany();
+    const [assignedWorkflows, draftWorkflows] = await Promise.all([
+      this.workflowRepo
+        .createQueryBuilder('w')
+        .leftJoinAndSelect('w.approvalSteps', 'steps')
+        .where('w.org_id = :orgId', { orgId })
+        .andWhere('w.current_assigned_user_id = :userId', { userId })
+        .andWhere('w.status IN (:...statuses)', {
+          statuses: [WorkflowStatus.PENDING_APPROVAL, WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS, WorkflowStatus.PENDING_REVIEW_CYCLE],
+        })
+        .andWhere('w.deleted_at IS NULL')
+        .orderBy('w.updatedAt', 'DESC')
+        .take(100)
+        .getMany(),
 
-    return workflows.map((w) => WorkflowResponseDto.from(w));
+      // El creador ve sus DRAFT en "Mis tareas" para poder enviarlos a aprobación
+      this.workflowRepo
+        .createQueryBuilder('w')
+        .leftJoinAndSelect('w.approvalSteps', 'steps')
+        .where('w.org_id = :orgId', { orgId })
+        .andWhere('w.created_by = :userId', { userId })
+        .andWhere('w.status = :draft', { draft: WorkflowStatus.DRAFT })
+        .andWhere('w.deleted_at IS NULL')
+        .orderBy('w.updatedAt', 'DESC')
+        .take(100)
+        .getMany(),
+    ]);
+
+    const merged = new Map<string, Workflow>();
+    for (const w of [...assignedWorkflows, ...draftWorkflows]) {
+      merged.set(w.id, w);
+    }
+
+    return Array.from(merged.values()).map((w) => WorkflowResponseDto.from(w));
   }
 
   // ── Workflows disponibles para usuario final ──────────────────────────────────

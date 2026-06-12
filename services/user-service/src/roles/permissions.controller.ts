@@ -26,7 +26,7 @@ export class PermissionsController {
   @ApiBearerAuth('JWT')
   @ApiResponse({ status: 200, description: 'Array of permissions' })
   @UseGuards(PermissionsGuard)
-  @RequirePermission(PermissionModule.ORGS, PermissionAction.READ)
+  @RequirePermission(PermissionModule.ROLES, PermissionAction.READ)
   @Get()
   findAll() {
     return this.permissionsService.findAll();

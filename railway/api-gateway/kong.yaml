@@ -288,6 +288,9 @@ services:
   # ── notification-service: SSE stream (autenticado por ticket efímero) ───
   - name: notification-sse
     url: http://notification-service.railway.internal:3000
+    read_timeout: 86400000    # 24h — SSE es una conexión larga; el default (60s) la corta
+    write_timeout: 86400000   # 24h — también necesario para long-lived connections
+    connect_timeout: 60000
     routes:
       - name: notification-sse-route
         paths:
@@ -301,6 +304,13 @@ services:
           minute: 30
           policy: local
           fault_tolerant: true
+      - name: response-transformer
+        id: a1b2c3d4-0023-0000-0000-000000000023
+        config:
+          add:
+            headers:
+              - "X-Accel-Buffering:no"   # desactiva buffering de nginx para el stream SSE
+              - "Cache-Control:no-cache" # evita que proxies intermedios cacheen el stream
 
   # ── notification-service: resto de rutas (JWT en header) ───────────────
   - name: notification-service
