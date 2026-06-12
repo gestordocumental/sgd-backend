@@ -2,12 +2,21 @@ import { ConfigService } from '@nestjs/config';
 import { NotificationsConsumer } from './notifications.consumer';
 import { NotificationsService } from './notifications.service';
 import { EmailService } from './email/email.service';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
+import { AppLogger, KafkaProducerService, TOPICS } from '@sgd/common';
 
-// Make runWithCorrelation a passthrough so handleMessage is exercised directly
-jest.mock('../common/kafka/kafka-consumer.util', () => ({
+// runWithCorrelation → passthrough so handleMessage is exercised directly.
+// withDlt → single-attempt passthrough that routes to DLT on error (mirrors
+//           real behavior without actual retry delays).
+jest.mock('@sgd/common', () => ({
+  ...jest.requireActual('@sgd/common'),
   runWithCorrelation: jest.fn((_msg: unknown, fn: () => Promise<void>) => fn()),
+  withDlt: jest.fn(async ({ producer, topic, message }: any, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch {
+      await producer.emitToDlt(topic, message).catch(() => {});
+    }
+  }),
 }));
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -48,9 +57,11 @@ describe('NotificationsConsumer', () => {
   let capturedEachMessage: ((payload: any) => Promise<void>);
 
   let notificationsService: jest.Mocked<Pick<NotificationsService, 'dispatch'>>;
-  let emailService: jest.Mocked<Pick<EmailService, 'sendInvitation'>>;
+  let emailService: jest.Mocked<Pick<EmailService, 'sendInvitation' | 'sendPasswordReset'>>;
   let logger: jest.Mocked<Pick<AppLogger, 'log' | 'warn' | 'error' | 'http'>>;
   let config: jest.Mocked<Pick<ConfigService, 'getOrThrow'>>;
+  let mockProducer: jest.Mocked<Pick<KafkaProducerService, 'emitToDlt'>>;
+  let sseService: { emit: jest.Mock };
 
   beforeEach(async () => {
     mockKafkaConsumer = {
@@ -65,17 +76,25 @@ describe('NotificationsConsumer', () => {
 
     const mockKafka = { consumer: jest.fn().mockReturnValue(mockKafkaConsumer) };
 
-    config             = { getOrThrow: jest.fn().mockReturnValue('test-consumer-group') };
+    config               = { getOrThrow: jest.fn().mockReturnValue('test-consumer-group') };
     notificationsService = { dispatch: jest.fn().mockResolvedValue(undefined) };
-    emailService       = { sendInvitation: jest.fn().mockResolvedValue(undefined) };
-    logger             = { log: jest.fn(), warn: jest.fn(), error: jest.fn(), http: jest.fn() };
+    emailService         = {
+      sendInvitation:   jest.fn().mockResolvedValue(undefined),
+      sendPasswordReset: jest.fn().mockResolvedValue(undefined),
+    };
+    logger               = { log: jest.fn(), warn: jest.fn(), error: jest.fn(), http: jest.fn() };
+    mockProducer         = { emitToDlt: jest.fn().mockResolvedValue(undefined) };
+
+    sseService = { emit: jest.fn() };
 
     consumer = new NotificationsConsumer(
       mockKafka as any,
       config as any,
       notificationsService as any,
+      sseService as any,
       emailService as any,
       logger as any,
+      mockProducer as any,
     );
 
     await consumer.onApplicationBootstrap();
@@ -83,10 +102,16 @@ describe('NotificationsConsumer', () => {
 
   // ── lifecycle ────────────────────────────────────────────────────────────
 
-  it('connects, subscribes to both topics and starts run on bootstrap', () => {
+  it('connects, subscribes to all topics and starts run on bootstrap', () => {
     expect(mockKafkaConsumer.connect).toHaveBeenCalledTimes(1);
     expect(mockKafkaConsumer.subscribe).toHaveBeenCalledWith({
-      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED],
+      topics: [
+        TOPICS.NOTIFICATION_SEND,
+        TOPICS.USER_INVITED,
+        TOPICS.USER_ORG_REMOVED,
+        TOPICS.USER_SUPER_ADMIN_REVOKED,
+        TOPICS.PASSWORD_RESET,
+      ],
       fromBeginning: false,
     });
     expect(mockKafkaConsumer.run).toHaveBeenCalledTimes(1);
@@ -155,7 +180,6 @@ describe('NotificationsConsumer', () => {
   });
 
   it('warns and skips on invalid notification.send payload', async () => {
-    // Missing recipientUserIds and message
     const bad = { type: 'WORKFLOW_APPROVED' };
 
     await capturedEachMessage(makeMsg(TOPICS.NOTIFICATION_SEND, JSON.stringify(bad)));
@@ -181,7 +205,6 @@ describe('NotificationsConsumer', () => {
   });
 
   it('warns and skips on invalid user.invited payload', async () => {
-    // Missing email, invitationToken, expiresAt
     const bad = { userId: 'user-1' };
 
     await capturedEachMessage(makeMsg(TOPICS.USER_INVITED, JSON.stringify(bad)));
@@ -193,27 +216,119 @@ describe('NotificationsConsumer', () => {
     expect(emailService.sendInvitation).not.toHaveBeenCalled();
   });
 
-  // ── error propagation ────────────────────────────────────────────────────
+  // ── DLT routing on handler error ──────────────────────────────────────────
 
-  it('re-throws errors so Kafka offset is not advanced', async () => {
+  it('routes to DLT and does not re-throw when notification dispatch fails', async () => {
     notificationsService.dispatch.mockRejectedValue(new Error('DB failure'));
 
+    // Must resolve — offset is advanced; the message goes to DLT instead
     await expect(
       capturedEachMessage(makeMsg(TOPICS.NOTIFICATION_SEND, JSON.stringify(validNotificationPayload))),
-    ).rejects.toThrow('DB failure');
+    ).resolves.toBeUndefined();
 
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining('DB failure'),
-      expect.anything(),
-      'NotificationsConsumer',
+    expect(mockProducer.emitToDlt).toHaveBeenCalledWith(
+      TOPICS.NOTIFICATION_SEND,
+      expect.objectContaining({ value: expect.any(Buffer) }),
     );
   });
 
-  it('re-throws errors from sendInvitation', async () => {
+  it('routes to DLT and does not re-throw when sendInvitation fails', async () => {
     emailService.sendInvitation.mockRejectedValue(new Error('Email API down'));
 
     await expect(
       capturedEachMessage(makeMsg(TOPICS.USER_INVITED, JSON.stringify(validInvitePayload))),
-    ).rejects.toThrow('Email API down');
+    ).resolves.toBeUndefined();
+
+    expect(mockProducer.emitToDlt).toHaveBeenCalledWith(
+      TOPICS.USER_INVITED,
+      expect.objectContaining({ value: expect.any(Buffer) }),
+    );
+  });
+
+  // ── handleMessage — auth.password-reset ──────────────────────────────────
+
+  it('sends password reset email for valid auth.password-reset payload', async () => {
+    const payload = { email: 'user@test.com', resetToken: 'token-xyz', expiresAt: '2025-12-31T00:00:00Z' };
+
+    await capturedEachMessage(makeMsg(TOPICS.PASSWORD_RESET, JSON.stringify(payload)));
+
+    expect(emailService.sendPasswordReset).toHaveBeenCalledWith({
+      to:         'user@test.com',
+      resetToken: 'token-xyz',
+      expiresAt:  '2025-12-31T00:00:00Z',
+    });
+    expect(notificationsService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips on invalid auth.password-reset payload', async () => {
+    const bad = { email: 'user@test.com' }; // missing resetToken and expiresAt
+
+    await capturedEachMessage(makeMsg(TOPICS.PASSWORD_RESET, JSON.stringify(bad)));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid auth.password-reset payload'),
+      'NotificationsConsumer',
+    );
+    expect(emailService.sendPasswordReset).not.toHaveBeenCalled();
+  });
+
+  it('routes to DLT and does not re-throw when sendPasswordReset fails', async () => {
+    emailService.sendPasswordReset.mockRejectedValue(new Error('SMTP error'));
+    const payload = { email: 'user@test.com', resetToken: 'token-xyz', expiresAt: '2025-12-31T00:00:00Z' };
+
+    await expect(
+      capturedEachMessage(makeMsg(TOPICS.PASSWORD_RESET, JSON.stringify(payload))),
+    ).resolves.toBeUndefined();
+
+    expect(mockProducer.emitToDlt).toHaveBeenCalledWith(
+      TOPICS.PASSWORD_RESET,
+      expect.objectContaining({ value: expect.any(Buffer) }),
+    );
+  });
+
+  // ── handleMessage — user.org-removed ─────────────────────────────────────
+
+  it('emits session-revoked SSE event for valid user.org-removed payload', async () => {
+    const payload = { userId: 'user-42', orgId: 'org-99' };
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_ORG_REMOVED, JSON.stringify(payload)));
+
+    expect(sseService.emit).toHaveBeenCalledWith('user-42', { orgId: 'org-99' }, 'session-revoked');
+    expect(notificationsService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips on invalid user.org-removed payload (missing orgId)', async () => {
+    const bad = { userId: 'user-42' }; // missing orgId
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_ORG_REMOVED, JSON.stringify(bad)));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid user.org-removed payload'),
+      'NotificationsConsumer',
+    );
+    expect(sseService.emit).not.toHaveBeenCalled();
+  });
+
+  // ── handleMessage — user.super-admin-revoked ──────────────────────────────
+
+  it('emits super-admin-revoked SSE event for valid user.super-admin-revoked payload', async () => {
+    const payload = { userId: 'admin-1' };
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_SUPER_ADMIN_REVOKED, JSON.stringify(payload)));
+
+    expect(sseService.emit).toHaveBeenCalledWith('admin-1', {}, 'super-admin-revoked');
+    expect(notificationsService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips on invalid user.super-admin-revoked payload (missing userId)', async () => {
+    const bad = {}; // missing userId
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_SUPER_ADMIN_REVOKED, JSON.stringify(bad)));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid user.super-admin-revoked payload'),
+      'NotificationsConsumer',
+    );
+    expect(sseService.emit).not.toHaveBeenCalled();
   });
 });

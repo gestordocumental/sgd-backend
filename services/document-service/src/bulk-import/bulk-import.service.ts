@@ -3,7 +3,7 @@ import * as ExcelJS from 'exceljs';
 import { TypologiesService } from '../typologies/typologies.service';
 import { OrgClientService, ResolveStructureItem } from '../common/org-client/org-client.service';
 import { CreationSource } from '../typologies/schemas/typology.schema';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 const MAX_ROWS = 500;
 
@@ -145,6 +145,11 @@ export class BulkImportService {
 
     const worksheet = workbook.worksheets[0];
     if (!worksheet) throw new BadRequestException('El archivo Excel no tiene hojas de cálculo');
+
+    // rowCount includes the header; reject before iterating all rows when clearly over the limit.
+    if (worksheet.rowCount - 1 > MAX_ROWS) {
+      throw new BadRequestException(`El archivo excede el máximo de ${MAX_ROWS} filas`);
+    }
 
     const rows: ExcelRow[] = [];
 

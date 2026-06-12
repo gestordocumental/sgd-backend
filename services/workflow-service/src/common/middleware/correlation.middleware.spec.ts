@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
-import { CorrelationMiddleware, CORRELATION_ID_HEADER } from './correlation.middleware';
-import { correlationStorage } from '../correlation/correlation.context';
+import {
+  CorrelationMiddleware,
+  CORRELATION_ID_HEADER,
+  correlationStorage,
+} from '@sgd/common';
 
 function makeReq(headerValue?: string | string[]): Request {
   return {

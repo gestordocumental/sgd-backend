@@ -1,5 +1,5 @@
-import { CorrelationMiddleware, CORRELATION_ID_HEADER } from './correlation.middleware';
-import { correlationStorage } from '../correlation/correlation.context';
+import { CorrelationMiddleware, CORRELATION_ID_HEADER } from '@sgd/common';
+import { correlationStorage } from '@sgd/common';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

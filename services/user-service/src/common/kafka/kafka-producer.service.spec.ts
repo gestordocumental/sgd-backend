@@ -1,9 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { KafkaProducerService } from './kafka-producer.service';
-import { AppLogger } from '../logger/app-logger.service';
-import { KAFKA_CLIENT } from './kafka.constants';
+import { KafkaProducerService, AppLogger, KAFKA_CLIENT } from '@sgd/common';
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('kafka-correlation-id'),
 }));
 

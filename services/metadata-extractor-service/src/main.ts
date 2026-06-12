@@ -1,8 +1,9 @@
 import 'reflect-metadata';
 import './instrument';
+import { json, urlencoded } from 'express';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { AppLogger } from './common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 /**
@@ -13,18 +14,21 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
  * taken from `process.env.PORT` or `3004` if unset.
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
+
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   const logger = app.get(AppLogger);
   app.useLogger(logger);
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Metadata Extractor Service')
-    .setDescription('Async Kafka worker that extracts metadata from uploaded documents (PDF, DOCX). Exposes only the health check endpoint.')
+    .setDescription('Async Kafka worker that extracts metadata from uploaded documents (PDF, DOCX, XLSX). Exposes health and preview extraction endpoints.')
     .setVersion('1.0')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/metadata-extractor/docs', app, document);
+  SwaggerModule.setup('api/v1/metadata-extractor/docs', app, document);
 
   const port = process.env.PORT ?? 3004;
   await app.listen(port);

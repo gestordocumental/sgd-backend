@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { DocumentUploadService } from './document-upload.service';
 import {
@@ -18,14 +18,42 @@ function makeId() {
 const PDF_MIME  = 'application/pdf';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+// Minimal 2-entry ZIP buffers for DOCX and XLSX. validateMagicBytes() now requires both
+// the [Content_Types].xml first-entry and a type-specific part entry, so each format needs
+// its own buffer — DOCX requires word/document.xml, XLSX requires xl/workbook.xml.
+function makeOoxmlEntry(filename: string): Buffer {
+  const name = Buffer.from(filename);
+  const header = Buffer.alloc(30);
+  header.writeUInt32LE(0x04034b50, 0); // PK\x03\x04
+  header.writeUInt16LE(name.length, 26);
+  return Buffer.concat([header, name]);
+}
+const DOCX_MAGIC = Buffer.concat([
+  makeOoxmlEntry('[Content_Types].xml'),
+  makeOoxmlEntry('word/document.xml'),
+]);
+const XLSX_MAGIC = Buffer.concat([
+  makeOoxmlEntry('[Content_Types].xml'),
+  makeOoxmlEntry('xl/workbook.xml'),
+]);
+
+// Minimum valid magic bytes per MIME type so validateMagicBytes() passes in tests.
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const MAGIC_BYTES: Record<string, Buffer> = {
+  [PDF_MIME]:  Buffer.from([0x25, 0x50, 0x44, 0x46]),
+  [DOCX_MIME]: DOCX_MAGIC,
+  [XLSX_MIME]: XLSX_MAGIC,
+};
+
 function makeFile(overrides: Partial<Express.Multer.File> = {}): Express.Multer.File {
+  const mimetype = overrides.mimetype ?? PDF_MIME;
   return {
     fieldname:    'file',
     originalname: 'test.pdf',
     encoding:     '7bit',
-    mimetype:     PDF_MIME,
+    mimetype,
     size:         1024,
-    buffer:       Buffer.from('fake pdf content'),
+    buffer:       MAGIC_BYTES[mimetype] ?? Buffer.alloc(4),
     destination:  '',
     filename:     '',
     path:         '',
@@ -70,7 +98,7 @@ function makeDeps(doc: TypologyDocument | null = null) {
     delete:              jest.fn().mockResolvedValue(undefined),
     getSignedDownloadUrl: jest.fn().mockResolvedValue({ url: 'https://signed.url', expiresAt: new Date() }),
   };
-  const kafka  = { emit: jest.fn().mockResolvedValue(undefined) };
+  const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
   const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return { model, storage, kafka, logger };
 }
@@ -133,6 +161,34 @@ describe('DocumentUploadService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('throws BadRequestException with FILE_CONTENT_MISMATCH when buffer does not match declared MIME type', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      // PDF MIME declared but DOCX (PK ZIP) magic bytes supplied
+      const spoofed = makeFile({ buffer: MAGIC_BYTES[DOCX_MIME] });
+
+      await expect(service.upload('org-1', doc.id, spoofed)).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'FILE_CONTENT_MISMATCH' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException with FILE_CONTENT_MISMATCH when DOCX bytes are submitted with XLSX MIME', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      // XLSX MIME declared but DOCX magic bytes supplied — cross-OOXML substitution
+      const spoofed = makeFile({ mimetype: XLSX_MIME, buffer: DOCX_MAGIC });
+
+      await expect(service.upload('org-1', doc.id, spoofed)).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'FILE_CONTENT_MISMATCH' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
     it('throws BadRequestException when file exceeds 20 MB', async () => {
       const doc = makeDoc();
       const { model, storage, kafka, logger } = makeDeps(doc);
@@ -170,6 +226,40 @@ describe('DocumentUploadService', () => {
         service.upload('org-1', doc.id, makeFile({ mimetype: DOCX_MIME, originalname: 'test.docx' })),
       ).resolves.not.toThrow();
     });
+
+    it('emits audit log when actorId is provided', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await service.upload('org-1', doc.id, makeFile(), undefined, 'actor-user-1');
+
+      expect(kafka.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ actorId: 'actor-user-1', action: 'TYPOLOGY_DOCUMENT_UPLOADED' }),
+      );
+    });
+
+    it('throws InternalServerErrorException when Kafka emit fails and deletes the uploaded file', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      kafka.emit.mockRejectedValue(new Error('Kafka down'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.upload('org-1', doc.id, makeFile())).rejects.toThrow(InternalServerErrorException);
+      expect(storage.delete).toHaveBeenCalled();
+    });
+
+    it('deletes orphaned upload and rethrows when DB save fails', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      (doc.save as jest.Mock).mockRejectedValueOnce(new Error('DB error'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.upload('org-1', doc.id, makeFile())).rejects.toThrow('DB error');
+      expect(storage.delete).toHaveBeenCalled();
+      expect(kafka.emit).not.toHaveBeenCalled();
+    });
   });
 
   // ── createNewVersion() ────────────────────────────────────────────────────
@@ -195,7 +285,7 @@ describe('DocumentUploadService', () => {
         upload: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn().mockResolvedValue(undefined),
       };
-      const kafka  = { emit: jest.fn().mockResolvedValue(undefined) };
+      const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
       const logger = { log: jest.fn(), warn: jest.fn() };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
@@ -237,6 +327,44 @@ describe('DocumentUploadService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('throws BadRequestException with FILE_CONTENT_MISMATCH when buffer does not match declared MIME type', async () => {
+      const oldDoc = makeDoc();
+      const FullModel: any = function () { return makeDoc(); };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+      const storage = { upload: jest.fn(), delete: jest.fn() };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn() };
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+
+      // PDF MIME declared but DOCX (PK ZIP) magic bytes supplied
+      const spoofed = makeFile({ buffer: MAGIC_BYTES[DOCX_MIME] });
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, spoofed, {}),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'FILE_CONTENT_MISMATCH' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException with FILE_CONTENT_MISMATCH when DOCX bytes are submitted with XLSX MIME', async () => {
+      const oldDoc = makeDoc();
+      const FullModel: any = function () { return makeDoc(); };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+      const storage = { upload: jest.fn(), delete: jest.fn() };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn() };
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+
+      // XLSX MIME declared but DOCX magic bytes supplied — cross-OOXML substitution
+      const spoofed = makeFile({ mimetype: XLSX_MIME, buffer: DOCX_MAGIC });
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, spoofed, {}),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'FILE_CONTENT_MISMATCH' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundException when old typology does not exist', async () => {
       const FullModel: any = function () { return makeDoc(); };
       FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
@@ -249,6 +377,98 @@ describe('DocumentUploadService', () => {
       await expect(
         service.createNewVersion('org-1', makeId(), makeFile(), {}),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── retryExtraction() ────────────────────────────────────────────────────
+
+  describe('retryExtraction()', () => {
+    function makeFailedDoc(): TypologyDocument {
+      return makeDoc({
+        documento: {
+          r2Key:             'org/org-1/typologies/file.pdf',
+          originalName:      'file.pdf',
+          mimeType:          PDF_MIME,
+          uploadedAt:        new Date(),
+          extractionStatus:  ExtractionStatus.FAILED,
+        },
+      });
+    }
+
+    it('sets PROCESSING, emits Kafka and returns success message', async () => {
+      const doc = makeFailedDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      const result = await service.retryExtraction('org-1', doc.id);
+
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
+      expect(kafka.emit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ orgId: 'org-1', typologyId: doc.id }),
+      );
+      expect(result).toEqual({ message: 'Extracción reencolada.', extractionStatus: ExtractionStatus.PROCESSING });
+    });
+
+    it('emits audit log when actorId is provided', async () => {
+      const doc = makeFailedDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await service.retryExtraction('org-1', doc.id, undefined, 'actor-1');
+
+      expect(kafka.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ actorId: 'actor-1', action: 'TYPOLOGY_EXTRACTION_RETRIED' }),
+      );
+    });
+
+    it('restores FAILED status and throws InternalServerErrorException when Kafka fails', async () => {
+      const doc = makeFailedDoc();
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      kafka.emit.mockRejectedValue(new Error('Kafka down'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(InternalServerErrorException);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.FAILED);
+    });
+
+    it('throws BadRequestException for invalid typology ID', async () => {
+      const { model, storage, kafka, logger } = makeDeps();
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', 'not-an-id')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when typology does not exist', async () => {
+      const { model, storage, kafka, logger } = makeDeps(null);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', makeId())).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when no document has been uploaded', async () => {
+      const doc = makeDoc(); // no r2Key
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when extraction status is not FAILED', async () => {
+      const doc = makeDoc({
+        documento: {
+          r2Key:            'org/org-1/typologies/file.pdf',
+          originalName:     'file.pdf',
+          mimeType:         PDF_MIME,
+          uploadedAt:       new Date(),
+          extractionStatus: ExtractionStatus.PROCESSING,
+        },
+      });
+      const { model, storage, kafka, logger } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
     });
   });
 

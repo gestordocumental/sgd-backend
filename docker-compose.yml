@@ -59,18 +59,21 @@ services:
       - sgd-local
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Redis — Auth Service (tokens) + User Service (invitation tokens) + Notification Service (cola)
+  # Redis — Auth Service (JWT/refresh tokens) · User Service (invitation tokens)
+  #         Notification Service (SSE tickets efímeros, 30 s TTL)
+  # Autenticación habilitada con contraseña local. En producción (Railway) usar
+  # la variable REDIS_PASSWORD del plugin Redis — nunca dejar sin contraseña.
   # ─────────────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2-alpine
     container_name: sgd-redis
-    command: redis-server --save 60 1 --loglevel warning
+    command: redis-server --save 60 1 --loglevel warning --requirepass redis_local_pass
     volumes:
       - redisdata:/data
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a redis_local_pass --no-auth-warning ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -92,10 +95,11 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       # PLAINTEXT: comunicación interna docker-compose
-      # EXTERNAL:  acceso desde el host local (127.0.0.1:9094)
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://127.0.0.1:9094
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      # HOST: acceso desde herramientas que corren directamente en el host
+      # KIND: acceso desde nodos Kind u otros clientes containerizados
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:9094,KIND://:9095
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://127.0.0.1:9094,KIND://${KAFKA_KIND_ADVERTISED_HOST:-host.docker.internal}:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT,KIND:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -108,7 +112,8 @@ services:
     volumes:
       - kafkadata:/var/lib/kafka/data
     ports:
-      - "9094:9094"     # Puerto externo para Kind y herramientas del host
+      - "9094:9094"     # Host local: localhost:9094
+      - "9095:9095"     # Kind/contenedores: ${KAFKA_KIND_ADVERTISED_HOST:-host.docker.internal}:9095
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
       interval: 10s
@@ -157,6 +162,9 @@ services:
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.file.uploaded --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extracted --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic typology.metadata.extraction.failed --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic user.org-removed --partitions 1 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic user.super-admin-revoked --partitions 1 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic auth.password-reset --partitions 1 --replication-factor 1 &&
       echo '>>> Tópicos creados correctamente.' &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
       "
@@ -246,7 +254,7 @@ services:
   kong:
     image: kong:3.4
     container_name: sgd-kong
-    # sed sustituye ${KONG_JWT_SECRET} en el template antes de que Kong lo cargue.
+    # envsubst sustituye variables de entorno en el template antes de que Kong lo cargue.
     # _transform: true en el YAML de Kong NO hace sustitución de variables de entorno.
     entrypoint: ["/bin/sh", "/kong-entrypoint.sh", "kong", "docker-start"]
     environment:
@@ -258,6 +266,8 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_JWT_SECRET: "${KONG_JWT_SECRET:-local-jwt-secret-change-me}"
+      # KONG_CONFIG_TEMPLATE y KONG_CORS_ORIGIN_* solo son necesarios en producción;
+      # en dev local los orígenes CORS están hardcodeados en kong.local.yaml.
     volumes:
       - ./docker/kong/kong.local.yaml:/etc/kong/kong.template.yaml:ro
       - ./docker/kong/entrypoint.sh:/kong-entrypoint.sh:ro
@@ -278,14 +288,19 @@ services:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Elasticsearch — Audit Service (sección 5.3)
-  # Nodo único para local. Acceso: http://localhost:9200
+  # Nodo único para local. Acceso: http://elastic:elastic_local_pass@localhost:9200
+  # Seguridad habilitada con basic auth; TLS deshabilitado para simplificar local.
+  # En producción (Railway) usar el plugin ES con TLS nativo habilitado.
   # ─────────────────────────────────────────────────────────────────────────────
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
     container_name: sgd-elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false      # Deshabilitado en local (habilitar en prod)
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false       # HTTP plano para local; TLS en prod
+      - xpack.security.transport.ssl.enabled=false  # Nodo único — sin inter-nodo TLS
+      - ELASTIC_PASSWORD=elastic_local_pass
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
       - cluster.name=sgd-local
     volumes:
@@ -293,11 +308,26 @@ services:
     ports:
       - "9200:9200"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      test: ["CMD-SHELL", "curl -sf -u elastic:elastic_local_pass http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 30s
+    restart: unless-stopped
+    networks:
+      - sgd-local
+
+  # ── Jaeger — Distributed tracing (all-in-one para dev local) ──────────────
+  # UI:            http://localhost:16686
+  # OTLP HTTP:     http://localhost:4318  ← apuntado por OTEL_EXPORTER_OTLP_ENDPOINT
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    container_name: sgd-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP HTTP receiver (microservicios del host envían aquí)
     restart: unless-stopped
     networks:
       - sgd-local

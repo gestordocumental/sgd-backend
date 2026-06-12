@@ -6,7 +6,7 @@ import { CargosService } from './cargos.service';
 import { Cargo } from './entities/cargo.entity';
 import { AreasService } from './areas.service';
 import { DepartamentosService } from './departamentos.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { KafkaProducerService } from '@sgd/common';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 

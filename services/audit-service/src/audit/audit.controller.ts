@@ -5,6 +5,7 @@ import {
   Query,
   NotFoundException,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -13,24 +14,26 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth } from '../common/decorators/auth.decorator';
-import { JwtPayloadParam, JwtPayload } from '../common/decorators/jwt-payload.decorator';
+import { Auth, JwtPayloadParam, JwtPayload, PermissionsGuard, RequirePermission } from '@sgd/common';
 import { AuditService } from './audit.service';
 import { AuditQueryDto, AuditExportDto } from './dto/audit-query.dto';
 
 @ApiTags('Audit')
 @ApiBearerAuth('JWT')
-@Controller('api/audit')
+@Controller('api/v1/audit')
+@UseGuards(PermissionsGuard)
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   /**
    * Consulta paginada del registro de auditoría.
    *
-   * - Super admin: puede filtrar por cualquier orgId (o ver todos si no filtra).
+   * - Super admin sin orgId: ve todos los eventos de todas las organizaciones.
+   * - Super admin con orgId: filtra por esa empresa específica.
    * - Usuario normal: solo puede ver eventos de su propia organización (orgId = companyId del token).
    */
   @Auth()
+  @RequirePermission('AUDIT', 'READ')
   @Get('logs')
   @ApiOperation({ summary: 'Consultar registro de auditoría (paginado)' })
   @ApiOkResponse({ description: 'Lista paginada de eventos de auditoría' })
@@ -39,9 +42,8 @@ export class AuditController {
     @JwtPayloadParam() me: JwtPayload,
   ) {
     if (me.isSuperAdmin) {
-      // Super admin: solo eventos sin orgId (acciones propias de super admin).
-      // Cualquier orgId que venga del cliente se ignora.
-      dto.orgId = undefined;
+      // Super admin sin orgId → ve todos los eventos.
+      // Super admin con orgId → filtra por esa empresa (para auditar una empresa específica).
       return this.auditService.query(dto, true);
     }
 
@@ -57,6 +59,7 @@ export class AuditController {
   }
 
   @Auth()
+  @RequirePermission('AUDIT', 'READ')
   @Get('logs/export')
   @ApiOperation({ summary: 'Exportar eventos de auditoría (máx. 5000 registros)' })
   @ApiOkResponse({ description: 'Lista plana de eventos para exportar a Excel' })
@@ -65,7 +68,6 @@ export class AuditController {
     @JwtPayloadParam() me: JwtPayload,
   ) {
     if (me.isSuperAdmin) {
-      dto.orgId = undefined;
       return this.auditService.export(dto, true);
     }
 
@@ -77,9 +79,10 @@ export class AuditController {
 
   /**
    * Obtiene un evento de auditoría por su ID de Elasticsearch.
-   * Super admin: solo eventos sin orgId. Org user: solo eventos de su org.
+   * Super admin: puede acceder a cualquier evento. Org user: solo eventos de su org.
    */
   @Auth()
+  @RequirePermission('AUDIT', 'READ')
   @Get('logs/:id')
   @ApiOperation({ summary: 'Obtener un evento de auditoría por ID' })
   @ApiOkResponse({ description: 'Evento de auditoría' })
@@ -91,12 +94,9 @@ export class AuditController {
     const doc = await this.auditService.findById(id);
     if (!doc) throw new NotFoundException('Audit log not found');
 
-    if (me.isSuperAdmin) {
-      // Super admin solo puede acceder a eventos sin org (sus propias acciones)
-      if (doc.orgId) throw new ForbiddenException('Access to this event is not allowed');
-    } else {
+    // Org user solo puede acceder a eventos de su org; super admin puede acceder a cualquier evento.
+    if (!me.isSuperAdmin) {
       if (!me.companyId) throw new ForbiddenException('No organization context found in token');
-      // Org user solo puede acceder a eventos de su org
       if (doc.orgId !== me.companyId) throw new ForbiddenException('Access to this organization is not allowed');
     }
 

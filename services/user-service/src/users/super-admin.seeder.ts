@@ -9,7 +9,7 @@ import { User, RegistrationStatus } from './entities/user.entity';
  * Using a constant ensures the same record is upserted on every cold start
  * without ever creating duplicates, regardless of how many times the DB is reset.
  */
-export const SUPER_ADMIN_USER_ID = '00000000-0000-0000-0000-000000000001';
+export const SUPER_ADMIN_USER_ID = '00000000-0000-4000-8000-000000000001';
 
 @Injectable()
 export class SuperAdminSeeder implements OnApplicationBootstrap {
@@ -44,7 +44,6 @@ export class SuperAdminSeeder implements OnApplicationBootstrap {
         departamentoId:     null,
         areaId:             null,
         cargoId:            null,
-        twoFactorEnabled:   false,
       })
       .orIgnore() // ON CONFLICT DO NOTHING — idempotent on every restart
       .execute();

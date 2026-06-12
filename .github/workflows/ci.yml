@@ -15,7 +15,36 @@ on:
   pull_request:
     branches: [dev, test, master]
 
+permissions:
+  contents: read
+
 jobs:
+  # ── Lint + SAST-lite (ESLint con plugin-security) ─────────────────────
+  lint:
+    name: Lint — ESLint + Security Rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Instalar dependencias del workspace
+        run: npm ci
+
+      - name: Compilar @sgd/common
+        run: npm run build:common
+
+      - name: Ejecutar ESLint (0 warnings tolerados)
+        run: npm run lint
+
   # ── Tests unitarios por servicio ─────────────────────────────────────────
   test-services:
     name: Test ${{ matrix.service }}
@@ -35,18 +64,28 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+          # El lockfile raíz cubre todo el workspace (packages/* y services/*)
+          cache-dependency-path: package-lock.json
 
-      - name: Instalar dependencias
-        working-directory: services/${{ matrix.service }}
+      - name: Instalar dependencias del workspace
+        # Instalar desde la raíz para que npm enlace correctamente @sgd/common
+        # (packages/common) como workspace local en todos los servicios.
         run: npm ci
+
+      - name: Compilar @sgd/common
+        # Los servicios importan desde packages/common/dist/, que no existe hasta
+        # que se compila. Sin este paso ts-jest lanza TS2307 en cualquier servicio
+        # que importe de @sgd/common.
+        run: npm run build:common
 
       - name: Ejecutar tests con cobertura (mínimo 85%)
         working-directory: services/${{ matrix.service }}
@@ -59,25 +98,72 @@ jobs:
         # Falla si hay vulnerabilidades de severidad alta o crítica.
         run: npm audit --audit-level=high
 
-  # ── Tests unitarios del frontend ─────────────────────────────────────────
-  test-frontend:
-    name: Test Frontend
+  # ── Tests E2E (Playwright) ───────────────────────────────────────────────
+  # Playwright intercepts all API calls via page.route() — no real backend needed.
+  # VITE_USE_MOCKS=false + VITE_API_URL=/api/v1 routes requests to a same-origin
+  # path that Playwright intercepts before they ever leave the browser.
+  test-e2e:
+    name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout backend repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
       - name: Checkout frontend repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: ${{ github.repository_owner }}/sgd-frontend
           path: frontend-repo
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend-repo/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend-repo
+        run: npm ci
+
+      - name: Install Playwright browsers (Chromium only)
+        working-directory: frontend-repo
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: frontend-repo
+        run: npm run e2e --if-present
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: frontend-repo/playwright-report/
+          retention-days: 7
+
+  # ── Tests unitarios del frontend ─────────────────────────────────────────
+  test-frontend:
+    name: Test Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout backend repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout frontend repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ github.repository_owner }}/sgd-frontend
+          path: frontend-repo
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -90,6 +176,107 @@ jobs:
       - name: Run unit tests
         working-directory: frontend-repo
         run: npm run test --if-present
+
+  # ── Tests de integración (auth-service) — PostgreSQL + Redis reales ─────
+  test-integration-auth:
+    name: Integration Tests — auth-service
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: auth_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Instalar dependencias del workspace
+        run: npm ci
+
+      - name: Compilar @sgd/common
+        run: npm run build:common
+
+      - name: Ejecutar tests de integración
+        working-directory: services/auth-service
+        env:
+          TEST_PG_HOST: localhost
+          TEST_PG_PORT: 5432
+          TEST_PG_USERNAME: postgres
+          TEST_PG_PASSWORD: postgres
+          TEST_PG_DATABASE: auth_test
+          TEST_REDIS_HOST: localhost
+          TEST_REDIS_PORT: 6379
+        run: npm run test:int
+
+  # ── Contract tests (Pact) — auth-service ↔ user-service ────────────────
+  # Consumer tests run first (generate the pact JSON files).
+  # Provider verification runs second (replays recorded interactions against
+  # a lightweight NestJS test app with mocked dependencies).
+  test-contracts:
+    name: Contract Tests (Pact) — auth ↔ user
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Instalar dependencias del workspace
+        run: npm ci
+
+      - name: Compilar @sgd/common
+        run: npm run build:common
+
+      - name: Consumer — auth-service expectations against user-service
+        working-directory: services/auth-service
+        run: npm run test:pact:consumer
+
+      - name: Consumer — user-service expectations against auth-service
+        working-directory: services/user-service
+        run: npm run test:pact:consumer
+
+      - name: Provider — verify user-service satisfies auth-service pact
+        working-directory: services/user-service
+        run: npm run test:pact:verify
+
+      - name: Provider — verify auth-service satisfies user-service pact
+        working-directory: services/auth-service
+        run: npm run test:pact:verify
 
   # ── Validar que cada Dockerfile compila sin errores ─────────────────────
   build-services:
@@ -110,18 +297,22 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        working-directory: services/${{ matrix.service }}
+      - name: Install workspace dependencies
         run: npm ci
+
+      - name: Build @sgd/common
+        run: npm run build:common
 
       - name: TypeScript compile check
         working-directory: services/${{ matrix.service }}
@@ -130,7 +321,8 @@ jobs:
       - name: Docker build check
         uses: docker/build-push-action@v5
         with:
-          context: services/${{ matrix.service }}
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
           push: false           # Solo valida que la imagen construye, no la sube
 
   # ── Validar que el Dockerfile de Kong (Railway) compila ─────────────────
@@ -139,7 +331,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Docker build check
         uses: docker/build-push-action@v5
@@ -153,7 +347,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0       # Necesario para escanear todo el historial
           persist-credentials: false
@@ -170,16 +364,20 @@ jobs:
   ci-success:
     name: CI OK
     runs-on: ubuntu-latest
-    needs: [build-services, build-api-gateway, test-services, test-frontend, security-scan]
+    needs: [lint, build-services, build-api-gateway, test-services, test-integration-auth, test-frontend, test-e2e, test-contracts, security-scan]
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
-          if [[ "${{ needs.build-services.result }}"   != "success" || \
-                "${{ needs.build-api-gateway.result }}" != "success" || \
-                "${{ needs.test-services.result }}"    != "success" || \
-                "${{ needs.test-frontend.result }}"     != "success" || \
-                "${{ needs.security-scan.result }}"    != "success" ]]; then
+          if [[ "${{ needs.lint.result }}"                     != "success" || \
+                "${{ needs.build-services.result }}"          != "success" || \
+                "${{ needs.build-api-gateway.result }}"         != "success" || \
+                "${{ needs.test-services.result }}"             != "success" || \
+                "${{ needs.test-integration-auth.result }}"     != "success" || \
+                "${{ needs.test-frontend.result }}"             != "success" || \
+                "${{ needs.test-e2e.result }}"                  != "success" || \
+                "${{ needs.test-contracts.result }}"            != "success" || \
+                "${{ needs.security-scan.result }}"             != "success" ]]; then
             echo "CI failed"
             exit 1
           fi

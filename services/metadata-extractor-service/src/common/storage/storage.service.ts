@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-import { AppLogger } from '../logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 import { Readable } from 'stream';
 
 @Injectable()

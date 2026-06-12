@@ -5,11 +5,7 @@ import { HttpModule } from '@nestjs/axios';
 import { APP_GUARD } from '@nestjs/core';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { HealthModule } from './health/health.module';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
-
-import { JwtGuard } from './common/guards/jwt.guard';
+import { CorrelationMiddleware, AppLogger, MetricsModule, JwtGuard } from '@sgd/common';
 
 // Entities — registradas en TypeOrmModule para que el guard y los repositorios las encuentren
 import { Workflow } from './workflows/entities/workflow.entity';
@@ -21,6 +17,7 @@ import { WorkflowAdminStep } from './workflows/entities/workflow-admin-step.enti
 import { WorkflowAdminAttachment } from './workflows/entities/workflow-admin-attachment.entity';
 import { WorkflowNote } from './workflows/entities/workflow-note.entity';
 import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity';
+import { IdempotencyKey } from './workflows/entities/idempotency-key.entity';
 
 @Module({
   imports: [
@@ -29,9 +26,15 @@ import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity'
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const dbPort = Number(config.get<string>('DB_PORT'));
-        if (!Number.isInteger(dbPort)) {
-          throw new Error(`Invalid DB_PORT value: "${config.get('DB_PORT')}"`);
+        const dbPortRaw = config.get<string>('DB_PORT');
+        const dbPort = Number(dbPortRaw);
+        if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
+          throw new Error(`Invalid DB_PORT value: "${dbPortRaw}"`);
+        }
+        const poolSizeRaw = config.get<string>('DB_POOL_SIZE') ?? '15';
+        const poolSize = Number(poolSizeRaw);
+        if (!Number.isInteger(poolSize) || poolSize <= 0) {
+          throw new Error(`Invalid DB_POOL_SIZE value: "${poolSizeRaw}"`);
         }
         return {
           type: 'postgres',
@@ -50,17 +53,25 @@ import { WorkflowTimeline } from './workflows/entities/workflow-timeline.entity'
             WorkflowAdminAttachment,
             WorkflowNote,
             WorkflowTimeline,
+            IdempotencyKey,
           ],
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
-          extra: { parseInt8: true },
+          extra: {
+            parseInt8: true,
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000,
+            idleTimeoutMillis: 60000,       // drop idle connections after 60s
+            connectionTimeoutMillis: 10000, // fail fast if can't acquire connection within 10s
+            max: poolSize,
+          },
         };
       },
     }),
 
     // HttpModule global para DocumentClientService y UserClientService
-    HttpModule.register({ timeout: 5000 }),
+    HttpModule.register({ timeout: 20000 }),  // must exceed DOCUMENT/USER_SERVICE_TIMEOUT_MS (15s)
 
     WorkflowsModule,
     HealthModule,

@@ -1,10 +1,11 @@
 import {
   Injectable,
   BadRequestException,
-  ForbiddenException,
   ConflictException,
+  ForbiddenException,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { assertValidTransition } from './workflow-state-machine';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Workflow } from './entities/workflow.entity';
@@ -20,10 +21,8 @@ import { ApproveWorkflowDto } from './dto/approve-workflow.dto';
 import { RejectWorkflowDto } from './dto/reject-workflow.dto';
 import { ResubmitWorkflowDto } from './dto/resubmit-workflow.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { KafkaProducerService, AppLogger, TOPICS } from '@sgd/common';
 import { UserClientService } from '../common/clients/user-client.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { AppLogger } from '../common/logger/app-logger.service';
 
 @Injectable()
 export class WorkflowApprovalService {
@@ -57,11 +56,7 @@ export class WorkflowApprovalService {
     }
 
     // [RN-01] Estado debe ser DRAFT
-    if (workflow.status !== WorkflowStatus.DRAFT) {
-      throw new ConflictException(
-        `Cannot start approval: workflow status is ${workflow.status}`,
-      );
-    }
+    assertValidTransition(workflow.status, WorkflowStatus.PENDING_APPROVAL);
 
     // [RN-02] Debe tener al menos un aprobador
     const steps = workflow.approvalSteps ?? [];
@@ -144,11 +139,7 @@ export class WorkflowApprovalService {
 
     if (!workflow) throw new BadRequestException('Workflow not found');
 
-    if (workflow.status !== WorkflowStatus.PENDING_APPROVAL) {
-      throw new ConflictException(
-        `Cannot approve: workflow status is ${workflow.status}`,
-      );
-    }
+    assertValidTransition(workflow.status, WorkflowStatus.PENDING_REVIEW_CYCLE);
 
     // [RN-04] Solo el aprobador actual puede aprobar
     if (workflow.currentAssignedUserId !== userId) {
@@ -317,11 +308,7 @@ export class WorkflowApprovalService {
 
     if (!workflow) throw new BadRequestException('Workflow not found');
 
-    if (workflow.status !== WorkflowStatus.PENDING_APPROVAL) {
-      throw new ConflictException(
-        `Cannot reject: workflow status is ${workflow.status}`,
-      );
-    }
+    assertValidTransition(workflow.status, WorkflowStatus.REJECTED);
 
     // [RN-06] Solo el aprobador actual puede rechazar
     if (workflow.currentAssignedUserId !== userId) {
@@ -388,7 +375,7 @@ export class WorkflowApprovalService {
 
     this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
       type:             'WORKFLOW_REJECTED',
-      recipientUserIds: [workflow.createdBy],
+      recipientUserIds: [...new Set([workflow.createdBy, ...(workflow.finalUserIds ?? [])])],
       orgId:            workflow.orgId,
       workflowId,
       workflowTitle:    workflow.title,
@@ -420,9 +407,10 @@ export class WorkflowApprovalService {
     // [RN-07] Solo se puede reenviar si está en RETURNED_TO_CREATOR
     if (workflow.status !== WorkflowStatus.RETURNED_TO_CREATOR) {
       throw new ConflictException(
-        `Cannot resubmit: workflow status is ${workflow.status}`,
+        `Invalid workflow state transition: cannot go from ${workflow.status} to ${WorkflowStatus.PENDING_APPROVAL}`,
       );
     }
+    assertValidTransition(workflow.status, WorkflowStatus.PENDING_APPROVAL);
 
     // [RN-08] Solo el creador puede reenviar
     if (workflow.createdBy !== userId) {

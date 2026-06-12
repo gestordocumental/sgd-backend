@@ -8,9 +8,7 @@ import { Org } from './orgs/entities/org.entity';
 import { Departamento } from './org-structure/entities/departamento.entity';
 import { Area } from './org-structure/entities/area.entity';
 import { Cargo } from './org-structure/entities/cargo.entity';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
+import { CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
 
 
 @Module({
@@ -20,9 +18,15 @@ import { MetricsModule } from './common/metrics/metrics.module';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const dbPort = Number(config.get<string>('DB_PORT'));
-        if (!Number.isInteger(dbPort)) {
-          throw new Error(`Invalid DB_PORT value: "${config.get('DB_PORT')}"`);
+        const dbPortRaw = config.get<string>('DB_PORT');
+        const dbPort = Number(dbPortRaw);
+        if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
+          throw new Error(`Invalid DB_PORT value: "${dbPortRaw}"`);
+        }
+        const poolSizeRaw = config.get<string>('DB_POOL_SIZE') ?? '15';
+        const poolSize = Number(poolSizeRaw);
+        if (!Number.isInteger(poolSize) || poolSize <= 0) {
+          throw new Error(`Invalid DB_POOL_SIZE value: "${poolSizeRaw}"`);
         }
         return {
           type: 'postgres',
@@ -35,6 +39,11 @@ import { MetricsModule } from './common/metrics/metrics.module';
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,
+          extra: {
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000,
+            max: poolSize,
+          },
         };
       },
     }),

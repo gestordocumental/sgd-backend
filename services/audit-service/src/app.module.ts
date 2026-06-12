@@ -3,11 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
-
-import { JwtGuard } from './common/guards/jwt.guard';
+import { CorrelationMiddleware, AppLogger, MetricsModule, JwtGuard } from '@sgd/common';
 
 @Module({
   imports: [

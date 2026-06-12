@@ -28,7 +28,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
 @ApiParam({ name: 'departamentoId', format: 'uuid' })
-@Controller('api/org/:orgId/departamentos/:departamentoId/cargos')
+@Controller('api/v1/org/:orgId/departamentos/:departamentoId/cargos')
 @UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class DeptCargosController {

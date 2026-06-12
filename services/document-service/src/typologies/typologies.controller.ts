@@ -33,8 +33,7 @@ import {
 } from '@nestjs/swagger';
 import { ExtractorClientService, PreviewExtractResult } from '../common/extractor-client/extractor-client.service';
 import { OrgClientService } from '../common/org-client/org-client.service';
-import { JwtGuard } from '../common/guards/jwt.guard';
-import { OrgMember } from '../common/decorators/auth.decorator';
+import { JwtGuard, OrgMember } from '@sgd/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { ResolveDiscrepancyDto } from './dto/resolve-discrepancy.dto';
@@ -47,7 +46,7 @@ import { multerOptions } from '../document-upload/document-upload.constants';
 @ApiTags('Typologies')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/documents/:orgId/typologies')
+@Controller('api/v1/documents/:orgId/typologies')
 @UseGuards(JwtGuard)
 @OrgMember()
 export class TypologiesController {
@@ -62,7 +61,16 @@ export class TypologiesController {
     description: 'Accepts a PDF/DOCX file and returns extracted nombre, codigo and version without persisting anything.',
   })
   @ApiConsumes('multipart/form-data')
-  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file:    { type: 'string', format: 'binary' },
+        orgName: { type: 'string', nullable: true, example: 'Helisa SAS' },
+      },
+    },
+  })
   @ApiOkResponse({ schema: { example: { nombre: 'Política de Seguridad', codigo: 'POL-SEG-001', version: 'v1.0' } } })
   @Post('preview-extract')
   @UseInterceptors(FileInterceptor('file', multerOptions))

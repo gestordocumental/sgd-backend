@@ -7,7 +7,7 @@ Desplegada en Railway (dev / test / prod). Localmente se ejecuta con Docker Comp
 
 ## Arquitectura
 
-```
+```text
 Frontend
     │
     ▼
@@ -53,7 +53,7 @@ Mensajería asíncrona (Kafka):
 
 ## Estructura del proyecto
 
-```
+```text
 document-management-system/
 │
 ├── docker-compose.yml            # Infraestructura local completa
@@ -88,7 +88,7 @@ document-management-system/
 
 Cada servicio tiene la misma estructura interna:
 
-```
+```text
 services/<nombre>/
 ├── Dockerfile
 ├── package.json
@@ -119,7 +119,7 @@ Gestiona la identidad global: credenciales (email + hash), generación y verific
 
 **Flujo de autenticación:**
 
-```
+```text
 1. POST /api/auth/login          → token global { sub, email }  (sin companyId)
 2. GET  /api/auth/me/companies   → lista de orgs del usuario
 3. POST /api/auth/switch-company → token scoped { sub, email, companyId }
@@ -201,7 +201,7 @@ Gestión de tipologías documentales. Carga de archivos (PDF/DOCX/DOC) al object
 
 **Flujo de extracción de metadata:**
 
-```
+```text
 1. Subir archivo  →  estado: PROCESSING
 2. Kafka: typology.file.uploaded  →  metadata-extractor-service lo consume
 3a. Éxito  →  Kafka: typology.metadata.extracted
@@ -584,7 +584,7 @@ Railway es un PaaS: no usa Kubernetes. Cada microservicio es un servicio indepen
 
 ### Estrategia de ramas → entornos
 
-```
+```text
 Rama git     Entorno Railway   NODE_ENV
 ────────────────────────────────────────
 develop  →   dev               development
@@ -620,7 +620,7 @@ openssl rand -base64 32   # INTERNAL_TOKEN
 
 ### Variables Railway — auth-service (ejemplo)
 
-```
+```env
 PORT=3000
 NODE_ENV=production
 JWT_SECRET=<openssl rand -base64 32>

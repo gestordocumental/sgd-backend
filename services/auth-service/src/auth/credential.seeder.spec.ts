@@ -38,13 +38,13 @@ describe('CredentialSeeder', () => {
 
     expect(repo.findOne).toHaveBeenCalledWith({
       where: [
-        { userId: '00000000-0000-0000-0000-000000000001' },
+        { userId: '00000000-0000-4000-8000-000000000001' },
         { email: 'admin@example.com' },
       ],
     });
     expect(bcrypt.hash).toHaveBeenCalledWith('Admin1234!', 10);
     expect(repo.create).toHaveBeenCalledWith({
-      userId: '00000000-0000-0000-0000-000000000001',
+      userId: '00000000-0000-4000-8000-000000000001',
       email: 'admin@example.com',
       passwordHash: 'hashed-admin-password',
       status: CredentialStatus.ACTIVE,

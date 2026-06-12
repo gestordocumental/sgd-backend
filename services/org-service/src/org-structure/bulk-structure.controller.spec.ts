@@ -5,7 +5,7 @@ import { InternalStructureController } from './internal-structure.controller';
 import { BulkStructureService } from './bulk-structure.service';
 import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
-import { InternalGuard } from '../common/guards/internal.guard';
+import { InternalGuard } from '@sgd/common';
 
 const ORG_ID = 'b3a7c1d0-0000-4000-a000-000000000001';
 

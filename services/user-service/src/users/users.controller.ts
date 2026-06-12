@@ -26,7 +26,7 @@ import { randomUUID, timingSafeEqual } from "crypto";
 // file-type v17+ is ESM-only — use dynamic import at call site
 import { StorageService } from "../common/storage/storage.service";
 import {
-  ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiParam,
+  ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth, ApiSecurity, ApiParam,
 } from '@nestjs/swagger';
 import { ConfigService } from "@nestjs/config";
 import { UsersService } from "./users.service";
@@ -40,16 +40,17 @@ import { UserResponseDto } from "./dto/user-response.dto";
 import { UserWithOrgRolesDto } from "./dto/user-with-org-roles.dto";
 import { UserOrgRoleResponseDto } from "./dto/user-org-role-response.dto";
 import { SetSuperAdminDto } from "./dto/super-admin.dto";
+import { SetOptionalReviewerDto } from "./dto/set-optional-reviewer.dto";
 import { RequireSuperAdmin } from "../common/decorators/require-super-admin.decorator";
 import { CurrentUserId } from "../common/decorators/current-user-id.decorator";
-import { JwtPayloadParam, JwtPayload } from "../common/decorators/jwt-payload.decorator";
+import { JwtPayloadParam, JwtPayload } from '@sgd/common';
 import { PermissionsGuard } from "../common/guards/permissions.guard";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
 import { PermissionModule, PermissionAction } from "../roles/entities/permission.entity";
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT')
-@Controller("api/users")
+@Controller("api/v1/users")
 @UseGuards(PermissionsGuard)
 export class UsersController {
   constructor(
@@ -58,9 +59,26 @@ export class UsersController {
     private readonly storageService: StorageService,
   ) {}
 
+  private verifyInternalToken(token: string | undefined, keys: string[]): void {
+    const allowed = keys
+      .map((k) => this.configService.get<string>(k))
+      .filter((t): t is string => !!t)
+      .map((t) => Buffer.from(t));
+
+    const provided = Buffer.from(token ?? '');
+    const valid = allowed.some(
+      (expected) =>
+        provided.length === expected.length && timingSafeEqual(expected, provided),
+    );
+    if (!valid) throw new UnauthorizedException();
+  }
+
   @ApiOperation({ summary: 'Create a new user and send invitation email' })
+  @ApiBody({ type: CreateUserDto })
   @ApiResponse({ status: 201, description: 'User created, returns user + invitationToken', type: CreateUserResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Email already registered' })
   @Post()
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async create(
@@ -81,16 +99,16 @@ export class UsersController {
     return { ...UserResponseDto.from(user), invitationToken };
   }
 
-  @ApiOperation({ summary: 'List all users (paginated)' })
-  @ApiResponse({ status: 200, description: 'Paginated users' })
+  @ApiOperation({ summary: 'List all users (cursor-paginated)' })
+  @ApiResponse({ status: 200, description: 'Cursor-paginated users' })
   @Get()
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAll(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
-  ): Promise<{ data: UserResponseDto[]; total: number }> {
-    const { data, total } = await this.usersService.findAll(page, limit);
-    return { data: data.map(UserResponseDto.from), total };
+    @Query('cursor') cursor?: string,
+  ): Promise<{ data: UserResponseDto[]; nextCursor: string | null; hasMore: boolean }> {
+    const result = await this.usersService.findAll(limit, cursor);
+    return { data: result.data.map(UserResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore };
   }
 
   @ApiOperation({ summary: 'User counts grouped by organization — super admin only' })
@@ -99,16 +117,21 @@ export class UsersController {
     return this.usersService.getCountsByOrg();
   }
 
-  @ApiOperation({ summary: 'List all super admin users (paginated)' })
-  @ApiResponse({ status: 200, description: 'Paginated super admin users' })
+  @ApiOperation({ summary: 'List all super admin users (cursor-paginated, with server-side search and status filter)' })
+  @ApiResponse({ status: 200, description: 'Cursor-paginated super admin users' })
   @Get("super-admins")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findAllSuperAdmin(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
-  ): Promise<{ data: UserResponseDto[]; total: number }> {
-    const { data, total } = await this.usersService.findAllSuperAdmin(page, limit);
-    return { data: data.map(UserResponseDto.from), total };
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('cursor') cursor?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: 'active' | 'inactive' | 'deleted' | 'pending',
+  ): Promise<{ data: UserResponseDto[]; nextCursor: string | null; hasMore: boolean }> {
+    if (status && !['active', 'inactive', 'deleted', 'pending'].includes(status)) {
+      throw new BadRequestException('status must be one of: active, inactive, deleted, pending');
+    }
+    const result = await this.usersService.findAllSuperAdmin(limit, cursor, search, status);
+    return { data: result.data.map(UserResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore };
   }
 
   @ApiOperation({ summary: 'Find user by email' })
@@ -119,17 +142,36 @@ export class UsersController {
     return UserResponseDto.from(await this.usersService.findByEmail(email));
   }
 
-  @ApiOperation({ summary: 'List users belonging to an organization' })
+  @ApiOperation({ summary: 'List users belonging to an organization (cursor-paginated)' })
   @ApiParam({ name: 'orgId', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Users found', type: UserWithOrgRolesDto, isArray: true })
+  @ApiResponse({ status: 200, description: 'Cursor-paginated users' })
   @Get('by-org/:orgId')
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async findByOrg(
-    @Param('orgId', ParseUUIDPipe) orgId: string,
-  ): Promise<UserWithOrgRolesDto[]> {
-    return (await this.usersService.findByOrg(orgId)).map(({ user, roles, orgRemovedAt }) =>
-      UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt),
-    );
+    @Param('orgId', new ParseUUIDPipe({ version: '4' })) orgId: string,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+    @Query('cursor') cursor?: string,
+  ): Promise<{ data: UserWithOrgRolesDto[]; nextCursor: string | null; hasMore: boolean }> {
+    const result = await this.usersService.findByOrg(orgId, limit, cursor);
+    return {
+      data: result.data.map(({ user, roles, orgRemovedAt, isOptionalReviewer }) =>
+        UserWithOrgRolesDto.fromUserAndRoles(user, roles, orgRemovedAt, isOptionalReviewer),
+      ),
+      nextCursor: result.nextCursor,
+      hasMore: result.hasMore,
+    };
+  }
+
+  /**
+   * Returns the caller's own profile. No @RequirePermission needed — a user
+   * can always read their own data regardless of their assigned role.
+   */
+  @ApiOperation({ summary: "Get the logged-in user's own profile" })
+  @ApiResponse({ status: 200, description: 'Caller profile', type: UserResponseDto })
+  @Get('me')
+  async getMe(@JwtPayloadParam() caller: JwtPayload): Promise<UserResponseDto> {
+    if (!caller.sub) throw new UnauthorizedException('Missing sub claim');
+    return UserResponseDto.from(await this.usersService.findOne(caller.sub));
   }
 
   /**
@@ -202,17 +244,25 @@ export class UsersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeAllFromOrg(
     @Headers("x-internal-token") internalToken: string,
-    @Param("orgId", ParseUUIDPipe) orgId: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
   ): Promise<void> {
-    const expected = Buffer.from(
-      this.configService.getOrThrow<string>("INTERNAL_TOKEN"),
-    );
-    const provided = Buffer.from(internalToken ?? "");
-    const isValid =
-      provided.length === expected.length &&
-      timingSafeEqual(expected, provided);
-    if (!isValid) throw new UnauthorizedException();
+    // Only org-service is authorized to call this endpoint
+    this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_ORG_USER']);
     await this.usersService.removeAllFromOrg(orgId);
+  }
+
+  @ApiOperation({ summary: 'Get effective permissions for a user in an org (internal only)' })
+  @ApiSecurity('internal-token')
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @Get(":id/effective-permissions")
+  async getEffectivePermissions(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+    @Query("companyId", new ParseUUIDPipe({ version: '4' })) companyId: string,
+  ): Promise<{ module: string; action: string }[]> {
+    // Only auth-service is authorized to call this endpoint
+    this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
+    return this.usersService.getEffectivePermissions(id, companyId);
   }
 
   @ApiOperation({ summary: "Get companies a user belongs to (internal only)" })
@@ -221,16 +271,10 @@ export class UsersController {
   @Get(":id/companies")
   getCompanies(
     @Headers("x-internal-token") internalToken: string,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
-    const expected = Buffer.from(
-      this.configService.getOrThrow<string>("INTERNAL_TOKEN"),
-    );
-    const provided = Buffer.from(internalToken ?? "");
-    const isValid =
-      provided.length === expected.length &&
-      timingSafeEqual(expected, provided);
-    if (!isValid) throw new UnauthorizedException();
+    // Only auth-service is authorized to call this endpoint
+    this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
     return this.usersService.getCompanies(id);
   }
 
@@ -239,18 +283,28 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User found', type: UserResponseDto })
   @Get(":id")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
-  async findOne(@Param("id") id: string): Promise<UserResponseDto> {
+  async findOne(
+    @Headers("x-internal-token") internalToken: string | undefined,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<UserResponseDto> {
+    // Service-to-service callers (e.g. auth-service) authenticate via internal token
+    if (internalToken !== undefined) {
+      this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_AUTH_USER']);
+    }
     return UserResponseDto.from(await this.usersService.findOne(id));
   }
 
   @ApiOperation({ summary: 'Update user profile fields' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: UpdateUserDto })
   @ApiResponse({ status: 200, description: 'User updated', type: UserResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 404, description: 'User not found' })
   @Patch(":id")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async update(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateUserDto,
   ): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.update(id, dto, caller.sub, caller.companyId));
@@ -264,9 +318,12 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.DELETE)
   remove(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
-    return this.usersService.remove(id, caller.companyId, caller.sub);
+    if (caller.companyId) {
+      return this.usersService.removeFromOrg(id, caller.companyId, caller.sub);
+    }
+    return this.usersService.globalRemove(id, caller.sub);
   }
 
   @ApiOperation({ summary: 'Restore a previously deleted user' })
@@ -276,9 +333,45 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async restore(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.restore(id, caller.sub));
+  }
+
+  @ApiOperation({ summary: 'Disable a user — blocks login without deleting the account' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User disabled', type: UserResponseDto })
+  @Patch(":id/disable")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  async disable(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.from(
+      await this.usersService.disable(id, {
+        actorId: caller.sub,
+        companyId: caller.companyId,
+        isSuperAdmin: caller.isSuperAdmin,
+      }),
+    );
+  }
+
+  @ApiOperation({ summary: 'Enable a previously disabled user' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'User enabled', type: UserResponseDto })
+  @Patch(":id/enable")
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  async enable(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.from(
+      await this.usersService.enable(id, {
+        actorId: caller.sub,
+        companyId: caller.companyId,
+        isSuperAdmin: caller.isSuperAdmin,
+      }),
+    );
   }
 
   @ApiOperation({ summary: 'Resend invitation email to a PENDING user' })
@@ -290,7 +383,7 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
   async resendInvitation(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
     const callerOrgId = caller.isSuperAdmin ? undefined : caller.companyId;
     const { user, invitationToken } = await this.usersService.resendInvitation(id, callerOrgId);
@@ -298,7 +391,10 @@ export class UsersController {
   }
 
   @ApiOperation({ summary: 'Complete registration using invitation token (public endpoint)' })
+  @ApiBody({ type: CompleteRegistrationDto })
   @ApiResponse({ status: 200, description: 'Registration completed', type: UserResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — missing or invalid fields' })
+  @ApiResponse({ status: 409, description: 'Token invalid, expired, or registration already completed' })
   @Post("complete-registration")
   async completeRegistration(@Body() dto: CompleteRegistrationDto): Promise<UserResponseDto> {
     return this.usersService.completeRegistration(dto);
@@ -306,20 +402,28 @@ export class UsersController {
 
   @ApiOperation({ summary: 'Set initial password for a user (admin provisioning)' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: ProvisionUserDto })
+  @ApiResponse({ status: 201, description: 'Password provisioned' })
+  @ApiResponse({ status: 400, description: 'Validation error — password too short or missing' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 409, description: 'User already has a password set' })
   @Post(":id/provision")
   @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
-  provision(@Param("id") id: string, @Body() dto: ProvisionUserDto) {
+  provision(@Param("id", new ParseUUIDPipe({ version: '4' })) id: string, @Body() dto: ProvisionUserDto) {
     return this.usersService.provision(id, dto);
   }
 
   @ApiOperation({ summary: 'Grant or revoke super admin privileges (super admin only)' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: SetSuperAdminDto })
   @ApiResponse({ status: 200, description: 'User updated', type: UserResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid body' })
+  @ApiResponse({ status: 404, description: 'User not found' })
   @Patch(":id/super-admin")
   async setSuperAdmin(
     @RequireSuperAdmin() _caller: void,
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: SetSuperAdminDto,
   ): Promise<UserResponseDto> {
     return UserResponseDto.from(await this.usersService.setSuperAdmin(id, dto.enabled, caller.sub));
@@ -327,13 +431,17 @@ export class UsersController {
 
   @ApiOperation({ summary: 'Assign a user to an organization with a role' })
   @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiBody({ type: AssignOrgDto })
   @ApiResponse({ status: 201, description: 'Organization assigned', type: UserOrgRoleResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid orgId or roleId' })
+  @ApiResponse({ status: 404, description: 'User, organization, or role not found' })
+  @ApiResponse({ status: 409, description: 'User already belongs to this organization' })
   @Post(":id/orgs")
   @HttpCode(HttpStatus.CREATED)
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   async assignOrg(
     @CurrentUserId() callerId: string,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: AssignOrgDto,
   ): Promise<UserOrgRoleResponseDto> {
     return UserOrgRoleResponseDto.from(
@@ -347,7 +455,7 @@ export class UsersController {
   @Get(":id/orgs")
   @RequirePermission(PermissionModule.USERS, PermissionAction.READ)
   async getOrgRoles(
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserOrgRoleResponseDto[]> {
     return (await this.usersService.getOrgRoles(id)).map(UserOrgRoleResponseDto.from);
   }
@@ -361,9 +469,31 @@ export class UsersController {
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
   removeFromOrg(
     @JwtPayloadParam() caller: JwtPayload,
-    @Param("id") id: string,
-    @Param("orgId") orgId: string,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
   ): Promise<void> {
     return this.usersService.removeFromOrg(id, orgId, caller.sub);
+  }
+
+  @ApiOperation({ summary: 'Set or clear the optional-reviewer flag for a user in a specific org' })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'User ID' })
+  @ApiParam({ name: 'orgId', format: 'uuid', description: 'Organization ID' })
+  @ApiBody({ type: SetOptionalReviewerDto })
+  @ApiResponse({ status: 204, description: 'Flag updated' })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid body' })
+  @ApiResponse({ status: 404, description: 'User is not a member of this org' })
+  @Patch(":id/orgs/:orgId/optional-reviewer")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.WRITE)
+  setOptionalReviewer(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
+    @Body() dto: SetOptionalReviewerDto,
+  ): Promise<void> {
+    if (!caller.isSuperAdmin && caller.companyId !== orgId) {
+      throw new ForbiddenException('You can only update users in your own organization');
+    }
+    return this.usersService.setOptionalReviewer(id, orgId, dto.value, caller.sub);
   }
 }

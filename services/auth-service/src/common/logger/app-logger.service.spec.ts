@@ -1,8 +1,7 @@
-import { AppLogger } from './app-logger.service';
-import * as correlationContext from '../correlation/correlation.context';
+import { AppLogger } from '@sgd/common';
 import * as winston from 'winston';
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('test-correlation-id'),
 }));
 

@@ -4,16 +4,11 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { of, throwError } from 'rxjs';
 import { AuthClientService } from './auth-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 // Mock the correlation context so it does not rely on AsyncLocalStorage state
-jest.mock('../common/correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('test-correlation-id'),
-}));
-
-// Mock the middleware constant to avoid importing the full middleware
-jest.mock('../common/middleware/correlation.middleware', () => ({
-  CORRELATION_ID_HEADER: 'x-correlation-id',
 }));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -50,8 +45,8 @@ describe('AuthClientService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn((key: string) => {
-              if (key === 'AUTH_SERVICE_URL') return AUTH_URL;
-              if (key === 'INTERNAL_TOKEN') return INTERNAL_TOKEN;
+              if (key === 'AUTH_SERVICE_URL')      return AUTH_URL;
+              if (key === 'INTERNAL_TOKEN_USER_AUTH') return INTERNAL_TOKEN;
               throw new Error(`Unknown config key: ${key}`);
             }),
           },
@@ -88,7 +83,7 @@ describe('AuthClientService', () => {
       await service.provisionCredentials(payload);
 
       expect(httpService.post).toHaveBeenCalledWith(
-        `${AUTH_URL}/api/auth/credentials/provision`,
+        `${AUTH_URL}/api/v1/auth/credentials/provision`,
         payload,
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -148,7 +143,7 @@ describe('AuthClientService', () => {
       await service.disableCredentials('user-uuid-1');
 
       expect(httpService.patch).toHaveBeenCalledWith(
-        `${AUTH_URL}/api/auth/credentials/user-uuid-1/disable`,
+        `${AUTH_URL}/api/v1/auth/credentials/user-uuid-1/disable`,
         {},
         expect.objectContaining({
           headers: expect.objectContaining({ 'x-internal-token': INTERNAL_TOKEN }),
@@ -182,7 +177,7 @@ describe('AuthClientService', () => {
       await service.enableCredentials('user-uuid-1');
 
       expect(httpService.patch).toHaveBeenCalledWith(
-        `${AUTH_URL}/api/auth/credentials/user-uuid-1/enable`,
+        `${AUTH_URL}/api/v1/auth/credentials/user-uuid-1/enable`,
         {},
         expect.objectContaining({
           headers: expect.objectContaining({ 'x-internal-token': INTERNAL_TOKEN }),

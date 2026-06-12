@@ -22,8 +22,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { OrgMember } from '../common/decorators/auth.decorator';
-import { JwtGuard } from '../common/guards/jwt.guard';
+import { JwtGuard, OrgMember } from '@sgd/common';
 import { DocumentUploadResponseDto } from './dto/document-upload-response.dto';
 import { SignedUrlResponseDto } from './dto/signed-url-response.dto';
 import { DocumentUploadService } from './document-upload.service';
@@ -52,7 +51,7 @@ function extractUserId(authHeader: string | undefined): string | undefined {
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
 @ApiParam({ name: 'id', description: 'MongoDB typology id' })
-@Controller('api/documents/:orgId/typologies/:id')
+@Controller('api/v1/documents/:orgId/typologies/:id')
 @UseGuards(JwtGuard)
 @OrgMember()
 export class DocumentUploadController {

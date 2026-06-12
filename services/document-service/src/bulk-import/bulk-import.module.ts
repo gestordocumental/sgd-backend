@@ -3,7 +3,7 @@ import { BulkImportService } from './bulk-import.service';
 import { BulkImportController } from './bulk-import.controller';
 import { TypologiesModule } from '../typologies/typologies.module';
 import { OrgClientModule } from '../common/org-client/org-client.module';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 @Module({
   imports: [TypologiesModule, OrgClientModule],

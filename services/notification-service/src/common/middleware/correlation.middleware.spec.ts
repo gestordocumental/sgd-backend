@@ -1,5 +1,4 @@
-import { CorrelationMiddleware, CORRELATION_ID_HEADER } from './correlation.middleware';
-import { correlationStorage } from '../correlation/correlation.context';
+import { CorrelationMiddleware, CORRELATION_ID_HEADER, correlationStorage } from '@sgd/common';
 
 function makeReqRes(headers: Record<string, string | string[]> = {}) {
   const req = { headers } as any;

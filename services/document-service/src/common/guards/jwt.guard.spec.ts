@@ -1,7 +1,7 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { JwtGuard } from './jwt.guard';
-import { AUTH_KEY, AuthMeta } from '../decorators/auth.decorator';
+import { AUTH_KEY, AuthMeta } from '@sgd/common';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,10 @@ function makeConfig(overrides: Record<string, string> = {}) {
     INTERNAL_TOKEN: INTERNAL_TOKEN,
     ...overrides,
   };
-  return { getOrThrow: jest.fn((key: string) => cfg[key]) } as any;
+  return {
+    getOrThrow: jest.fn((key: string) => cfg[key]),
+    get:        jest.fn((key: string) => cfg[key]),
+  } as any;
 }
 
 function makeContext(headers: Record<string, string> = {}, params: Record<string, string> = {}) {

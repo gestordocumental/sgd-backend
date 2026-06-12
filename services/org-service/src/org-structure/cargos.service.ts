@@ -6,9 +6,7 @@ import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
 import { AreasService } from './areas.service';
 import { DepartamentosService } from './departamentos.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
 export class CargosService {
@@ -37,8 +35,8 @@ export class CargosService {
       resourceType: 'cargo',
       resourceId:   params.resourceId,
       resourceName: params.resourceName ?? null,
-      ip:           getClientIp(),
-      metadata:     params.metadata,
+      ip:           (correlationStorage.getStore()?.['clientIp'] as string | undefined) ?? null,
+      metadata:     params.metadata ?? null,
       timestamp:    new Date().toISOString(),
     });
   }

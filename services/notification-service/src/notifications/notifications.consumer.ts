@@ -6,10 +6,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
-import { KAFKA_CLIENT, TOPICS } from '../common/kafka/kafka.constants';
-import { runWithCorrelation } from '../common/kafka/kafka-consumer.util';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger, KAFKA_CLIENT, KafkaProducerService, TOPICS, runWithCorrelation, withDlt } from '@sgd/common';
 import { NotificationsService } from './notifications.service';
+import { SseService } from './sse.service';
 import { EmailService } from './email/email.service';
 import { NotificationType, NOTIFICATION_TYPES } from './entities/notification.entity';
 
@@ -30,6 +29,42 @@ interface UserInvitedPayload {
   email: string;
   invitationToken: string;
   expiresAt: string;
+}
+
+interface PasswordResetPayload {
+  email: string;
+  resetToken: string;
+  expiresAt: string;
+}
+
+function isValidPasswordResetPayload(raw: unknown): raw is PasswordResetPayload {
+  if (!raw || typeof raw !== 'object') return false;
+  const p = raw as Record<string, unknown>;
+  return (
+    typeof p['email']      === 'string' &&
+    typeof p['resetToken'] === 'string' &&
+    typeof p['expiresAt']  === 'string'
+  );
+}
+
+interface UserOrgRemovedPayload {
+  userId: string;
+  orgId: string;
+}
+
+function isValidUserOrgRemovedPayload(raw: unknown): raw is UserOrgRemovedPayload {
+  if (!raw || typeof raw !== 'object') return false;
+  const p = raw as Record<string, unknown>;
+  return typeof p['userId'] === 'string' && typeof p['orgId'] === 'string';
+}
+
+interface UserSuperAdminRevokedPayload {
+  userId: string;
+}
+
+function isValidUserSuperAdminRevokedPayload(raw: unknown): raw is UserSuperAdminRevokedPayload {
+  if (!raw || typeof raw !== 'object') return false;
+  return typeof (raw as Record<string, unknown>)['userId'] === 'string';
 }
 
 function isValidNotificationPayload(raw: unknown): raw is NotificationPayload {
@@ -78,37 +113,46 @@ export class NotificationsConsumer
     @Inject(KAFKA_CLIENT) private readonly kafka: Kafka,
     private readonly config: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly sseService: SseService,
     private readonly emailService: EmailService,
     private readonly logger: AppLogger,
+    private readonly producer: KafkaProducerService,
   ) {}
 
   async onApplicationBootstrap() {
     const groupId = this.config.getOrThrow<string>('KAFKA_CONSUMER_GROUP');
-    this.consumer = this.kafka.consumer({ groupId });
+    this.consumer = this.kafka.consumer({
+      groupId,
+      // Connection-level retry: reconnects up to 3 times on broker unavailability.
+      // Message-level retry is handled by withDlt inside eachMessage.
+      retry: { initialRetryTime: 300, retries: 3 },
+    });
 
     await this.consumer.connect();
     await this.consumer.subscribe({
-      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED],
+      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED, TOPICS.USER_ORG_REMOVED, TOPICS.USER_SUPER_ADMIN_REVOKED, TOPICS.PASSWORD_RESET],
       fromBeginning: false,
     });
 
     await this.consumer.run({
       eachMessage: async (payload: EachMessagePayload) => {
-        await runWithCorrelation(payload.message, async () => {
-          await this.handleMessage(payload);
-        }).catch((err: unknown) => {
-          this.logger.error(
-            `[kafka] Unhandled error processing message from topic ${payload.topic}: ${err instanceof Error ? err.message : String(err)}`,
-            err instanceof Error ? err.stack : undefined,
-            'NotificationsConsumer',
-          );
-          throw err;
-        });
+        await runWithCorrelation(payload.message, () =>
+          withDlt(
+            {
+              topic: payload.topic,
+              message: payload.message,
+              producer: this.producer,
+              logger: this.logger,
+              context: 'NotificationsConsumer',
+            },
+            () => this.handleMessage(payload),
+          ),
+        );
       },
     });
 
     this.logger.log(
-      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}]`,
+      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}, ${TOPICS.USER_ORG_REMOVED}, ${TOPICS.USER_SUPER_ADMIN_REVOKED}, ${TOPICS.PASSWORD_RESET}]`,
       'NotificationsConsumer',
     );
   }
@@ -134,6 +178,22 @@ export class NotificationsConsumer
 
     this.logger.http({ type: 'kafka-consume', topic, message: `← [kafka] ${topic}` });
 
+    if (topic === TOPICS.PASSWORD_RESET) {
+      if (!isValidPasswordResetPayload(raw)) {
+        this.logger.warn(
+          `[kafka] Invalid auth.password-reset payload — skipping`,
+          'NotificationsConsumer',
+        );
+        return;
+      }
+      await this.emailService.sendPasswordReset({
+        to:         raw.email,
+        resetToken: raw.resetToken,
+        expiresAt:  raw.expiresAt,
+      });
+      return;
+    }
+
     if (topic === TOPICS.USER_INVITED) {
       if (!isValidUserInvitedPayload(raw)) {
         this.logger.warn(
@@ -147,6 +207,40 @@ export class NotificationsConsumer
         invitationToken: raw.invitationToken,
         expiresAt:       raw.expiresAt,
       });
+      return;
+    }
+
+    if (topic === TOPICS.USER_ORG_REMOVED) {
+      if (!isValidUserOrgRemovedPayload(raw)) {
+        this.logger.warn(
+          `[kafka] Invalid user.org-removed payload — skipping`,
+          'NotificationsConsumer',
+        );
+        return;
+      }
+      // Push SSE event to revoke the user's active browser session immediately.
+      // The frontend listens for 'session-revoked' and clears the auth state.
+      this.sseService.emit(raw.userId, { orgId: raw.orgId }, 'session-revoked');
+      this.logger.log(
+        `Session revocation SSE sent to user ${raw.userId} for org ${raw.orgId}`,
+        'NotificationsConsumer',
+      );
+      return;
+    }
+
+    if (topic === TOPICS.USER_SUPER_ADMIN_REVOKED) {
+      if (!isValidUserSuperAdminRevokedPayload(raw)) {
+        this.logger.warn(
+          `[kafka] Invalid user.super-admin-revoked payload — skipping`,
+          'NotificationsConsumer',
+        );
+        return;
+      }
+      this.sseService.emit(raw.userId, {}, 'super-admin-revoked');
+      this.logger.log(
+        `Super admin revocation SSE sent to user ${raw.userId}`,
+        'NotificationsConsumer',
+      );
       return;
     }
 

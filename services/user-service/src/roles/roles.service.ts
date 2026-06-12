@@ -77,7 +77,8 @@ export class RolesService {
       }
     }
 
-    Object.assign(role, dto);
+    if (dto.name) role.name = dto.name;
+    if (dto.description !== undefined) role.description = dto.description;
     return this.rolesRepository.save(role);
   }
 

@@ -1,6 +1,10 @@
+import { initTracing } from '@sgd/common';
 import * as Sentry from '@sentry/node';
 
-// Initialized once at process start — Sentry is a no-op when SENTRY_DSN is not set.
+// OTEL must be initialized first so auto-patching hooks are registered before
+// NestJS, Express, TypeORM, Redis, and KafkaJS modules are loaded.
+initTracing('auth-service');
+
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
   enabled: !!process.env.SENTRY_DSN,

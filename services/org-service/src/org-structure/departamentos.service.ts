@@ -4,9 +4,7 @@ import { Repository } from 'typeorm';
 import { Departamento } from './entities/departamento.entity';
 import { CreateDepartamentoDto } from './dto/create-departamento.dto';
 import { UpdateDepartamentoDto } from './dto/update-departamento.dto';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
 export class DepartamentosService {
@@ -32,8 +30,8 @@ export class DepartamentosService {
       resourceType: 'departamento',
       resourceId:   params.resourceId,
       resourceName: params.resourceName ?? null,
-      ip:           getClientIp(),
-      metadata:     params.metadata,
+      ip:           correlationStorage.getStore()?.['clientIp'] as string | null,
+      metadata:     params.metadata ?? null,
       timestamp:    new Date().toISOString(),
     });
   }

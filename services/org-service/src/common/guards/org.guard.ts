@@ -44,14 +44,23 @@ export class OrgGuard implements CanActivate {
       user?: Record<string, unknown>;
     }>();
 
-    // Internal calls between microservices — only allowed for non-superAdminOnly endpoints
+    // Internal calls between microservices — only allowed for non-superAdminOnly endpoints.
+    // Each key identifies one (caller → org-service) pair; any valid caller is allowed through.
     if (!meta.superAdminOnly) {
       const internalToken = request.headers['x-internal-token'];
       if (internalToken) {
-        const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+        const allowed = [
+          'INTERNAL_TOKEN_NOTIF_ORG',
+          'INTERNAL_TOKEN_DOC_ORG',
+        ]
+          .map((k) => this.configService.get<string>(k))
+          .filter((t): t is string => !!t)
+          .map((t) => Buffer.from(t));
         const provided = Buffer.from(internalToken);
-        const isValid =
-          provided.length === expected.length && timingSafeEqual(expected, provided);
+        const isValid = allowed.some(
+          (expected) =>
+            provided.length === expected.length && timingSafeEqual(expected, provided),
+        );
         if (isValid) return true;
       }
     }
@@ -79,7 +88,7 @@ export class OrgGuard implements CanActivate {
 
       if (!companyId) {
         throw new ForbiddenException(
-          'Token has no companyId — call POST /api/auth/switch-company first',
+          'Token has no companyId — call POST /api/v1/auth/switch-company first',
         );
       }
       if (companyId !== orgId) {

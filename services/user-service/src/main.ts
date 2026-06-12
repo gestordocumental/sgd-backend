@@ -1,16 +1,18 @@
 import 'reflect-metadata';
 import './instrument';
+import { json, urlencoded } from 'express';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { AppLogger } from './common/logger/app-logger.service';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { AppLogger, LoggingInterceptor, HttpExceptionFilter } from '@sgd/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true, bodyParser: false });
+
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   const logger = app.get(AppLogger);
 
@@ -35,7 +37,7 @@ async function bootstrap() {
     .addApiKey({ type: 'apiKey', in: 'header', name: 'x-internal-token' }, 'internal-token')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/users/docs', app, document);
+  SwaggerModule.setup('api/v1/users/docs', app, document);
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);

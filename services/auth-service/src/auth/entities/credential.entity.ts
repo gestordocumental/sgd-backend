@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
   Index,
 } from "typeorm";
 
@@ -12,8 +13,10 @@ export enum CredentialStatus {
   DISABLED = "disabled", // Blocked by admin/security
 }
 
+// Partial unique index: enforces email uniqueness only among non-deleted rows,
+// allowing future soft-deletion of credentials while permitting email reuse.
+@Index("IDX_credentials_email_active", ["email"], { unique: true, where: '"deleted_at" IS NULL' })
 @Entity("credentials")
-@Index(["email"], { unique: true }) // global unique email (one identity per email)
 export class Credential {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
@@ -21,13 +24,18 @@ export class Credential {
   @Column()
   email!: string;
 
-  // Logical relationship with the User Service
+  // Cross-service reference to user-service's User.id.
+  // No DB FK by design: auth-service and user-service use separate databases (microservice boundary).
+  // Integrity is maintained at the application layer:
+  //   - Only user-service may write this field via POST /credentials/provision (x-internal-token).
+  //   - No other code path creates a Credential record, so no other source of userId exists.
+  //   - ProvisionCredentialDto validates the value as a UUID before it reaches the service.
   @Index({ unique: true })
   @Column({ name: "user_id", type: "uuid" })
   userId!: string;
 
   // It is filled in when the user completes the invitation.
-  @Column({ name: "password_hash", nullable: true })
+  @Column({ name: "password_hash", type: "varchar", nullable: true })
   passwordHash!: string | null;
 
   // Credential status according to the invitation cycle
@@ -38,10 +46,6 @@ export class Credential {
   })
   status!: CredentialStatus;
 
-  // Refresh current token (optional) for rotation/revocation
-  @Column({ name: "refresh_token_hash", nullable: true })
-  refreshTokenHash!: string | null;
-
   @Column({ name: "locked_until", type: "timestamptz", nullable: true })
   lockedUntil!: Date | null;
 
@@ -50,4 +54,7 @@ export class Credential {
 
   @UpdateDateColumn({ name: "updated_at", type: "timestamptz" })
   updatedAt!: Date;
+
+  @DeleteDateColumn({ name: "deleted_at", type: "timestamptz", nullable: true })
+  deletedAt!: Date | null;
 }

@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { Kafka } from 'kafkajs';
-import { KAFKA_CLIENT } from '../common/kafka/kafka.constants';
+import { KAFKA_CLIENT } from '@sgd/common';
 
 @Injectable()
 export class HealthService {

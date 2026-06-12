@@ -1,5 +1,5 @@
 import { UnauthorizedException, ExecutionContext } from '@nestjs/common';
-import { jwtPayloadFactory } from './jwt-payload.decorator';
+import { jwtPayloadFactory } from '@sgd/common';
 
 function makeCtx(user?: Record<string, unknown>): ExecutionContext {
   return {

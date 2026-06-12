@@ -18,7 +18,7 @@ import {
   TimelineEventType,
 } from './entities/enums';
 import { WorkflowTimelineService } from './workflow-timeline.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { KafkaProducerService, AppLogger } from '@sgd/common';
 
 // ── Factories ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +102,8 @@ function buildService() {
     emitSafe: jest.fn(),
   } as unknown as jest.Mocked<KafkaProducerService>;
 
+  const logger = { log: jest.fn(), error: jest.fn(), warn: jest.fn() } as unknown as AppLogger;
+
   const service = new WorkflowAdminCycleService(
     workflowRepo,
     cycleRepo,
@@ -111,6 +113,7 @@ function buildService() {
     dataSource,
     timelineService,
     kafkaProducer,
+    logger,
   );
 
   return { service, workflowRepo, cycleRepo, stepRepo, dataSource, timelineService, kafkaProducer };

@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { AppLogger } from '../logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 @Injectable()
 export class StorageService implements OnModuleInit {
@@ -62,9 +62,20 @@ export class StorageService implements OnModuleInit {
     key: string,
     filename?: string,
     mimeType?: string,
+    forceAttachment = false,
   ): Promise<{ url: string; expiresAt: Date }> {
     const disposition = filename
-      ? `${mimeType === 'application/pdf' ? 'inline' : 'attachment'}; filename="${filename.replace(/"/g, '\\"')}"`
+      ? (() => {
+          const mode = (!forceAttachment && mimeType === 'application/pdf') ? 'inline' : 'attachment';
+          const isAscii = /^[\x20-\x7E]*$/.test(filename);
+          if (isAscii) {
+            return `${mode}; filename="${filename.replace(/"/g, '\\"')}"`;
+          }
+          // RFC 5987: provide ASCII fallback and UTF-8 encoded name for full compatibility.
+          const ascii = filename.replace(/[^\x20-\x7E]/g, '_');
+          const rfc5987 = encodeURIComponent(filename).replace(/'/g, '%27');
+          return `${mode}; filename="${ascii}"; filename*=UTF-8''${rfc5987}`;
+        })()
       : undefined;
 
     const url = await getSignedUrl(
@@ -84,6 +95,16 @@ export class StorageService implements OnModuleInit {
   async delete(key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
     this.logger.log(`Deleted: ${key}`, 'StorageService');
+  }
+
+  async downloadBuffer(key: string): Promise<Buffer> {
+    const { Body } = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!Body) throw new Error(`Empty body for key: ${key}`);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
   }
 
   async exists(key: string): Promise<boolean> {

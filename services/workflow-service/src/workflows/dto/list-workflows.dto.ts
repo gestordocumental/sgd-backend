@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsOptional, IsInt, Min, Max, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsInt, Min, Max, IsUUID, IsString, MaxLength } from 'class-validator';
 import { WorkflowStatus } from '../entities/enums';
 
 export class ListWorkflowsDto {
@@ -8,6 +8,12 @@ export class ListWorkflowsDto {
   @IsOptional()
   @IsEnum(WorkflowStatus)
   status?: WorkflowStatus;
+
+  @ApiPropertyOptional({ description: 'Búsqueda por título o descripción (case-insensitive)', maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  search?: string;
 
   @ApiPropertyOptional({ format: 'uuid', description: 'Filtrar por creador' })
   @IsOptional()

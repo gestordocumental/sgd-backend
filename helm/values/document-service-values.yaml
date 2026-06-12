@@ -1,0 +1,39 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install document-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/document-service-values.yaml
+
+image:
+  repository: document-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
+
+# No TypeORM migrations (MongoDB) — reduce startup window vs. base default (300 s).
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 18   # 90 s — no migration overhead
+  successThreshold: 1
+  timeoutSeconds: 3
+
+# readinessProbe checks: MongoDB
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "192Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"

@@ -1,5 +1,4 @@
-import { CorrelationMiddleware, CORRELATION_ID_HEADER } from './correlation.middleware';
-import { correlationStorage } from '../correlation/correlation.context';
+import { CorrelationMiddleware, CORRELATION_ID_HEADER, correlationStorage } from '@sgd/common';
 import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 
@@ -7,7 +6,7 @@ jest.mock('crypto', () => ({
   randomUUID: jest.fn().mockReturnValue('generated-uuid'),
 }));
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   correlationStorage: {
     run: jest.fn((store, cb) => cb()),
   },
@@ -34,7 +33,7 @@ describe('CorrelationMiddleware', () => {
 
     expect(mockRes.setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'incoming-id-123');
     expect(correlationStorage.run).toHaveBeenCalledWith(
-      { correlationId: 'incoming-id-123' },
+      { correlationId: 'incoming-id-123', clientIp: null },
       expect.any(Function),
     );
   });
@@ -47,7 +46,7 @@ describe('CorrelationMiddleware', () => {
     expect(randomUUID).toHaveBeenCalled();
     expect(mockRes.setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'generated-uuid');
     expect(correlationStorage.run).toHaveBeenCalledWith(
-      { correlationId: 'generated-uuid' },
+      { correlationId: 'generated-uuid', clientIp: null },
       expect.any(Function),
     );
   });
@@ -68,7 +67,7 @@ describe('CorrelationMiddleware', () => {
 
     expect(mockRes.setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'array-id-1');
     expect(correlationStorage.run).toHaveBeenCalledWith(
-      { correlationId: 'array-id-1' },
+      { correlationId: 'array-id-1', clientIp: null },
       expect.any(Function),
     );
   });

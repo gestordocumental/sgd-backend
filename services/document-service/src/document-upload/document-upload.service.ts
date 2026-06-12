@@ -4,12 +4,9 @@ import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { Typology, TypologyDocument, ExtractionStatus, TypologyStatus } from '../typologies/schemas/typology.schema';
 import { StorageService } from '../common/storage/storage.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
+import { AppLogger, KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sgd/common';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
-import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
+import { ALLOWED_MIMETYPES, MAX_FILE_SIZE, validateMagicBytes } from './document-upload.constants';
 
 /**
  * Determine whether `newVer` is exactly one incremental bump above `oldVer`.
@@ -24,6 +21,7 @@ import { ALLOWED_MIMETYPES, MAX_FILE_SIZE } from './document-upload.constants';
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const parse = (v: string): number[] | null => {
     const normalized = v.replace(/^v/i, '');
+    // eslint-disable-next-line security/detect-unsafe-regex
     if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
     return normalized.split('.').map((n) => Number(n));
   };
@@ -70,13 +68,12 @@ export class DocumentUploadService {
       actorId:       params.actorId,
       orgId:         params.orgId,
       action:        params.action,
-      resourceType:  'typology',
+      resourceType:  'document',
       resourceId:    params.resourceId,
       resourceName:  params.resourceName ?? null,
-      correlationId:         getCorrelationId(),
-      businessCorrelationId: params.resourceId,
+      correlationId: getCorrelationId(),
       ip:            getClientIp(),
-      metadata:      params.metadata,
+      metadata:      params.metadata ?? null,
       timestamp:     new Date().toISOString(),
     });
   }
@@ -97,6 +94,9 @@ export class DocumentUploadService {
     if (!ext) throw new BadRequestException('Format not allowed. Use PDF, DOCX or XLSX.');
 
     if (file.size > MAX_FILE_SIZE) throw new BadRequestException('File exceeds the maximum allowed size of 20 MB.');
+
+    if (!validateMagicBytes(file.buffer, file.mimetype))
+      throw new BadRequestException({ message: 'File content does not match declared type.', errorCode: 'FILE_CONTENT_MISMATCH' });
 
     const previousDoc = typology.documento?.r2Key ? { ...typology.documento } : null;
     const r2Key = `org/${orgId}/typologies/${typologyId}/${uuidv4()}.${ext}`;
@@ -181,6 +181,9 @@ export class DocumentUploadService {
     const ext = ALLOWED_MIMETYPES[file.mimetype];
     if (!ext) throw new BadRequestException('Format not allowed. Use PDF, DOCX or XLSX.');
     if (file.size > MAX_FILE_SIZE) throw new BadRequestException('File exceeds the maximum allowed size of 20 MB.');
+
+    if (!validateMagicBytes(file.buffer, file.mimetype))
+      throw new BadRequestException({ message: 'File content does not match declared type.', errorCode: 'FILE_CONTENT_MISMATCH' });
 
     const newVersion = dto.version ?? null;
     const oldVersion = old.datosDeclarados.version;

@@ -1,4 +1,4 @@
-import { BadRequestException, GatewayTimeoutException, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { AxiosResponse } from 'axios';
@@ -8,29 +8,44 @@ import {
   UserExistsResult,
   UsersByPositionResult,
 } from './user-client.service';
-import { AppLogger } from '../logger/app-logger.service';
-import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
+import { AppLogger, CORRELATION_ID_HEADER } from '@sgd/common';
+
+// Circuit breaker is mocked as a transparent pass-through by default.
+jest.mock('opossum', () => jest.fn());
+import CircuitBreaker = require('opossum');
+
+const MockCircuitBreaker = CircuitBreaker as unknown as jest.Mock;
+let mockCbInstance: { fire: jest.Mock; on: jest.Mock; opened: boolean };
 
 describe('UserClientService', () => {
   const userServiceUrl = 'http://user-service';
   const internalToken = 'internal-token';
   let httpService: jest.Mocked<Pick<HttpService, 'get' | 'post'>>;
-  let logger: jest.Mocked<Pick<AppLogger, 'http'>>;
+  let logger: jest.Mocked<Pick<AppLogger, 'http' | 'log' | 'warn'>>;
   let service: UserClientService;
 
   beforeEach(() => {
+    mockCbInstance = {
+      fire: jest.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),
+      on: jest.fn(),
+      opened: false,
+    };
+    MockCircuitBreaker.mockImplementation(() => mockCbInstance as any);
+
     httpService = {
       get: jest.fn(),
       post: jest.fn(),
     };
     logger = {
       http: jest.fn(),
+      log: jest.fn(),
+      warn: jest.fn(),
     };
 
     const config = {
       getOrThrow: jest.fn((key: string) => {
-        if (key === 'USER_SERVICE_URL') return userServiceUrl;
-        if (key === 'INTERNAL_TOKEN') return internalToken;
+        if (key === 'USER_SERVICE_URL')           return userServiceUrl;
+        if (key === 'INTERNAL_TOKEN_WORKFLOW_USER') return internalToken;
         throw new Error(`Unknown key: ${key}`);
       }),
       get: jest.fn().mockReturnValue(1000),
@@ -120,5 +135,29 @@ describe('UserClientService', () => {
     httpService.get.mockReturnValue(throwError(() => new Error('network down')));
 
     await expect(service.validateUserExists('user-1')).rejects.toThrow(InternalServerErrorException);
+  });
+
+  // ── circuit breaker ──────────────────────────────────────────────────────
+
+  it('throws ServiceUnavailableException when user-service circuit is open (getUsersByPosition)', async () => {
+    mockCbInstance.fire.mockRejectedValueOnce(
+      Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+    );
+
+    await expect(service.getUsersByPosition('org-1', {})).rejects.toThrow(ServiceUnavailableException);
+  });
+
+  it('throws ServiceUnavailableException when user-service circuit is open (validateUserExists)', async () => {
+    mockCbInstance.fire.mockRejectedValueOnce(
+      Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+    );
+
+    await expect(service.validateUserExists('user-1')).rejects.toThrow(ServiceUnavailableException);
+  });
+
+  it('registers open/halfOpen/close handlers on the circuit breaker', () => {
+    expect(mockCbInstance.on).toHaveBeenCalledWith('open', expect.any(Function));
+    expect(mockCbInstance.on).toHaveBeenCalledWith('halfOpen', expect.any(Function));
+    expect(mockCbInstance.on).toHaveBeenCalledWith('close', expect.any(Function));
   });
 });

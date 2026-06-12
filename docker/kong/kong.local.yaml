@@ -1,5 +1,4 @@
 _format_version: "3.0"
-_transform: true
 
 # ── Consumidor SGD ──────────────────────────────────────────────────────────
 # KONG_JWT_SECRET debe coincidir con JWT_SECRET de auth-service (.env)
@@ -12,15 +11,51 @@ consumers:
 
 # ── Plugins globales ────────────────────────────────────────────────────────
 plugins:
-  - name: cors
+  # Capa 1 — por IP
+  - name: rate-limiting
+    id: b1b2c3d4-0001-0000-0000-000000000001
     config:
+      minute: 10000
+      limit_by: ip
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # Capa 2 — por token JWT (header Authorization)
+  - name: rate-limiting
+    id: b1b2c3d4-0002-0000-0000-000000000002
+    config:
+      minute: 1000
+      limit_by: header
+      header_name: Authorization
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  - name: cors
+    id: b1b2c3d4-0003-0000-0000-000000000003
+    config:
+      # Listar orígenes explícitos — el estándar CORS prohíbe credentials: true con origins: "*".
+      # En dev local el frontend corre en :5173 (Vite dev) o :4173 (Vite preview).
       origins:
-        - "*"
+        - "http://localhost:5173"
+        - "http://localhost:4173"
       methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       headers: [Authorization, Content-Type, Accept, X-Company-Id, X-Correlation-Id]
       exposed_headers: [X-Request-Id, X-Correlation-Id]
-      credentials: false   # false cuando origins es "*"
+      credentials: true    # necesario para que el navegador envíe la cookie httpOnly del refresh token
       max_age: 3600
+
+  - name: response-transformer
+    id: b1b2c3d4-0004-0000-0000-000000000004
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "X-XSS-Protection:0"
+          - "Referrer-Policy:strict-origin-when-cross-origin"
+          - "Content-Security-Policy:default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 
 # ── Servicios y Rutas ───────────────────────────────────────────────────────
 # Los microservicios corren en el host con npm run start:dev.
@@ -45,6 +80,7 @@ services:
         strip_path: false
     plugins:
       - name: request-termination
+        id: b1b2c3d4-0005-0000-0000-000000000005
         config:
           status_code: 200
           message: "OK"
@@ -57,7 +93,7 @@ services:
     routes:
       - name: auth-docs-route
         paths:
-          - /api/auth/docs
+          - /api/v1/auth/docs
         strip_path: false
 
   - name: user-docs
@@ -65,7 +101,7 @@ services:
     routes:
       - name: user-docs-route
         paths:
-          - /api/users/docs
+          - /api/v1/users/docs
         strip_path: false
 
   - name: org-docs
@@ -73,7 +109,7 @@ services:
     routes:
       - name: org-docs-route
         paths:
-          - /api/org/docs
+          - /api/v1/org/docs
         strip_path: false
 
   - name: document-docs
@@ -81,7 +117,7 @@ services:
     routes:
       - name: document-docs-route
         paths:
-          - /api/documents/docs
+          - /api/v1/documents/docs
         strip_path: false
 
   - name: metadata-extractor-docs
@@ -89,7 +125,7 @@ services:
     routes:
       - name: metadata-extractor-docs-route
         paths:
-          - /api/metadata-extractor/docs
+          - /api/v1/metadata-extractor/docs
         strip_path: false
 
   # ── auth-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
@@ -98,12 +134,32 @@ services:
     routes:
       - name: auth-login
         paths:
-          - /api/auth/login
-          - /api/auth/refresh
+          - /api/v1/auth/login
+          - /api/v1/auth/refresh
+          - /api/v1/auth/exit-company
+          - /api/v1/auth/forgot-password
         methods: [POST]
         strip_path: false
     plugins:
       - name: rate-limiting
+        id: b1b2c3d4-0006-0000-0000-000000000006
+        config:
+          minute: 10
+          policy: local
+          fault_tolerant: true
+
+  # ── auth-service: reset-password (sin JWT, con rate-limit) ─────────────
+  - name: auth-reset-password
+    url: http://host.docker.internal:3000
+    routes:
+      - name: auth-reset-password-route
+        paths:
+          - /api/v1/auth/reset-password
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        id: b1b2c3d4-0007-0000-0000-000000000007
         config:
           minute: 10
           policy: local
@@ -115,7 +171,7 @@ services:
     routes:
       - name: auth-provision-route
         paths:
-          - /api/auth/credentials/provision
+          - /api/v1/auth/credentials/provision
         methods: [POST]
         strip_path: false
 
@@ -125,10 +181,11 @@ services:
     routes:
       - name: auth-me
         paths:
-          - /api/auth
+          - /api/v1/auth
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0008-0000-0000-000000000008
 
   # ── org-service ────────────────────────────────────────────────────────
   - name: org-service
@@ -136,10 +193,11 @@ services:
     routes:
       - name: org-routes
         paths:
-          - /api/org
+          - /api/v1/org
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0009-0000-0000-000000000009
 
   # ── user-service: avatares estáticos (sin JWT) ─────────────────────────
   - name: user-avatars
@@ -157,7 +215,7 @@ services:
     routes:
       - name: complete-registration
         paths:
-          - /api/users/complete-registration
+          - /api/v1/users/complete-registration
         methods: [POST]
         strip_path: false
 
@@ -167,12 +225,13 @@ services:
     routes:
       - name: user-routes
         paths:
-          - /api/users
-          - /api/roles
-          - ~/api/permissions$
+          - /api/v1/users
+          - /api/v1/roles
+          - ~/api/v1/permissions$
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0010-0000-0000-000000000010
 
   # ── document-service (con JWT) ─────────────────────────────────────────
   - name: document-service
@@ -180,10 +239,11 @@ services:
     routes:
       - name: document-routes
         paths:
-          - /api/documents
+          - /api/v1/documents
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0011-0000-0000-000000000011
 
   # ── workflow-service (con JWT) ─────────────────────────────────────────
   - name: workflow-service
@@ -191,21 +251,68 @@ services:
     routes:
       - name: workflow-routes
         paths:
-          - /api/workflows
+          - /api/v1/workflows
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0012-0000-0000-000000000012
 
-  # ── notification-service ───────────────────────────────────────────────
+  # ── notification-service: ticket efímero para SSE (JWT en header) ──────
+  # El cliente obtiene un ticket de corta vida (30s, un solo uso) antes de
+  # abrir la conexión SSE. Así el JWT completo nunca aparece en la URL ni
+  # en los logs de acceso de Kong/proxies.
+  - name: notification-sse-ticket
+    url: http://host.docker.internal:3006
+    routes:
+      - name: notification-sse-ticket-route
+        paths:
+          - /api/v1/notifications/stream/ticket
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: b1b2c3d4-0013-0000-0000-000000000013
+
+  # ── notification-service: SSE stream (autenticado por ticket efímero) ──
+  # EventSource no puede enviar headers; el ticket de corta vida reemplaza
+  # al JWT en la query string para no exponer credenciales en logs/URLs.
+  - name: notification-sse
+    url: http://host.docker.internal:3006
+    read_timeout: 86400000    # 24h — SSE es una conexión larga; el default (60s) la corta
+    write_timeout: 86400000   # 24h — también necesario para long-lived connections
+    connect_timeout: 60000
+    routes:
+      - name: notification-sse-route
+        paths:
+          - /api/v1/notifications/stream
+        methods: [GET]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        id: b1b2c3d4-0014-0000-0000-000000000014
+        config:
+          minute: 30
+          policy: local
+          fault_tolerant: true
+      - name: response-transformer
+        id: b1b2c3d4-0023-0000-0000-000000000023
+        config:
+          add:
+            headers:
+              - "X-Accel-Buffering:no"   # desactiva buffering de nginx para el stream SSE
+              - "Cache-Control:no-cache" # evita que proxies intermedios cacheen el stream
+
+  # ── notification-service: resto de rutas (JWT en header) ───────────────
   - name: notification-service
     url: http://host.docker.internal:3006
     routes:
       - name: notification-routes
         paths:
-          - /api/notifications
+          - /api/v1/notifications
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0015-0000-0000-000000000015
 
   # ── audit-service: Swagger docs (sin JWT) ──────────────────────────────
   - name: audit-docs
@@ -213,7 +320,7 @@ services:
     routes:
       - name: audit-docs-route
         paths:
-          - /api/audit/docs
+          - /api/v1/audit/docs
         strip_path: false
 
   # ── audit-service (con JWT) ─────────────────────────────────────────────
@@ -222,7 +329,8 @@ services:
     routes:
       - name: audit-routes
         paths:
-          - /api/audit
+          - /api/v1/audit
         strip_path: false
     plugins:
       - name: jwt
+        id: b1b2c3d4-0016-0000-0000-000000000016

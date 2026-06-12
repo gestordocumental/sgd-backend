@@ -1,0 +1,471 @@
+{
+  "consumer": {
+    "name": "user-service"
+  },
+  "interactions": [
+    {
+      "description": "a provision request when credentials already exist",
+      "providerStates": [
+        {
+          "name": "credentials already exist for the user"
+        }
+      ],
+      "request": {
+        "body": {
+          "email": "user@example.com",
+          "password": "Secur3P@ss!",
+          "userId": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/auth/credentials/provision"
+      },
+      "response": {
+        "body": {
+          "message": "Conflict"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 409
+      }
+    },
+    {
+      "description": "a disable request for a user without credentials",
+      "providerStates": [
+        {
+          "name": "credentials do not exist for the user"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PATCH",
+        "path": "/api/v1/auth/credentials/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/disable"
+      },
+      "response": {
+        "body": {
+          "message": "Not Found"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 404
+      }
+    },
+    {
+      "description": "a request to disable user credentials",
+      "providerStates": [
+        {
+          "name": "credentials exist for the user"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PATCH",
+        "path": "/api/v1/auth/credentials/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/disable"
+      },
+      "response": {
+        "status": 204
+      }
+    },
+    {
+      "description": "a request to enable user credentials",
+      "providerStates": [
+        {
+          "name": "credentials exist for the user"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PATCH",
+        "path": "/api/v1/auth/credentials/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/enable"
+      },
+      "response": {
+        "status": 204
+      }
+    },
+    {
+      "description": "a request to revoke all refresh tokens for a user",
+      "providerStates": [
+        {
+          "name": "credentials exist for the user"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PATCH",
+        "path": "/api/v1/auth/credentials/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/revoke-tokens"
+      },
+      "response": {
+        "status": 204
+      }
+    },
+    {
+      "description": "a provision request with an invalid email",
+      "providerStates": [
+        {
+          "name": "email is invalid"
+        }
+      ],
+      "request": {
+        "body": {
+          "email": "not-an-email",
+          "password": "Secur3P@ss!",
+          "userId": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/auth/credentials/provision"
+      },
+      "response": {
+        "body": {
+          "message": "Validation failed"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 400
+      }
+    },
+    {
+      "description": "an enable request with an invalid internal token",
+      "providerStates": [
+        {
+          "name": "internal token is invalid"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PATCH",
+        "path": "/api/v1/auth/credentials/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/enable"
+      },
+      "response": {
+        "body": {
+          "message": "Unauthorized"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 401
+      }
+    },
+    {
+      "description": "a request to provision credentials for a new user",
+      "providerStates": [
+        {
+          "name": "no credentials exist for the user"
+        }
+      ],
+      "request": {
+        "body": {
+          "email": "user@example.com",
+          "password": "Secur3P@ss!",
+          "userId": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/auth/credentials/provision"
+      },
+      "response": {
+        "body": {
+          "ok": true
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "12.5.2"
+    },
+    "pactRust": {
+      "ffi": "0.4.20",
+      "models": "1.2.0"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "auth-service"
+  }
+}

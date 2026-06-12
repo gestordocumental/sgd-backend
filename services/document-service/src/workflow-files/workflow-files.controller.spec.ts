@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, StreamableFile } from '@nestjs/common';
+import { PassThrough } from 'stream';
 import { WorkflowFilesController } from './workflow-files.controller';
 import { WorkflowFileUploadResponseDto } from './dto/workflow-file-upload-response.dto';
 
@@ -35,6 +36,7 @@ function makeService() {
   return {
     upload:       jest.fn().mockResolvedValue(makeUploadResponse()),
     getSignedUrl: jest.fn().mockResolvedValue({ signedUrl: 'https://signed.url', expiresAt: new Date() }),
+    downloadZip:  jest.fn().mockResolvedValue({ stream: new PassThrough(), filename: 'report.zip' }),
   };
 }
 
@@ -92,7 +94,7 @@ describe('WorkflowFilesController', () => {
 
       const result = await ctrl.getSignedUrl('org-1', storageKey);
 
-      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey);
+      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey, undefined, undefined);
       expect(result).toMatchObject({ signedUrl: 'https://signed.url' });
     });
 
@@ -120,6 +122,36 @@ describe('WorkflowFilesController', () => {
       await expect(
         ctrl.getSignedUrl('org-1', 'org/org-1/workflow-uploads/uuid.pdf'),
       ).rejects.toThrow('Forbidden');
+    });
+  });
+
+  describe('downloadZip()', () => {
+    it('sets Content-Type and Content-Disposition headers and returns StreamableFile', async () => {
+      const service = makeService();
+      const ctrl    = new WorkflowFilesController(service as any);
+      const res     = { setHeader: jest.fn() };
+      const body    = {
+        files: [{ storageKey: 'org/org-1/workflow-uploads/f.pdf', zipPath: 'f.pdf' }],
+        title: 'Report',
+      };
+
+      const result = await ctrl.downloadZip('org-1', body as any, res as any);
+
+      expect(service.downloadZip).toHaveBeenCalledWith('org-1', body.files, body.title);
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/zip');
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="report.zip"');
+      expect(result).toBeInstanceOf(StreamableFile);
+    });
+
+    it('propagates errors from service.downloadZip', async () => {
+      const service = makeService();
+      service.downloadZip.mockRejectedValue(new BadRequestException('No hay archivos para descargar'));
+      const ctrl = new WorkflowFilesController(service as any);
+      const res  = { setHeader: jest.fn() };
+
+      await expect(
+        ctrl.downloadZip('org-1', { files: [], title: 'T' } as any, res as any),
+      ).rejects.toThrow('No hay archivos para descargar');
     });
   });
 });

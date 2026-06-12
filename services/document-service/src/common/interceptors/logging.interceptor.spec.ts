@@ -1,7 +1,7 @@
-import { LoggingInterceptor } from './logging.interceptor';
+import { LoggingInterceptor } from '@sgd/common';
 import { of, throwError } from 'rxjs';
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('interceptor-correlation-id'),
 }));
 

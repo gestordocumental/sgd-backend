@@ -4,7 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DepartamentosService } from './departamentos.service';
 import { Departamento } from './entities/departamento.entity';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { KafkaProducerService } from '@sgd/common';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 

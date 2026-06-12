@@ -9,9 +9,7 @@ import {
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { ResolveDiscrepancyDto, ResolveAction } from './dto/resolve-discrepancy.dto';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp, getCorrelationId } from '../common/correlation/correlation.context';
+import { KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sgd/common';
 
 /**
  * Determines whether `newVer` represents exactly a +1 increment over `oldVer` at the first differing segment, with all subsequent segments in `newVer` equal to zero.
@@ -21,10 +19,15 @@ import { getClientIp, getCorrelationId } from '../common/correlation/correlation
  * @returns `true` if the first differing segment in `newVer` equals the corresponding segment in `oldVer` plus one and every following segment in `newVer` is `0`, `false` otherwise.
  */
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
-  const parse = (v: string) =>
-    v.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const parse = (v: string): number[] | null => {
+    const normalized = v.replace(/^v/i, '');
+    // eslint-disable-next-line security/detect-unsafe-regex
+    if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
+    return normalized.split('.').map((n) => Number(n));
+  };
   const nv = parse(newVer);
   const ov = parse(oldVer);
+  if (!nv || !ov) return false;
   const len = Math.max(nv.length, ov.length);
   while (nv.length < len) nv.push(0);
   while (ov.length < len) ov.push(0);
@@ -75,7 +78,7 @@ export class TypologiesService {
       resourceName:  params.resourceName ?? null,
       correlationId: getCorrelationId(),
       ip:            getClientIp(),
-      metadata:      params.metadata,
+      metadata:      params.metadata ?? null,
       timestamp:     new Date().toISOString(),
     });
   }

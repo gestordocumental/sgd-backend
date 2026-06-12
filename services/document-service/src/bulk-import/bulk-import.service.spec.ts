@@ -40,6 +40,7 @@ function makeDeps(overrides: { typologiesService?: any; orgClient?: any } = {}) 
 // ── BulkImportService ──────────────────────────────────────────────────────
 
 describe('BulkImportService', () => {
+  afterEach(() => jest.restoreAllMocks());
 
   it('imports valid rows successfully', async () => {
     const buffer = await buildExcel([
@@ -149,16 +150,17 @@ describe('BulkImportService', () => {
   });
 
   it('throws BadRequestException when row count exceeds 500', async () => {
-    const rows: Array<[string, string, string, string, string, string]> = Array.from(
-      { length: 501 },
-      (_, i) => ['IT', '', '', `Policy ${i}`, `COD-${i}`, 'v1'],
-    );
-    const buffer = await buildExcel(rows);
+    jest.spyOn(ExcelJS, 'Workbook').mockImplementationOnce(function () {
+      return {
+        xlsx: { load: jest.fn().mockResolvedValue(undefined) },
+        worksheets: [{ rowCount: 502 }],
+      };
+    } as any);
 
     const { typologiesService, orgClient, logger } = makeDeps();
     const service = new BulkImportService(typologiesService as any, orgClient as any, logger as any);
 
-    await expect(service.importFromExcel('org-1', buffer)).rejects.toThrow(BadRequestException);
+    await expect(service.importFromExcel('org-1', Buffer.alloc(0))).rejects.toThrow(BadRequestException);
   });
 
   it('handles mixed resolved/failed rows correctly', async () => {

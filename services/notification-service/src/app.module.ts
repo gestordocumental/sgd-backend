@@ -4,11 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
-import { CorrelationMiddleware } from './common/middleware/correlation.middleware';
-import { AppLogger } from './common/logger/app-logger.service';
-import { MetricsModule } from './common/metrics/metrics.module';
-
-import { JwtGuard } from './common/guards/jwt.guard';
+import { RedisModule } from './common/redis/redis.module';
+import { CorrelationMiddleware, AppLogger, MetricsModule, JwtGuard } from '@sgd/common';
 import { Notification } from './notifications/entities/notification.entity';
 
 @Module({
@@ -18,9 +15,15 @@ import { Notification } from './notifications/entities/notification.entity';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const dbPort = Number(config.get<string>('DB_PORT'));
-        if (!Number.isInteger(dbPort)) {
-          throw new Error(`Invalid DB_PORT value: "${config.get('DB_PORT')}"`);
+        const dbPortRaw = config.get<string>('DB_PORT');
+        const dbPort = Number(dbPortRaw);
+        if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
+          throw new Error(`Invalid DB_PORT value: "${dbPortRaw}"`);
+        }
+        const poolSizeRaw = config.get<string>('DB_POOL_SIZE') ?? '15';
+        const poolSize = Number(poolSizeRaw);
+        if (!Number.isInteger(poolSize) || poolSize <= 0) {
+          throw new Error(`Invalid DB_POOL_SIZE value: "${poolSizeRaw}"`);
         }
         return {
           type: 'postgres',
@@ -37,11 +40,13 @@ import { Notification } from './notifications/entities/notification.entity';
             parseInt8: true,
             keepAlive: true,
             keepAliveInitialDelayMillis: 10000,
+            max: poolSize,
           },
         };
       },
     }),
 
+    RedisModule,
     NotificationsModule,
     HealthModule,
     MetricsModule,

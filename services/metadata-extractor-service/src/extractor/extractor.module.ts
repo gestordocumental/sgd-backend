@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
-import { KafkaModule } from '../common/kafka/kafka.module';
+import { KafkaModule, AppLogger } from '@sgd/common';
 import { StorageService } from '../common/storage/storage.service';
 import { MetadataRulesService } from './rules/metadata-rules.service';
 import { ExtractorService } from './extractor.service';
 import { PreviewExtractController } from './preview-extract.controller';
-import { AppLogger } from '../common/logger/app-logger.service';
 
 @Module({
   imports: [KafkaModule],

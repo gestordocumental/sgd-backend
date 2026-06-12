@@ -1,9 +1,8 @@
 import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
-import { LoggingInterceptor } from './logging.interceptor';
-import { AppLogger } from '../logger/app-logger.service';
+import { LoggingInterceptor, AppLogger } from '@sgd/common';
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   getCorrelationId: jest.fn().mockReturnValue('intercept-correlation-id'),
 }));
 
@@ -73,8 +72,8 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(ctx, handler).subscribe({
       complete: () => {
-        const calls = mockLogger.http.mock.calls.map((c) => c[0] as Record<string, unknown>);
-        const responselog = calls.find((c) => c['type'] === 'response');
+        const calls = mockLogger.http.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+        const responselog = calls.find((c: Record<string, unknown>) => c['type'] === 'response');
         expect(responselog).toBeDefined();
         expect(responselog).toMatchObject({
           type: 'response',
@@ -95,7 +94,7 @@ describe('LoggingInterceptor', () => {
     const handler = makeHandler(payload);
 
     interceptor.intercept(ctx, handler).subscribe({
-      next: (value) => {
+      next: (value: unknown) => {
         expect(value).toEqual(payload);
       },
       complete: () => done(),
@@ -111,8 +110,8 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(ctx, handler).subscribe({
       error: () => {
-        const calls = mockLogger.http.mock.calls.map((c) => c[0] as Record<string, unknown>);
-        const responseLog = calls.find((c) => c['type'] === 'response');
+        const calls = mockLogger.http.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+        const responseLog = calls.find((c: Record<string, unknown>) => c['type'] === 'response');
         expect(responseLog).toMatchObject({
           type: 'response',
           method: 'DELETE',
@@ -131,8 +130,8 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(ctx, handler).subscribe({
       error: () => {
-        const calls = mockLogger.http.mock.calls.map((c) => c[0] as Record<string, unknown>);
-        const responseLog = calls.find((c) => c['type'] === 'response');
+        const calls = mockLogger.http.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+        const responseLog = calls.find((c: Record<string, unknown>) => c['type'] === 'response');
         expect(responseLog).toMatchObject({ statusCode: 500 });
         done();
       },
@@ -146,8 +145,8 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(ctx, handler).subscribe({
       error: () => {
-        const calls = mockLogger.http.mock.calls.map((c) => c[0] as Record<string, unknown>);
-        const responseLog = calls.find((c) => c['type'] === 'response');
+        const calls = mockLogger.http.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+        const responseLog = calls.find((c: Record<string, unknown>) => c['type'] === 'response');
         expect(responseLog).toMatchObject({ statusCode: 403 });
         done();
       },
@@ -160,7 +159,7 @@ describe('LoggingInterceptor', () => {
     const handler = makeHandler(originalError);
 
     interceptor.intercept(ctx, handler).subscribe({
-      error: (err) => {
+      error: (err: unknown) => {
         expect(err).toBe(originalError);
         done();
       },
@@ -173,8 +172,8 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(ctx, handler).subscribe({
       complete: () => {
-        const calls = mockLogger.http.mock.calls.map((c) => c[0] as Record<string, unknown>);
-        const requestLog = calls.find((c) => c['type'] === 'request');
+        const calls = mockLogger.http.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+        const requestLog = calls.find((c: Record<string, unknown>) => c['type'] === 'request');
         expect(requestLog).toMatchObject({ ip: '192.168.1.10' });
         done();
       },

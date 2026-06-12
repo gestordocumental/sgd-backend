@@ -4,6 +4,8 @@ import {
   Controller,
   Param,
   Post,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -17,13 +19,15 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
-import { JwtGuard } from '../common/guards/jwt.guard';
-import { OrgMember } from '../common/decorators/auth.decorator';
+import type { Response } from 'express';
+import { JwtGuard, OrgMember } from '@sgd/common';
 import { MAX_FILE_SIZE } from '../document-upload/document-upload.constants';
 import { WorkflowFilesService } from './workflow-files.service';
 import { WorkflowFileUploadResponseDto } from './dto/workflow-file-upload-response.dto';
+import { DownloadZipDto } from './dto/download-zip.dto';
 
 const WORKFLOW_MIME_WHITELIST = new Set([
   'application/pdf',
@@ -39,6 +43,9 @@ const workflowMulterOptions = {
     file: Express.Multer.File,
     cb: (err: Error | null, accept: boolean) => void,
   ) => {
+    // Re-interpret Latin-1 decoded bytes as UTF-8 to recover accented characters in filenames.
+    file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
     if (WORKFLOW_MIME_WHITELIST.has(file.mimetype)) cb(null, true);
     else cb(new BadRequestException('Formato no permitido. Use PDF, DOCX, XLSX o imagen (PNG, JPG, WEBP, GIF, BMP, TIFF).'), false);
   },
@@ -47,7 +54,7 @@ const workflowMulterOptions = {
 @ApiTags('Workflow Files')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/documents/:orgId/workflow-files')
+@Controller('api/v1/documents/:orgId/workflow-files')
 @UseGuards(JwtGuard)
 @OrgMember()
 export class WorkflowFilesController {
@@ -79,8 +86,28 @@ export class WorkflowFilesController {
   async getSignedUrl(
     @Param('orgId') orgId: string,
     @Body('storageKey') storageKey: string,
+    @Body('originalName') originalName?: string,
+    @Body('mimeType') mimeType?: string,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     if (!storageKey) throw new BadRequestException('storageKey es requerido');
-    return this.service.getSignedUrl(orgId, storageKey);
+    return this.service.getSignedUrl(orgId, storageKey, originalName, mimeType);
+  }
+
+  @ApiOperation({ summary: 'Descargar múltiples archivos del workflow como un ZIP' })
+  @ApiProduces('application/zip')
+  @Post('download-zip')
+  async downloadZip(
+    @Param('orgId') orgId: string,
+    @Body() body: DownloadZipDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { stream, filename } = await this.service.downloadZip(orgId, body.files, body.title);
+    const isAscii = /^[\x20-\x7E]*$/.test(filename);
+    const disposition = isAscii
+      ? `attachment; filename="${filename}"`
+      : `attachment; filename="${filename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename).replace(/'/g, '%27')}`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', disposition);
+    return new StreamableFile(stream);
   }
 }

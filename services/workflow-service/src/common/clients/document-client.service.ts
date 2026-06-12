@@ -3,13 +3,13 @@ import {
   InternalServerErrorException,
   GatewayTimeoutException,
   BadRequestException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
-import { AppLogger } from '../logger/app-logger.service';
-import { getCorrelationId } from '../correlation/correlation.context';
-import { CORRELATION_ID_HEADER } from '../middleware/correlation.middleware';
+import { AppLogger, getCorrelationId, CORRELATION_ID_HEADER } from '@sgd/common';
+import CircuitBreaker = require('opossum');
 
 export interface TypologyPublicInfo {
   id: string;
@@ -56,6 +56,7 @@ export class DocumentClientService {
   private readonly documentServiceUrl: string;
   private readonly internalToken: string;
   private readonly timeoutMs: number;
+  private readonly cb: CircuitBreaker;
 
   constructor(
     private readonly httpService: HttpService,
@@ -63,10 +64,24 @@ export class DocumentClientService {
     private readonly logger: AppLogger,
   ) {
     this.documentServiceUrl = this.config.getOrThrow<string>('DOCUMENT_SERVICE_URL');
-    this.internalToken      = this.config.getOrThrow<string>('INTERNAL_TOKEN');
+    this.internalToken      = this.config.getOrThrow<string>('INTERNAL_TOKEN_WORKFLOW_DOC');
     const raw               = this.config.get<string | number>('DOCUMENT_SERVICE_TIMEOUT_MS');
     const parsed            = raw == null ? 5_000 : Number(raw);
     this.timeoutMs          = Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000;
+
+    this.cb = new CircuitBreaker(
+      (fn: () => Promise<unknown>) => fn(),
+      {
+        name:                     'document-service',
+        timeout:                  false,   // RxJS timeout() handles per-request timeouts
+        errorThresholdPercentage: 75,
+        resetTimeout:             10_000,
+        volumeThreshold:          10,
+      },
+    );
+    this.cb.on('open',     () => this.logger.warn('[circuit] document-service OPEN — failing fast', 'DocumentClientService'));
+    this.cb.on('halfOpen', () => this.logger.log('[circuit] document-service HALF-OPEN — probing', 'DocumentClientService'));
+    this.cb.on('close',    () => this.logger.log('[circuit] document-service CLOSED — recovered', 'DocumentClientService'));
   }
 
   /**
@@ -89,15 +104,17 @@ export class DocumentClientService {
     });
 
     try {
-      const response = await firstValueFrom(
-        this.httpService
-          .get<TypologyPublicInfo>(url, {
-            headers: {
-              'x-internal-token':      this.internalToken,
-              [CORRELATION_ID_HEADER]: correlationId,
-            },
-          })
-          .pipe(timeout(this.timeoutMs)),
+      const response = await this.fireWithCb<{ data: TypologyPublicInfo }>(() =>
+        firstValueFrom(
+          this.httpService
+            .get<TypologyPublicInfo>(url, {
+              headers: {
+                'x-internal-token':      this.internalToken,
+                [CORRELATION_ID_HEADER]: correlationId,
+              },
+            })
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
 
       this.logger.http({
@@ -110,6 +127,7 @@ export class DocumentClientService {
 
       return response.data;
     } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
       return this.handleError(error, 'document-service', url, correlationId);
     }
   }
@@ -138,19 +156,21 @@ export class DocumentClientService {
     });
 
     try {
-      const response = await firstValueFrom(
-        this.httpService
-          .post<ValidateDocumentResult>(
-            url,
-            { typologyId, documentId },
-            {
-              headers: {
-                'x-internal-token':      this.internalToken,
-                [CORRELATION_ID_HEADER]: correlationId,
+      const response = await this.fireWithCb<{ data: ValidateDocumentResult }>(() =>
+        firstValueFrom(
+          this.httpService
+            .post<ValidateDocumentResult>(
+              url,
+              { typologyId, documentId },
+              {
+                headers: {
+                  'x-internal-token':      this.internalToken,
+                  [CORRELATION_ID_HEADER]: correlationId,
+                },
               },
-            },
-          )
-          .pipe(timeout(this.timeoutMs)),
+            )
+            .pipe(timeout(this.timeoutMs)),
+        ),
       );
 
       this.logger.http({
@@ -163,7 +183,19 @@ export class DocumentClientService {
 
       return response.data;
     } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
       return this.handleError(error, 'document-service', url, correlationId);
+    }
+  }
+
+  private async fireWithCb<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await this.cb.fire(fn) as T;
+    } catch (err: any) {
+      if (err?.code === 'EOPENBREAKER') {
+        throw new ServiceUnavailableException('document-service is temporarily unavailable');
+      }
+      throw err;
     }
   }
 

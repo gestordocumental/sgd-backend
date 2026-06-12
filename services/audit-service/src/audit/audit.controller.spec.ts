@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
 import { AuditQueryDto, AuditExportDto } from './dto/audit-query.dto';
-import { JwtPayload } from '../common/decorators/jwt-payload.decorator';
+import { JwtPayload } from '@sgd/common';
 
 const mockService: jest.Mocked<Pick<AuditService, 'query' | 'export' | 'findById'>> = {
   query:    jest.fn(),
@@ -106,11 +106,12 @@ describe('AuditController', () => {
       expect(result).toBe(doc);
     });
 
-    it('super admin cannot access org-scoped events', async () => {
+    it('super admin can access org-scoped events', async () => {
       const doc = { id: 'doc-1', orgId: 'other-org' } as any;
       mockService.findById.mockResolvedValue(doc);
       const me = makePayload({ isSuperAdmin: true });
-      await expect(controller.getById('doc-1', me)).rejects.toThrow(ForbiddenException);
+      const result = await controller.getById('doc-1', me);
+      expect(result).toBe(doc);
     });
 
     it('normal user without companyId throws ForbiddenException', async () => {

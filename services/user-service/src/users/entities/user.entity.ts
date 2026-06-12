@@ -71,10 +71,6 @@ export class User {
   @Column({ name: 'is_super_admin', type: 'boolean', default: false })
   isSuperAdmin!: boolean;
 
-  // Can be toggled by the user or forced by super admin
-  @Column({ name: 'two_factor_enabled', type: 'boolean', default: false })
-  twoFactorEnabled!: boolean;
-
   @OneToMany(() => UserOrgRole, (uor) => uor.user)
   orgRoles!: UserOrgRole[];
 

@@ -1,8 +1,12 @@
-import { CorrelationMiddleware, CORRELATION_ID_HEADER } from './correlation.middleware';
+import {
+  CorrelationMiddleware,
+  CORRELATION_ID_HEADER,
+  correlationStorage,
+} from '@sgd/common';
 
 // ── Module-level mocks ────────────────────────────────────────────────────────
 
-jest.mock('../correlation/correlation.context', () => ({
+jest.mock('@sgd/common/correlation/correlation.context', () => ({
   correlationStorage: {
     run: jest.fn((_store: any, cb: () => void) => cb()),
   },
@@ -12,7 +16,6 @@ jest.mock('crypto', () => ({
   randomUUID: jest.fn().mockReturnValue('generated-uuid'),
 }));
 
-import { correlationStorage } from '../correlation/correlation.context';
 import { randomUUID } from 'crypto';
 
 const mockRun         = correlationStorage.run as jest.MockedFunction<typeof correlationStorage.run>;
@@ -53,7 +56,7 @@ describe('CorrelationMiddleware', () => {
 
     expect(res.setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'existing-correlation-id');
     expect(mockRun).toHaveBeenCalledWith(
-      { correlationId: 'existing-correlation-id' },
+      { correlationId: 'existing-correlation-id', clientIp: null },
       expect.any(Function),
     );
     expect(mockRandomUUID).not.toHaveBeenCalled();
@@ -67,7 +70,7 @@ describe('CorrelationMiddleware', () => {
     expect(mockRandomUUID).toHaveBeenCalled();
     expect(res.setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'generated-uuid');
     expect(mockRun).toHaveBeenCalledWith(
-      { correlationId: 'generated-uuid' },
+      { correlationId: 'generated-uuid', clientIp: null },
       expect.any(Function),
     );
   });
@@ -98,7 +101,7 @@ describe('CorrelationMiddleware', () => {
     expect(mockRandomUUID).not.toHaveBeenCalled();
     expect(res.setHeader).toHaveBeenCalledWith(CORRELATION_ID_HEADER, 'array-correlation-id');
     expect(mockRun).toHaveBeenCalledWith(
-      { correlationId: 'array-correlation-id' },
+      { correlationId: 'array-correlation-id', clientIp: null },
       expect.any(Function),
     );
   });

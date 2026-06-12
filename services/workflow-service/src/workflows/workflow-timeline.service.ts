@@ -3,10 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { WorkflowTimeline } from './entities/workflow-timeline.entity';
 import { TimelineEventType } from './entities/enums';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { KafkaProducerService, AppLogger, TOPICS, correlationStorage } from '@sgd/common';
 
 interface RecordEventParams {
   workflowId: string;
@@ -75,7 +72,7 @@ export class WorkflowTimelineService {
       resourceId:    params.workflowId,
       resourceName:  params.resourceName ?? null,
       correlationId: params.workflowId,   // ID de negocio: agrupa toda la trazabilidad del workflow
-      ip:            getClientIp(),
+      ip:            (correlationStorage.getStore()?.['clientIp'] as string | null) ?? null,
       metadata:      params.metadata ?? null,
       timestamp:     new Date().toISOString(),
     });

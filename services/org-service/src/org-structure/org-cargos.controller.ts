@@ -16,7 +16,7 @@ import { CargoResponseDto } from './dto/cargo-response.dto';
 @ApiTags('Org Structure - Cargos')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/org/:orgId/cargos')
+@Controller('api/v1/org/:orgId/cargos')
 @UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class OrgCargosController {

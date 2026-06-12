@@ -2,18 +2,20 @@ import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import { Credential } from './auth/entities/credential.entity';
 
+const dbPortRaw = process.env.DB_PORT ?? '5432';
+const dbPort = Number(dbPortRaw);
+if (!Number.isInteger(dbPort) || dbPort <= 0 || dbPort > 65535) {
+  throw new Error(`Invalid DB_PORT: "${dbPortRaw}"`);
+}
+
 export const AppDataSource = new DataSource({
   type: 'postgres',
   host: process.env.DB_HOST ?? 'localhost',
-  port: Number(process.env.DB_PORT ?? 5432),
+  port: dbPort,
   username: process.env.DB_USERNAME ?? 'auth_user',
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME ?? 'auth_db',
   entities: [Credential],
-  migrations: [
-    process.env.NODE_ENV === 'production'
-      ? 'dist/migrations/*.js'
-      : 'src/migrations/*.ts',
-  ],
+  migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
 });

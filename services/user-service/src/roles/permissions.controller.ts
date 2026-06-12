@@ -4,14 +4,18 @@ import {
   Query,
   Headers,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import { PermissionsService } from './permissions.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiSecurity, ApiQuery } from '@nestjs/swagger';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { PermissionModule, PermissionAction } from './entities/permission.entity';
 
 @ApiTags('Permissions')
-@Controller('api/permissions')
+@Controller('api/v1/permissions')
 export class PermissionsController {
   constructor(
     private readonly permissionsService: PermissionsService,
@@ -21,7 +25,8 @@ export class PermissionsController {
   @ApiOperation({ summary: 'List all available permissions — used by orgs to build custom roles' })
   @ApiBearerAuth('JWT')
   @ApiResponse({ status: 200, description: 'Array of permissions' })
-  // Returns all available permissions — orgs use this list to build custom roles
+  @UseGuards(PermissionsGuard)
+  @RequirePermission(PermissionModule.ROLES, PermissionAction.READ)
   @Get()
   findAll() {
     return this.permissionsService.findAll();
@@ -53,7 +58,8 @@ export class PermissionsController {
     @Query('module') module: string,
     @Query('action') action: string,
   ): Promise<{ allowed: boolean }> {
-    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));
+    // org-service is the sole caller of this endpoint (via OrgPermissionsGuard).
+    const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN_ORG_USER'));
     const provided = Buffer.from(internalToken ?? '');
     const isValid =
       provided.length === expected.length && timingSafeEqual(expected, provided);

@@ -5,7 +5,7 @@ import { BulkStructureService } from './bulk-structure.service';
 import { Departamento } from './entities/departamento.entity';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
-import { AppLogger } from '../common/logger/app-logger.service';
+import { AppLogger } from '@sgd/common';
 
 // ─── ExcelJS mock ─────────────────────────────────────────────────────────────
 type RowCallback = (row: { getCell: (n: number) => { text: string } }, rowNumber: number) => void;

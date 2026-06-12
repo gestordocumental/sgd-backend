@@ -9,14 +9,19 @@ import Redis from 'ioredis';
     {
       provide: 'REDIS_CLIENT',
       inject: [ConfigService],
-      useFactory: (config: ConfigService) =>
-        new Redis({
+      useFactory: (config: ConfigService) => {
+        const password = config.get<string>('REDIS_PASSWORD');
+        if (!password && config.get<string>('NODE_ENV') === 'production') {
+          throw new Error('REDIS_PASSWORD must be set in production');
+        }
+        return new Redis({
           host: config.get<string>('REDIS_HOST'),
           port: config.get<number>('REDIS_PORT'),
           // empty password ("") → undefined so ioredis does not send AUTH
-          password: config.get<string>('REDIS_PASSWORD') || undefined,
+          password: password || undefined,
           lazyConnect: false,
-        }),
+        });
+      },
     },
   ],
   exports: ['REDIS_CLIENT'],

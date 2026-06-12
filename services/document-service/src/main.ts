@@ -1,11 +1,10 @@
 import 'reflect-metadata';
 import './instrument';
+import { json, urlencoded } from 'express';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { AppLogger } from './common/logger/app-logger.service';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { AppLogger, LoggingInterceptor, HttpExceptionFilter } from '@sgd/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 /**
@@ -17,7 +16,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
  * and logs the startup message.
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
+
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   const logger = app.get(AppLogger);
   app.useLogger(logger);
@@ -33,7 +35,7 @@ async function bootstrap() {
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'JWT')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/documents/docs', app, document);
+  SwaggerModule.setup('api/v1/documents/docs', app, document);
 
   const port = process.env.PORT ?? 3003;
   await app.listen(port);

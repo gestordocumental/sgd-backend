@@ -14,10 +14,8 @@ import { WorkflowTimeline } from './entities/workflow-timeline.entity';
 import { WorkflowAdminCycle } from './entities/workflow-admin-cycle.entity';
 import { WorkflowStatus, ApprovalStepStatus, AttachmentType, TimelineEventType } from './entities/enums';
 import { WorkflowTimelineService } from './workflow-timeline.service';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
+import { AppLogger, KafkaProducerService, JwtPayload } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
-import { AppLogger } from '../common/logger/app-logger.service';
-import { JwtPayload } from '../common/decorators/jwt-payload.decorator';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 
 // ── Factories ─────────────────────────────────────────────────────────────────

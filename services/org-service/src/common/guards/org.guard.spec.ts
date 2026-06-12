@@ -29,16 +29,22 @@ const makeContext = (
 
 describe('OrgGuard', () => {
   let reflector: { getAllAndOverride: jest.Mock };
-  let configService: { getOrThrow: jest.Mock };
+  let configService: {
+    get: jest.Mock<string | undefined, [string]>;
+    getOrThrow: jest.Mock<string, [string]>;
+  };
   let guard: OrgGuard;
 
   beforeEach(() => {
     reflector = { getAllAndOverride: jest.fn() };
     configService = {
       getOrThrow: jest.fn((key: string) => {
-        if (key === 'INTERNAL_TOKEN') return 'internal-secret';
-        if (key === 'JWT_SECRET')     return TEST_JWT_SECRET;
+        if (key === 'JWT_SECRET') return TEST_JWT_SECRET;
         throw new Error(`Unexpected key ${key}`);
+      }),
+      get: jest.fn((key: string) => {
+        if (key === 'INTERNAL_TOKEN_NOTIF_ORG') return 'internal-secret';
+        return undefined;
       }),
     };
     guard = new OrgGuard(reflector as unknown as Reflector, configService as unknown as ConfigService);

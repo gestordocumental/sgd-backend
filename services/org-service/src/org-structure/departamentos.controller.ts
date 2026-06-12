@@ -22,7 +22,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @ApiTags('Org Structure — Departamentos')
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
-@Controller('api/org/:orgId/departamentos')
+@Controller('api/v1/org/:orgId/departamentos')
 @UseGuards(OrgGuard, OrgPermissionsGuard)
 @OrgMemberOrSuperAdmin()
 export class DepartamentosController {

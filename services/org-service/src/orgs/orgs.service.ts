@@ -1,19 +1,40 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ConflictException,
-  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
+import { In, Repository } from 'typeorm';
 import { Org, OrgStatus } from './entities/org.entity';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
-import { KafkaProducerService } from '../common/kafka/kafka-producer.service';
-import { TOPICS } from '../common/kafka/kafka.constants';
-import { getClientIp } from '../common/correlation/correlation.context';
+import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
+import { UserClientService } from '../common/user-client/user-client.service';
+
+function encodeCursor(createdAt: Date, id: string): string {
+  return Buffer.from(JSON.stringify({ at: createdAt.toISOString(), id })).toString('base64url');
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function decodeCursor(raw: string): { at: string; id: string } {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (
+      typeof parsed.at !== 'string' ||
+      Number.isNaN(Date.parse(parsed.at)) ||
+      typeof parsed.id !== 'string' ||
+      !UUID_RE.test(parsed.id)
+    ) {
+      throw new BadRequestException('Invalid cursor');
+    }
+    return parsed;
+  } catch {
+    throw new BadRequestException('Invalid cursor');
+  }
+}
 
 @Injectable()
 export class OrgsService {
@@ -22,14 +43,15 @@ export class OrgsService {
   constructor(
     @InjectRepository(Org)
     private readonly orgRepo: Repository<Org>,
-    private readonly configService: ConfigService,
     private readonly kafkaProducer: KafkaProducerService,
+    private readonly userClient: UserClientService,
   ) {}
 
   private emitAuditLog(
     action: string,
     org: Org,
     actorId: string,
+    metadata?: Record<string, unknown>,
   ): void {
     this.kafkaProducer.emitSafe(TOPICS.AUDIT_LOG, {
       service:      'org-service',
@@ -39,8 +61,9 @@ export class OrgsService {
       resourceType: 'company',
       resourceId:   org.id,
       resourceName: org.name,
-      ip:           getClientIp(),
+      ip:           correlationStorage.getStore()?.['clientIp'] as string | null,
       timestamp:    new Date().toISOString(),
+      metadata:     metadata ?? null,
     });
   }
 
@@ -64,8 +87,49 @@ export class OrgsService {
     return saved;
   }
 
-  async findAll(): Promise<Org[]> {
-    return this.orgRepo.find({ order: { createdAt: 'ASC' }, withDeleted: true });
+  async findAll(params: {
+    limit?: number;
+    cursor?: string;
+    search?: string;
+    status?: 'active' | 'inactive' | 'deleted';
+  } = {}): Promise<{ data: Org[]; nextCursor: string | null; hasMore: boolean }> {
+    const limit = Math.min(Math.max(1, params.limit ?? 20), 100);
+    const decoded = params.cursor ? decodeCursor(params.cursor) : null;
+
+    const qb = this.orgRepo
+      .createQueryBuilder('o')
+      .withDeleted()
+      .orderBy('o.createdAt', 'ASC')
+      .addOrderBy('o.id', 'ASC')
+      .take(limit + 1);
+
+    if (params.search?.trim()) {
+      const q = `%${params.search.trim()}%`;
+      qb.where('(o.name ILIKE :q OR o.nit ILIKE :q)', { q });
+    }
+
+    if (params.status === 'deleted') {
+      qb.andWhere('o.deletedAt IS NOT NULL');
+    } else if (params.status === 'active') {
+      qb.andWhere('o.deletedAt IS NULL').andWhere('o.status = :s', { s: OrgStatus.ACTIVE });
+    } else if (params.status === 'inactive') {
+      qb.andWhere('o.deletedAt IS NULL').andWhere('o.status != :s', { s: OrgStatus.ACTIVE });
+    }
+
+    if (decoded) {
+      qb.andWhere(
+        '(o.createdAt > :at OR (o.createdAt = :at AND o.id > :cursorId))',
+        { at: decoded.at, cursorId: decoded.id },
+      );
+    }
+
+    const rows = await qb.getMany();
+    const hasMore = rows.length > limit;
+    const data = hasMore ? rows.slice(0, limit) : rows;
+    const last = data.at(-1);
+    const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+    return { data, nextCursor, hasMore };
   }
 
   async findOne(id: string): Promise<Org> {
@@ -84,6 +148,9 @@ export class OrgsService {
       }
     }
 
+    const before: Record<string, unknown> = {};
+    for (const key of Object.keys(dto)) before[key] = (org as unknown as Record<string, unknown>)[key];
+
     Object.assign(org, {
       ...(dto.name    !== undefined && { name:    dto.name }),
       ...(dto.nit     !== undefined && { nit:     dto.nit }),
@@ -93,7 +160,15 @@ export class OrgsService {
     });
 
     const updated = await this.orgRepo.save(org);
-    if (actorId) this.emitAuditLog('COMPANY_UPDATED', updated, actorId);
+
+    if (actorId) {
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
+      for (const key of Object.keys(dto)) {
+        const to = (dto as Record<string, unknown>)[key];
+        if (before[key] !== to) changes[key] = { from: before[key], to };
+      }
+      this.emitAuditLog('COMPANY_UPDATED', updated, actorId, { changes });
+    }
     return updated;
   }
 
@@ -107,7 +182,7 @@ export class OrgsService {
     await this.orgRepo.softRemove(org);
 
     try {
-      await this.revokeOrgAccess(id);
+      await this.userClient.revokeOrgAccess(id);
     } catch (err) {
       this.logger.error(
         `revokeOrgAccess failed for org ${id} — compensating by restoring the record`,
@@ -127,31 +202,9 @@ export class OrgsService {
     if (actorId) this.emitAuditLog('COMPANY_DELETED', org, actorId);
   }
 
-  private async revokeOrgAccess(orgId: string): Promise<void> {
-    const userServiceUrl = this.configService.getOrThrow<string>('USER_SERVICE_URL');
-    const internalToken = this.configService.getOrThrow<string>('INTERNAL_TOKEN');
-    const url = `${userServiceUrl}/api/users/internal/orgs/${orgId}/users`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
-    try {
-      const res = await fetch(url, {
-        method: 'DELETE',
-        signal: controller.signal,
-        headers: { 'x-internal-token': internalToken },
-      });
-      if (!res.ok && res.status !== 404) {
-        this.logger.error(`Failed to revoke org access for ${orgId}: HTTP ${res.status}`);
-        throw new InternalServerErrorException('Failed to revoke user access after org deletion');
-      }
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        this.logger.error(`Timeout revoking org access for ${orgId}`);
-        throw new InternalServerErrorException('Timeout revoking user access after org deletion');
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeout);
-    }
+  async findByIds(ids: string[]): Promise<Org[]> {
+    if (ids.length === 0) return [];
+    return this.orgRepo.findBy({ id: In(ids) });
   }
 
   async restore(id: string, actorId?: string): Promise<Org> {
