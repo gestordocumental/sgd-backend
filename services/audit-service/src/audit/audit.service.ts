@@ -91,8 +91,9 @@ export class AuditService implements OnModuleInit {
   /**
    * Construye las cláusulas must de Elasticsearch.
    *
-   * superAdminScope=true → restringe a eventos SIN orgId (acciones de super admin puras).
-   * superAdminScope=false + dto.orgId → restringe a esa organización concreta.
+   * superAdminScope=true + sin dto.orgId → eventos de plataforma (orgId ausente/null).
+   * superAdminScope=true + dto.orgId    → eventos de esa empresa específica.
+   * superAdminScope=false + dto.orgId   → eventos de la org + eventos de company management donde resourceId = orgId.
    */
   private buildMustClauses(
     dto: {
