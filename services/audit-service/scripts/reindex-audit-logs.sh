@@ -45,6 +45,32 @@ command -v curl    >/dev/null 2>&1 || { echo "[ERROR] curl is required but not i
 INDEX="audit-logs"
 TEMP_INDEX="audit-logs-reindex-tmp"
 
+# Mapping must stay in sync with AuditService.ensureIndex() in audit.service.ts
+read -r -d '' INDEX_BODY <<'MAPPING' || true
+{
+  "mappings": {
+    "properties": {
+      "service":       { "type": "keyword" },
+      "actorId":       { "type": "keyword" },
+      "orgId":         { "type": "keyword" },
+      "action":        { "type": "keyword" },
+      "resourceType":  { "type": "keyword" },
+      "resourceId":    { "type": "keyword" },
+      "resourceName":  { "type": "keyword" },
+      "correlationId": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
+      "ip":            { "type": "keyword" },
+      "metadata":      { "type": "object", "enabled": false },
+      "timestamp":     { "type": "date" },
+      "indexedAt":     { "type": "date" }
+    }
+  },
+  "settings": {
+    "number_of_shards":   1,
+    "number_of_replicas": 0
+  }
+}
+MAPPING
+
 NETRC_FILE=$(mktemp)
 trap "rm -f ${NETRC_FILE}" EXIT
 chmod 600 "${NETRC_FILE}"
@@ -68,28 +94,7 @@ STATUS=$(curl -o /dev/null -w "%{http_code}" -sSL "${AUTH[@]}" "${ES_URL}/${INDE
 
 if [ "$STATUS" = "404" ]; then
   log "Index does not exist — creating with correct mapping."
-  es -X PUT "${ES_URL}/${INDEX}" -d '{
-    "mappings": {
-      "properties": {
-        "service":       { "type": "keyword" },
-        "actorId":       { "type": "keyword" },
-        "orgId":         { "type": "keyword" },
-        "action":        { "type": "keyword" },
-        "resourceType":  { "type": "keyword" },
-        "resourceId":    { "type": "keyword" },
-        "resourceName":  { "type": "keyword" },
-        "correlationId": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
-        "ip":            { "type": "keyword" },
-        "metadata":      { "type": "object", "enabled": false },
-        "timestamp":     { "type": "date" },
-        "indexedAt":     { "type": "date" }
-      }
-    },
-    "settings": {
-      "number_of_shards":   1,
-      "number_of_replicas": 0
-    }
-  }'
+  es -X PUT "${ES_URL}/${INDEX}" -d "${INDEX_BODY}"
   log "Done — index created."
   exit 0
 fi
@@ -123,28 +128,7 @@ fi
 # ── 5. create temp index with correct mapping ──────────────────────────────────
 
 log "Creating temp index '${TEMP_INDEX}' with correct mapping..."
-es -X PUT "${ES_URL}/${TEMP_INDEX}" -d '{
-  "mappings": {
-    "properties": {
-      "service":       { "type": "keyword" },
-      "actorId":       { "type": "keyword" },
-      "orgId":         { "type": "keyword" },
-      "action":        { "type": "keyword" },
-      "resourceType":  { "type": "keyword" },
-      "resourceId":    { "type": "keyword" },
-      "resourceName":  { "type": "keyword" },
-      "correlationId": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
-      "ip":            { "type": "keyword" },
-      "metadata":      { "type": "object", "enabled": false },
-      "timestamp":     { "type": "date" },
-      "indexedAt":     { "type": "date" }
-    }
-  },
-  "settings": {
-    "number_of_shards":   1,
-    "number_of_replicas": 0
-  }
-}' > /dev/null
+es -X PUT "${ES_URL}/${TEMP_INDEX}" -d "${INDEX_BODY}" > /dev/null
 
 # ── 6. reindex source → temp ───────────────────────────────────────────────────
 
@@ -170,28 +154,7 @@ es -X DELETE "${ES_URL}/${INDEX}" > /dev/null
 # ── 8. create original index with correct mapping ──────────────────────────────
 
 log "Recreating '${INDEX}' with correct mapping..."
-es -X PUT "${ES_URL}/${INDEX}" -d '{
-  "mappings": {
-    "properties": {
-      "service":       { "type": "keyword" },
-      "actorId":       { "type": "keyword" },
-      "orgId":         { "type": "keyword" },
-      "action":        { "type": "keyword" },
-      "resourceType":  { "type": "keyword" },
-      "resourceId":    { "type": "keyword" },
-      "resourceName":  { "type": "keyword" },
-      "correlationId": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
-      "ip":            { "type": "keyword" },
-      "metadata":      { "type": "object", "enabled": false },
-      "timestamp":     { "type": "date" },
-      "indexedAt":     { "type": "date" }
-    }
-  },
-  "settings": {
-    "number_of_shards":   1,
-    "number_of_replicas": 0
-  }
-}' > /dev/null
+es -X PUT "${ES_URL}/${INDEX}" -d "${INDEX_BODY}" > /dev/null
 log "MAINTENANCE WINDOW CLOSED — '${INDEX}' exists again with correct mapping. audit-service can be restarted."
 
 # ── 9. reindex temp → original ─────────────────────────────────────────────────

@@ -124,6 +124,9 @@ export class OrgClientService {
         message: `← [org-service] POST /internal/structure/resolve ${status ?? 500}: ${message}`,
       });
 
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        throw new HttpException(message, status);
+      }
       throw new InternalServerErrorException(
         `Could not resolve org structure from org-service: ${message}`,
       );
