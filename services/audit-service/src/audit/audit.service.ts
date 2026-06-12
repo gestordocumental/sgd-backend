@@ -12,6 +12,11 @@ import { ES_WRITE_CLIENT, ES_READ_CLIENT } from './es-client.tokens';
 
 const INDEX = 'audit-logs';
 
+function isIndexNotFound(err: unknown): boolean {
+  return (err as { meta?: { body?: { error?: { type?: string } } } })
+    ?.meta?.body?.error?.type === 'index_not_found_exception';
+}
+
 @Injectable()
 export class AuditService implements OnModuleInit {
   constructor(
@@ -20,12 +25,11 @@ export class AuditService implements OnModuleInit {
     private readonly logger: AppLogger,
   ) {}
 
-  /**
-   * Crea el índice en Elasticsearch si no existe al arrancar el servicio.
-   * El mapping define los tipos de los campos más importantes para búsquedas eficientes.
-   * Usa writeClient porque la creación de índices requiere permisos de escritura/admin.
-   */
   async onModuleInit() {
+    await this.ensureIndex();
+  }
+
+  private async ensureIndex(): Promise<void> {
     try {
       const exists = await this.writeClient.indices.exists({ index: INDEX });
       if (!exists) {
@@ -40,8 +44,6 @@ export class AuditService implements OnModuleInit {
               resourceType:  { type: 'keyword' },
               resourceId:    { type: 'keyword' },
               resourceName:  { type: 'keyword' },
-              // text + .keyword sub-field: text allows full-text search if needed,
-              // .keyword allows exact-match term queries on the full UUID value.
               correlationId: { type: 'text', fields: { keyword: { type: 'keyword', ignore_above: 256 } } },
               ip:            { type: 'keyword' },
               metadata:      { type: 'object', enabled: false },
@@ -109,8 +111,11 @@ export class AuditService implements OnModuleInit {
     const must: object[] = [];
 
     if (superAdminScope) {
-      // Eventos de super admin: documentos donde orgId no existe o es null
-      must.push({ bool: { must_not: { exists: { field: 'orgId' } } } });
+      // Super admin sin orgId → ve todos los eventos de todas las empresas.
+      // Super admin con orgId → filtra por esa empresa específica.
+      if (dto.orgId) {
+        must.push({ term: { orgId: dto.orgId } });
+      }
     } else if (dto.orgId) {
       must.push({ term: { orgId: dto.orgId } });
     }
@@ -152,43 +157,59 @@ export class AuditService implements OnModuleInit {
 
     const must = this.buildMustClauses(dto, superAdminScope);
 
-    const response = await this.readClient.search<AuditLogDocument>({
-      index: INDEX,
-      from,
-      size:  limit,
-      query: must.length > 0 ? { bool: { must } } : { match_all: {} },
-      sort:  [{ timestamp: { order: 'desc' } }],
-    });
+    try {
+      const response = await this.readClient.search<AuditLogDocument>({
+        index: INDEX,
+        from,
+        size:  limit,
+        query: must.length > 0 ? { bool: { must } } : { match_all: {} },
+        sort:  [{ timestamp: { order: 'desc' } }],
+      });
 
-    const hits  = response.hits.hits;
-    const total = typeof response.hits.total === 'number'
-      ? response.hits.total
-      : (response.hits.total?.value ?? 0);
+      const hits  = response.hits.hits;
+      const total = typeof response.hits.total === 'number'
+        ? response.hits.total
+        : (response.hits.total?.value ?? 0);
 
-    const data: AuditLogDocument[] = hits.map((hit) => ({
-      id: hit._id ?? '',
-      ...(hit._source as Omit<AuditLogDocument, 'id'>),
-    }));
+      const data: AuditLogDocument[] = hits.map((hit) => ({
+        id: hit._id ?? '',
+        ...(hit._source as Omit<AuditLogDocument, 'id'>),
+      }));
 
-    return { data, total, page, limit };
+      return { data, total, page, limit };
+    } catch (err: unknown) {
+      if (isIndexNotFound(err)) {
+        void this.ensureIndex();
+        return { data: [], total: 0, page, limit };
+      }
+      throw err;
+    }
   }
 
   async export(dto: AuditExportDto, superAdminScope = false): Promise<AuditLogDocument[]> {
     const limit = dto.limit ?? 1000;
     const must  = this.buildMustClauses(dto, superAdminScope);
 
-    const response = await this.readClient.search<AuditLogDocument>({
-      index: INDEX,
-      from:  0,
-      size:  limit,
-      query: must.length > 0 ? { bool: { must } } : { match_all: {} },
-      sort:  [{ timestamp: { order: 'desc' } }],
-    });
+    try {
+      const response = await this.readClient.search<AuditLogDocument>({
+        index: INDEX,
+        from:  0,
+        size:  limit,
+        query: must.length > 0 ? { bool: { must } } : { match_all: {} },
+        sort:  [{ timestamp: { order: 'desc' } }],
+      });
 
-    return response.hits.hits.map((hit) => ({
-      id: hit._id ?? '',
-      ...(hit._source as Omit<AuditLogDocument, 'id'>),
-    }));
+      return response.hits.hits.map((hit) => ({
+        id: hit._id ?? '',
+        ...(hit._source as Omit<AuditLogDocument, 'id'>),
+      }));
+    } catch (err: unknown) {
+      if (isIndexNotFound(err)) {
+        void this.ensureIndex();
+        return [];
+      }
+      throw err;
+    }
   }
 
   async findById(id: string): Promise<AuditLogDocument | null> {

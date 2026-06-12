@@ -130,9 +130,12 @@ en Railway para cada entorno (dev / test / prod).
 |---|---|---|---|---|
 | `NODE_ENV` | `development` | `test` | `production` | Manual |
 | `PORT` | `3000` | `3000` | `3000` | Manual |
-| `ELASTICSEARCH_NODE` | `http://elasticsearch.railway.internal:9200` | idem | idem | Manual |
-| `ELASTICSEARCH_INDEX` | `sgd-audit-logs-dev` | `sgd-audit-logs-test` | `sgd-audit-logs` | Manual |
-| `KAFKA_BROKERS` | `kafka.railway.internal:9092` | idem | idem | Manual |
+| `ELASTICSEARCH_URL` | `http://elasticsearch.railway.internal:9200` | idem | idem | Manual |
+| `ELASTICSEARCH_WRITE_USERNAME` | `elastic` | `elastic` | `elastic` | Manual |
+| `ELASTICSEARCH_WRITE_PASSWORD` | `<password>` | `<password>` | `<password>` | Manual |
+| `ELASTICSEARCH_READ_USERNAME` | `elastic` | `elastic` | `elastic` | Manual |
+| `ELASTICSEARCH_READ_PASSWORD` | `<password>` | `<password>` | `<password>` | Manual |
+| `KAFKA_BROKER` | `kafka.railway.internal:9092` | idem | idem | Manual |
 | `KAFKA_CLIENT_ID` | `audit-service` | `audit-service` | `audit-service` | Manual |
 | `KAFKA_GROUP_ID` | `audit-service-group` | `audit-service-group` | `audit-service-group` | Manual |
 

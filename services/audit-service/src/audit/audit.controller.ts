@@ -41,9 +41,8 @@ export class AuditController {
     @JwtPayloadParam() me: JwtPayload,
   ) {
     if (me.isSuperAdmin) {
-      // Super admin: ve eventos de plataforma (orgId = null).
-      // Acciones sobre empresas/usuarios como plataforma, no eventos de negocio de cada empresa.
-      dto.orgId = undefined;
+      // Super admin sin orgId → ve todos los eventos.
+      // Super admin con orgId → filtra por esa empresa (para auditar una empresa específica).
       return this.auditService.query(dto, true);
     }
 
@@ -68,7 +67,6 @@ export class AuditController {
     @JwtPayloadParam() me: JwtPayload,
   ) {
     if (me.isSuperAdmin) {
-      dto.orgId = undefined;
       return this.auditService.export(dto, true);
     }
 
@@ -96,8 +94,7 @@ export class AuditController {
     if (!doc) throw new NotFoundException('Audit log not found');
 
     if (me.isSuperAdmin) {
-      // Super admin solo puede acceder a eventos de plataforma (sin orgId)
-      if (doc.orgId) throw new ForbiddenException('Access to this event is not allowed');
+      // Super admin puede acceder a cualquier evento
     } else {
       if (!me.companyId) throw new ForbiddenException('No organization context found in token');
       // Org user solo puede acceder a eventos de su org

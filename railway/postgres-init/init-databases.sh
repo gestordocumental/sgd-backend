@@ -10,6 +10,7 @@
 #   PG_PORT     = ${{Postgres.PGPORT}}
 #   PG_USER     = ${{Postgres.PGUSER}}
 #   PG_PASSWORD = ${{Postgres.PGPASSWORD}}
+#   PG_DATABASE = ${{Postgres.PGDATABASE}}   ← base de datos por defecto de Railway (no siempre es "postgres")
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -e
@@ -18,13 +19,16 @@ echo ">>> Iniciando creación de bases de datos SGD en Railway PostgreSQL..."
 
 export PGPASSWORD="$PG_PASSWORD"
 
+# Railway crea la BD inicial con el nombre del proyecto, no necesariamente "postgres"
+DEFAULT_DB="${PG_DATABASE:-postgres}"
+
 run_sql() {
-  psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "postgres" -c "$1"
+  psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DEFAULT_DB" -c "$1"
 }
 
 # Crear cada DB solo si no existe (idempotente)
 for DB in auth_db org_db user_db workflow_db; do
-  EXISTS=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "postgres" \
+  EXISTS=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DEFAULT_DB" \
     -tAc "SELECT 1 FROM pg_database WHERE datname='$DB'")
 
   if [ "$EXISTS" = "1" ]; then
