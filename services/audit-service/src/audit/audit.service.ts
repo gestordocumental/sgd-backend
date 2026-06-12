@@ -179,6 +179,7 @@ export class AuditService implements OnModuleInit {
       return { data, total, page, limit };
     } catch (err: unknown) {
       if (isIndexNotFound(err)) {
+        this.logger.warn(`Index "${INDEX}" not found during query — triggering ensureIndex`, 'AuditService');
         void this.ensureIndex();
         return { data: [], total: 0, page, limit };
       }
@@ -205,6 +206,7 @@ export class AuditService implements OnModuleInit {
       }));
     } catch (err: unknown) {
       if (isIndexNotFound(err)) {
+        this.logger.warn(`Index "${INDEX}" not found during export — triggering ensureIndex`, 'AuditService');
         void this.ensureIndex();
         return [];
       }

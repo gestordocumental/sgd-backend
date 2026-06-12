@@ -28,7 +28,8 @@ export class AuditController {
   /**
    * Consulta paginada del registro de auditoría.
    *
-   * - Super admin: ve eventos de plataforma (orgId = null) — gestión de empresas/usuarios a nivel global.
+   * - Super admin sin orgId: ve todos los eventos de todas las organizaciones.
+   * - Super admin con orgId: filtra por esa empresa específica.
    * - Usuario normal: solo puede ver eventos de su propia organización (orgId = companyId del token).
    */
   @Auth()
@@ -93,11 +94,9 @@ export class AuditController {
     const doc = await this.auditService.findById(id);
     if (!doc) throw new NotFoundException('Audit log not found');
 
-    if (me.isSuperAdmin) {
-      // Super admin puede acceder a cualquier evento
-    } else {
+    // Org user solo puede acceder a eventos de su org; super admin puede acceder a cualquier evento.
+    if (!me.isSuperAdmin) {
       if (!me.companyId) throw new ForbiddenException('No organization context found in token');
-      // Org user solo puede acceder a eventos de su org
       if (doc.orgId !== me.companyId) throw new ForbiddenException('Access to this organization is not allowed');
     }
 
