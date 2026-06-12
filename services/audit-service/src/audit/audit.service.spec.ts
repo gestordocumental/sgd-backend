@@ -91,27 +91,17 @@ describe('AuditService', () => {
       expect(es.indices.create).not.toHaveBeenCalled();
     });
 
-    it('logs error (does not throw) when Elasticsearch is unavailable', async () => {
-      es.indices.exists.mockRejectedValue(new Error('ES connection refused'));
+    it('throws when Elasticsearch is unavailable so the module fails to start', async () => {
+      const err = new Error('ES connection refused');
+      es.indices.exists.mockRejectedValue(err);
 
-      await expect(service.onModuleInit()).resolves.toBeUndefined();
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to initialize'),
-        expect.any(String),
-        'AuditService',
-      );
+      await expect(service.onModuleInit()).rejects.toThrow('ES connection refused');
     });
 
-    it('logs error with fallback string when non-Error is thrown', async () => {
+    it('throws non-Error rejections so Railway can restart the service', async () => {
       es.indices.exists.mockRejectedValue('plain string error');
 
-      await service.onModuleInit();
-
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to initialize'),
-        'plain string error',
-        'AuditService',
-      );
+      await expect(service.onModuleInit()).rejects.toBe('plain string error');
     });
   });
 
