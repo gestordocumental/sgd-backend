@@ -431,11 +431,11 @@ describe('UsersController', () => {
   // ─── DELETE /:id/orgs/:orgId/roles/:roleId ───────────────────────────────
 
   describe('removeRoleFromOrg', () => {
-    it('delegates to service.removeRoleFromOrg', async () => {
+    it('delegates to service when caller belongs to the same org', async () => {
       usersService.removeRoleFromOrg.mockResolvedValue(undefined);
 
       await controller.removeRoleFromOrg(
-        { sub: 'caller-id' } as any,
+        { sub: 'caller-id', companyId: 'org-uuid-1' } as any,
         'user-uuid-1',
         'org-uuid-1',
         'role-uuid-1',
@@ -448,17 +448,71 @@ describe('UsersController', () => {
         'caller-id',
       );
     });
+
+    it('allows super-admin to target any org', async () => {
+      usersService.removeRoleFromOrg.mockResolvedValue(undefined);
+
+      await controller.removeRoleFromOrg(
+        { sub: 'caller-id', isSuperAdmin: true } as any,
+        'user-uuid-1',
+        'other-org-uuid',
+        'role-uuid-1',
+      );
+
+      expect(usersService.removeRoleFromOrg).toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when non-super-admin targets a different org', async () => {
+      await expect(
+        controller.removeRoleFromOrg(
+          { sub: 'caller-id', companyId: 'org-uuid-1' } as any,
+          'user-uuid-1',
+          'other-org-uuid',
+          'role-uuid-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(usersService.removeRoleFromOrg).not.toHaveBeenCalled();
+    });
   });
 
   // ─── DELETE /:id/orgs/:orgId ──────────────────────────────────────────────
 
   describe('removeFromOrg', () => {
-    it('delegates to service.removeFromOrg', async () => {
+    it('delegates to service when caller belongs to the same org', async () => {
       usersService.removeFromOrg.mockResolvedValue(undefined);
 
-      await controller.removeFromOrg({ sub: 'caller-id' } as any, 'user-uuid-1', 'org-uuid-1');
+      await controller.removeFromOrg(
+        { sub: 'caller-id', companyId: 'org-uuid-1' } as any,
+        'user-uuid-1',
+        'org-uuid-1',
+      );
 
       expect(usersService.removeFromOrg).toHaveBeenCalledWith('user-uuid-1', 'org-uuid-1', 'caller-id');
+    });
+
+    it('allows super-admin to target any org', async () => {
+      usersService.removeFromOrg.mockResolvedValue(undefined);
+
+      await controller.removeFromOrg(
+        { sub: 'caller-id', isSuperAdmin: true } as any,
+        'user-uuid-1',
+        'other-org-uuid',
+      );
+
+      expect(usersService.removeFromOrg).toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when non-super-admin targets a different org', async () => {
+      await expect(
+        controller.removeFromOrg(
+          { sub: 'caller-id', companyId: 'org-uuid-1' } as any,
+          'user-uuid-1',
+          'other-org-uuid',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(usersService.removeFromOrg).not.toHaveBeenCalled();
     });
   });
 

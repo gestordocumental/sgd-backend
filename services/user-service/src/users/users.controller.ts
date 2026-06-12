@@ -469,12 +469,15 @@ export class UsersController {
   @Delete(":id/orgs/:orgId/roles/:roleId")
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
-  removeRoleFromOrg(
+  async removeRoleFromOrg(
     @JwtPayloadParam() caller: JwtPayload,
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
     @Param("roleId", new ParseUUIDPipe({ version: '4' })) roleId: string,
   ): Promise<void> {
+    if (!caller.isSuperAdmin && caller.companyId !== orgId) {
+      throw new ForbiddenException('You can only remove roles from users in your own organization');
+    }
     return this.usersService.removeRoleFromOrg(id, orgId, roleId, caller.sub);
   }
 
@@ -485,11 +488,14 @@ export class UsersController {
   @Delete(":id/orgs/:orgId")
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
-  removeFromOrg(
+  async removeFromOrg(
     @JwtPayloadParam() caller: JwtPayload,
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
     @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
   ): Promise<void> {
+    if (!caller.isSuperAdmin && caller.companyId !== orgId) {
+      throw new ForbiddenException('You can only remove users from your own organization');
+    }
     return this.usersService.removeFromOrg(id, orgId, caller.sub);
   }
 
