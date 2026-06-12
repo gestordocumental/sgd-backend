@@ -126,12 +126,12 @@ export class UsersController {
     @Query('cursor') cursor?: string,
     @Query('search') search?: string,
     @Query('status') status?: 'active' | 'inactive' | 'deleted' | 'pending',
-  ): Promise<{ data: UserResponseDto[]; nextCursor: string | null; hasMore: boolean }> {
+  ): Promise<{ data: UserResponseDto[]; nextCursor: string | null; hasMore: boolean; total: number }> {
     if (status && !['active', 'inactive', 'deleted', 'pending'].includes(status)) {
       throw new BadRequestException('status must be one of: active, inactive, deleted, pending');
     }
     const result = await this.usersService.findAllSuperAdmin(limit, cursor, search, status);
-    return { data: result.data.map(UserResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore };
+    return { data: result.data.map(UserResponseDto.from), nextCursor: result.nextCursor, hasMore: result.hasMore, total: result.total };
   }
 
   @ApiOperation({ summary: 'Find user by email' })
@@ -458,6 +458,24 @@ export class UsersController {
     @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<UserOrgRoleResponseDto[]> {
     return (await this.usersService.getOrgRoles(id)).map(UserOrgRoleResponseDto.from);
+  }
+
+  @ApiOperation({ summary: 'Remove a specific role from a user in an organization (keeps org membership)' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiParam({ name: 'orgId', format: 'uuid' })
+  @ApiParam({ name: 'roleId', format: 'uuid' })
+  @ApiResponse({ status: 204, description: 'Role removed from user' })
+  @ApiResponse({ status: 404, description: 'User does not have this role in this org' })
+  @Delete(":id/orgs/:orgId/roles/:roleId")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(PermissionModule.USERS, PermissionAction.MANAGE)
+  removeRoleFromOrg(
+    @JwtPayloadParam() caller: JwtPayload,
+    @Param("id", new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
+    @Param("roleId", new ParseUUIDPipe({ version: '4' })) roleId: string,
+  ): Promise<void> {
+    return this.usersService.removeRoleFromOrg(id, orgId, roleId, caller.sub);
   }
 
   @ApiOperation({ summary: 'Remove a user from an organization' })

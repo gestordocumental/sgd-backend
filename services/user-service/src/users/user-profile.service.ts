@@ -106,37 +106,34 @@ export class UserProfileService {
     cursor?: string,
     search?: string,
     status?: 'active' | 'inactive' | 'deleted' | 'pending',
-  ): Promise<{ data: User[]; nextCursor: string | null; hasMore: boolean }> {
+  ): Promise<{ data: User[]; nextCursor: string | null; hasMore: boolean; total: number }> {
     const safeLimit = Math.min(Math.max(1, limit), 100);
     const decoded = cursor ? decodeCursor(cursor) : null;
 
-    const qb = this.usersRepository
-      .createQueryBuilder('u')
-      .withDeleted()
-      .where('u.isSuperAdmin = :isSuperAdmin', { isSuperAdmin: true })
+    const applyFilters = (qb: ReturnType<typeof this.usersRepository.createQueryBuilder>) => {
+      qb.withDeleted().where('u.isSuperAdmin = :isSuperAdmin', { isSuperAdmin: true });
+      if (search?.trim()) {
+        const q = `%${search.trim()}%`;
+        qb.andWhere('(u.email ILIKE :q OR u.firstName ILIKE :q OR u.lastName ILIKE :q)', { q });
+      }
+      if (status === 'deleted') {
+        qb.andWhere('u.deletedAt IS NOT NULL');
+      } else if (status === 'pending') {
+        qb.andWhere('u.deletedAt IS NULL').andWhere('u.registrationStatus = :rs', { rs: 'pending_credentials' });
+      } else if (status === 'active') {
+        qb.andWhere('u.deletedAt IS NULL').andWhere('u.isActive = true');
+      } else if (status === 'inactive') {
+        qb.andWhere('u.deletedAt IS NULL')
+          .andWhere('u.isActive = false')
+          .andWhere('u.registrationStatus != :rs', { rs: 'pending_credentials' });
+      }
+    };
+
+    const qb = this.usersRepository.createQueryBuilder('u')
       .orderBy('u.createdAt', 'DESC')
       .addOrderBy('u.id', 'DESC')
       .take(safeLimit + 1);
-
-    if (search?.trim()) {
-      const q = `%${search.trim()}%`;
-      qb.andWhere(
-        '(u.email ILIKE :q OR u.firstName ILIKE :q OR u.lastName ILIKE :q)',
-        { q },
-      );
-    }
-
-    if (status === 'deleted') {
-      qb.andWhere('u.deletedAt IS NOT NULL');
-    } else if (status === 'pending') {
-      qb.andWhere('u.deletedAt IS NULL').andWhere('u.registrationStatus = :rs', { rs: 'pending_credentials' });
-    } else if (status === 'active') {
-      qb.andWhere('u.deletedAt IS NULL').andWhere('u.isActive = true');
-    } else if (status === 'inactive') {
-      qb.andWhere('u.deletedAt IS NULL')
-        .andWhere('u.isActive = false')
-        .andWhere('u.registrationStatus != :rs', { rs: 'pending_credentials' });
-    }
+    applyFilters(qb);
 
     if (decoded) {
       qb.andWhere(
@@ -145,13 +142,16 @@ export class UserProfileService {
       );
     }
 
-    const rows = await qb.getMany();
+    const countQb = this.usersRepository.createQueryBuilder('u');
+    applyFilters(countQb);
+
+    const [rows, total] = await Promise.all([qb.getMany(), countQb.getCount()]);
     const hasMore = rows.length > safeLimit;
     const data = hasMore ? rows.slice(0, safeLimit) : rows;
     const last = data.at(-1);
     const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
 
-    return { data, nextCursor, hasMore };
+    return { data, nextCursor, hasMore, total };
   }
 
   async update(id: string, dto: UpdateUserDto, actorId?: string, orgId?: string): Promise<User> {

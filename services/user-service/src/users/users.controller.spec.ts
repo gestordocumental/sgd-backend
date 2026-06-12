@@ -73,6 +73,7 @@ describe('UsersController', () => {
             getMyOrgRoles: jest.fn(),
             uploadAvatar: jest.fn(),
             update: jest.fn(),
+            removeRoleFromOrg: jest.fn(),
             removeFromOrg: jest.fn(),
             globalRemove: jest.fn(),
             restore: jest.fn(),
@@ -427,6 +428,28 @@ describe('UsersController', () => {
     });
   });
 
+  // ─── DELETE /:id/orgs/:orgId/roles/:roleId ───────────────────────────────
+
+  describe('removeRoleFromOrg', () => {
+    it('delegates to service.removeRoleFromOrg', async () => {
+      usersService.removeRoleFromOrg.mockResolvedValue(undefined);
+
+      await controller.removeRoleFromOrg(
+        { sub: 'caller-id' } as any,
+        'user-uuid-1',
+        'org-uuid-1',
+        'role-uuid-1',
+      );
+
+      expect(usersService.removeRoleFromOrg).toHaveBeenCalledWith(
+        'user-uuid-1',
+        'org-uuid-1',
+        'role-uuid-1',
+        'caller-id',
+      );
+    });
+  });
+
   // ─── DELETE /:id/orgs/:orgId ──────────────────────────────────────────────
 
   describe('removeFromOrg', () => {
@@ -458,7 +481,7 @@ describe('UsersController', () => {
   describe('findAllSuperAdmin', () => {
     it('returns paginated UserResponseDto items for super admins', async () => {
       const users = [makeUser({ isSuperAdmin: true })];
-      usersService.findAllSuperAdmin.mockResolvedValue({ data: users, nextCursor: null, hasMore: false });
+      usersService.findAllSuperAdmin.mockResolvedValue({ data: users, nextCursor: null, hasMore: false, total: 1 });
 
       const result = await controller.findAllSuperAdmin(20);
 
