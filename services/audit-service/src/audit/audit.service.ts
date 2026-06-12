@@ -30,40 +30,32 @@ export class AuditService implements OnModuleInit {
   }
 
   private async ensureIndex(): Promise<void> {
-    try {
-      const exists = await this.writeClient.indices.exists({ index: INDEX });
-      if (!exists) {
-        await this.writeClient.indices.create({
-          index: INDEX,
-          mappings: {
-            properties: {
-              service:       { type: 'keyword' },
-              actorId:       { type: 'keyword' },
-              orgId:         { type: 'keyword' },
-              action:        { type: 'keyword' },
-              resourceType:  { type: 'keyword' },
-              resourceId:    { type: 'keyword' },
-              resourceName:  { type: 'keyword' },
-              correlationId: { type: 'text', fields: { keyword: { type: 'keyword', ignore_above: 256 } } },
-              ip:            { type: 'keyword' },
-              metadata:      { type: 'object', enabled: false },
-              timestamp:     { type: 'date' },
-              indexedAt:     { type: 'date' },
-            },
+    const exists = await this.writeClient.indices.exists({ index: INDEX });
+    if (!exists) {
+      await this.writeClient.indices.create({
+        index: INDEX,
+        mappings: {
+          properties: {
+            service:       { type: 'keyword' },
+            actorId:       { type: 'keyword' },
+            orgId:         { type: 'keyword' },
+            action:        { type: 'keyword' },
+            resourceType:  { type: 'keyword' },
+            resourceId:    { type: 'keyword' },
+            resourceName:  { type: 'keyword' },
+            correlationId: { type: 'text', fields: { keyword: { type: 'keyword', ignore_above: 256 } } },
+            ip:            { type: 'keyword' },
+            metadata:      { type: 'object', enabled: false },
+            timestamp:     { type: 'date' },
+            indexedAt:     { type: 'date' },
           },
-          settings: {
-            number_of_shards:   1,
-            number_of_replicas: 0,
-          },
-        });
-        this.logger.log(`Elasticsearch index "${INDEX}" created`, 'AuditService');
-      }
-    } catch (err: unknown) {
-      this.logger.error(
-        `Failed to initialize Elasticsearch index "${INDEX}"`,
-        err instanceof Error ? err.stack : String(err),
-        'AuditService',
-      );
+        },
+        settings: {
+          number_of_shards:   1,
+          number_of_replicas: 0,
+        },
+      });
+      this.logger.log(`Elasticsearch index "${INDEX}" created`, 'AuditService');
     }
   }
 
@@ -199,7 +191,9 @@ export class AuditService implements OnModuleInit {
     } catch (err: unknown) {
       if (isIndexNotFound(err)) {
         this.logger.warn(`Index "${INDEX}" not found during query — triggering ensureIndex`, 'AuditService');
-        void this.ensureIndex();
+        void this.ensureIndex().catch((e: unknown) =>
+          this.logger.error('Recovery ensureIndex failed', e instanceof Error ? e.stack : String(e), 'AuditService'),
+        );
         return { data: [], total: 0, page, limit };
       }
       throw err;
@@ -226,7 +220,9 @@ export class AuditService implements OnModuleInit {
     } catch (err: unknown) {
       if (isIndexNotFound(err)) {
         this.logger.warn(`Index "${INDEX}" not found during export — triggering ensureIndex`, 'AuditService');
-        void this.ensureIndex();
+        void this.ensureIndex().catch((e: unknown) =>
+          this.logger.error('Recovery ensureIndex failed', e instanceof Error ? e.stack : String(e), 'AuditService'),
+        );
         return [];
       }
       throw err;
