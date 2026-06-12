@@ -7,6 +7,7 @@ import { StorageService } from '../common/storage/storage.service';
 import { AppLogger, KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sgd/common';
 import { TypologyResponseDto } from '../typologies/dto/typology-response.dto';
 import { ALLOWED_MIMETYPES, MAX_FILE_SIZE, validateMagicBytes } from './document-upload.constants';
+import { ClamavService } from '../clamav/clamav.service';
 
 /**
  * Determine whether `newVer` is exactly one incremental bump above `oldVer`.
@@ -53,6 +54,7 @@ export class DocumentUploadService {
     private readonly storage: StorageService,
     private readonly kafka: KafkaProducerService,
     private readonly logger: AppLogger,
+    private readonly clamav: ClamavService,
   ) {}
 
   private emitAuditLog(params: {
@@ -97,6 +99,10 @@ export class DocumentUploadService {
 
     if (!validateMagicBytes(file.buffer, file.mimetype))
       throw new BadRequestException({ message: 'File content does not match declared type.', errorCode: 'FILE_CONTENT_MISMATCH' });
+
+    const scanResult = await this.clamav.scan(file.buffer);
+    if (!scanResult.clean)
+      throw new BadRequestException({ message: `File rejected: malware detected (${scanResult.threat}).`, errorCode: 'MALWARE_DETECTED' });
 
     const previousDoc = typology.documento?.r2Key ? { ...typology.documento } : null;
     const r2Key = `org/${orgId}/typologies/${typologyId}/${uuidv4()}.${ext}`;
@@ -184,6 +190,10 @@ export class DocumentUploadService {
 
     if (!validateMagicBytes(file.buffer, file.mimetype))
       throw new BadRequestException({ message: 'File content does not match declared type.', errorCode: 'FILE_CONTENT_MISMATCH' });
+
+    const scanResult = await this.clamav.scan(file.buffer);
+    if (!scanResult.clean)
+      throw new BadRequestException({ message: `File rejected: malware detected (${scanResult.threat}).`, errorCode: 'MALWARE_DETECTED' });
 
     const newVersion = dto.version ?? null;
     const oldVersion = old.datosDeclarados.version;
