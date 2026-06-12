@@ -21,7 +21,7 @@ export interface ProvisionPayload {
 export class AuthClientService {
   private readonly authServiceUrl: string;
   private readonly internalToken: string;
-  private readonly timeoutMs = 5_000;
+  private readonly timeoutMs = 15_000;
   private readonly cb: CircuitBreaker;
 
   constructor(
@@ -37,9 +37,9 @@ export class AuthClientService {
       {
         name:                     'auth-service',
         timeout:                  false,   // RxJS timeout() handles per-request timeouts
-        errorThresholdPercentage: 50,
-        resetTimeout:             30_000,
-        volumeThreshold:          3,
+        errorThresholdPercentage: 75,
+        resetTimeout:             10_000,
+        volumeThreshold:          10,
         // 4xx errors are deterministic client/business errors — don't trip the circuit.
         errorFilter: (err: any) => {
           const s = err?.response?.status;

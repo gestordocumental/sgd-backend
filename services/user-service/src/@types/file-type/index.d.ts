@@ -1,4 +1,4 @@
-// Local type shim for file-type v22+ (ESM-only package used via dynamic import).
+// Local type shim for file-type (ESM-only since v17, used via dynamic import).
 // Provides type information without requiring moduleResolution: node16/bundler.
 declare module 'file-type' {
   export interface FileTypeResult {

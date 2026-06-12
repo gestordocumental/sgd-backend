@@ -45,7 +45,7 @@ export class RolesController {
   @ApiResponse({ status: 201, description: 'Role created' })
   @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
   @ApiResponse({ status: 409, description: 'Role name already exists in this organization' })
-  @RequirePermission(PermissionModule.ORGS, PermissionAction.WRITE)
+  @RequirePermission(PermissionModule.ROLES, PermissionAction.WRITE)
   @Post()
   create(@Body() dto: CreateRoleDto, @OrgId() orgId: string) {
     return this.rolesService.create(dto, orgId);
@@ -57,7 +57,7 @@ export class RolesController {
   @ApiResponse({ status: 200, description: 'Role updated' })
   @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
   @ApiResponse({ status: 404, description: 'Role not found' })
-  @RequirePermission(PermissionModule.ORGS, PermissionAction.WRITE)
+  @RequirePermission(PermissionModule.ROLES, PermissionAction.WRITE)
   @Patch(':id')
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -69,7 +69,7 @@ export class RolesController {
 
   @ApiOperation({ summary: 'Delete a role' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @RequirePermission(PermissionModule.ORGS, PermissionAction.WRITE)
+  @RequirePermission(PermissionModule.ROLES, PermissionAction.WRITE)
   @Delete(':id')
   remove(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string, @OrgId() orgId: string) {
     return this.rolesService.remove(id, orgId);
@@ -81,7 +81,7 @@ export class RolesController {
   @ApiResponse({ status: 201, description: 'Permissions replaced' })
   @ApiResponse({ status: 400, description: 'Validation error — invalid permission IDs' })
   @ApiResponse({ status: 404, description: 'Role not found' })
-  @RequirePermission(PermissionModule.ORGS, PermissionAction.WRITE)
+  @RequirePermission(PermissionModule.ROLES, PermissionAction.WRITE)
   @Post(':id/permissions')
   assignPermissions(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -94,7 +94,7 @@ export class RolesController {
   @ApiOperation({ summary: 'Remove a single permission from a role' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiParam({ name: 'permissionId', format: 'uuid' })
-  @RequirePermission(PermissionModule.ORGS, PermissionAction.WRITE)
+  @RequirePermission(PermissionModule.ROLES, PermissionAction.WRITE)
   @Delete(':id/permissions/:permissionId')
   removePermission(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,

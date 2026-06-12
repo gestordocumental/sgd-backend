@@ -33,6 +33,7 @@ module.exports = {
     // (it guards on OTEL_EXPORTER_OTLP_ENDPOINT which is never set in CI).
     '^@opentelemetry/auto-instrumentations-node$': '<rootDir>/__mocks__/otel-auto-instrumentations-noop.js',
     '^@opentelemetry/sdk-node$': '<rootDir>/__mocks__/otel-sdk-noop.js',
+    '^@opentelemetry/exporter-trace-otlp-http$': '<rootDir>/__mocks__/otel-exporter-noop.js',
   },
   coverageThreshold: { global: { statements: 85, lines: 85 } },
   forceExit: true,

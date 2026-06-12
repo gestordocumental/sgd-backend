@@ -1,0 +1,29 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install auth-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/auth-service-values.yaml
+
+image:
+  repository: auth-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
+
+# readinessProbe checks: PostgreSQL + Redis
+# Both must be reachable before the pod accepts traffic.
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5   # generous: DB ping + Redis ping in sequence
+
+resources:
+  requests:
+    cpu: "150m"
+    memory: "192Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"

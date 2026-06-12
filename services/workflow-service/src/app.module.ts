@@ -62,6 +62,8 @@ import { IdempotencyKey } from './workflows/entities/idempotency-key.entity';
             parseInt8: true,
             keepAlive: true,
             keepAliveInitialDelayMillis: 10000,
+            idleTimeoutMillis: 60000,       // drop idle connections after 60s
+            connectionTimeoutMillis: 10000, // fail fast if can't acquire connection within 10s
             max: poolSize,
           },
         };
@@ -69,7 +71,7 @@ import { IdempotencyKey } from './workflows/entities/idempotency-key.entity';
     }),
 
     // HttpModule global para DocumentClientService y UserClientService
-    HttpModule.register({ timeout: 5000 }),
+    HttpModule.register({ timeout: 20000 }),  // must exceed DOCUMENT/USER_SERVICE_TIMEOUT_MS (15s)
 
     WorkflowsModule,
     HealthModule,

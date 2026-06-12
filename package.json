@@ -10,6 +10,14 @@
     "build:common:watch": "npm run build:watch -w packages/common",
     "lint": "eslint 'services/*/src/**/*.ts' 'packages/common/src/**/*.ts' --max-warnings=150"
   },
+  "overrides": {
+    "cross-spawn": "^7.0.6",
+    "underscore": "^1.13.8",
+    "@pact-foundation/pact-core": {
+      "cross-spawn": "^7.0.6",
+      "underscore": "^1.13.8"
+    }
+  },
   "devDependencies": {
     "@nestjs/mongoose": "^11.0.4",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
@@ -17,6 +25,7 @@
     "eslint": "^9.0.0",
     "eslint-plugin-security": "^3.0.0",
     "mongoose": "^8.14.1",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "underscore": "^1.13.8"
   }
 }

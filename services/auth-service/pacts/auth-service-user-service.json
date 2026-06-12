@@ -1,0 +1,544 @@
+{
+  "consumer": {
+    "name": "auth-service"
+  },
+  "interactions": [
+    {
+      "description": "a profile info request with an invalid internal token",
+      "providerStates": [
+        {
+          "name": "internal token is invalid"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/users/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+      },
+      "response": {
+        "body": {
+          "message": "Unauthorized"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 401
+      }
+    },
+    {
+      "description": "a companies request for a non-existent user",
+      "providerStates": [
+        {
+          "name": "user does not exist"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/users/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/companies"
+      },
+      "response": {
+        "body": {
+          "message": "Not Found"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 404
+      }
+    },
+    {
+      "description": "a profile info request for a non-existent user",
+      "providerStates": [
+        {
+          "name": "user does not exist"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/users/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+      },
+      "response": {
+        "body": {
+          "message": "Not Found"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 404
+      }
+    },
+    {
+      "description": "an effective-permissions request for a non-existent user",
+      "providerStates": [
+        {
+          "name": "user does not exist"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "query": {}
+        },
+        "method": "GET",
+        "path": "/api/v1/users/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/effective-permissions",
+        "query": {
+          "companyId": [
+            "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380b22"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "message": "Not Found"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 404
+      }
+    },
+    {
+      "description": "a request for user profile info",
+      "providerStates": [
+        {
+          "name": "user exists"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/users/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+      },
+      "response": {
+        "body": {
+          "email": "user@example.com",
+          "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+          "isActive": true,
+          "isSuperAdmin": false,
+          "registrationStatus": "active"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.email": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.isActive": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.isSuperAdmin": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.registrationStatus": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "a request for the orgs a user belongs to",
+      "providerStates": [
+        {
+          "name": "user exists and belongs to at least one org"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/users/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/companies"
+      },
+      "response": {
+        "body": [
+          "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380b22"
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "a request for the effective permissions of a user in an org",
+      "providerStates": [
+        {
+          "name": "user has at least one permission in org"
+        }
+      ],
+      "request": {
+        "headers": {
+          "x-internal-token": "pact-test-token"
+        },
+        "matchingRules": {
+          "header": {
+            "x-internal-token": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "query": {}
+        },
+        "method": "GET",
+        "path": "/api/v1/users/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/effective-permissions",
+        "query": {
+          "companyId": [
+            "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380b22"
+          ]
+        }
+      },
+      "response": {
+        "body": [
+          {
+            "action": "read",
+            "module": "documents"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].action": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].module": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "status": {}
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "12.5.2"
+    },
+    "pactRust": {
+      "ffi": "0.4.20",
+      "models": "1.2.0"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "user-service"
+  }
+}

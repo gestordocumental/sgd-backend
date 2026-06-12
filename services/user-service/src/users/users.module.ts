@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
+import { UserProfileService } from './user-profile.service';
+import { UserOrgService } from './user-org.service';
+import { UserRegistrationService } from './user-registration.service';
 import { UsersController } from './users.controller';
 import { InternalUsersController } from './internal-users.controller';
 import { AuthClientModule } from '../auth-client/auth-client.module';
@@ -22,7 +25,15 @@ import { OrgClientModule } from '../common/org-client/org-client.module';
     OrgClientModule,
   ],
   controllers: [UsersController, InternalUsersController],
-  providers: [UsersService, PermissionsGuard, SuperAdminSeeder, InternalGuard],
+  providers: [
+    UserProfileService,
+    UserOrgService,
+    UserRegistrationService,
+    UsersService,
+    PermissionsGuard,
+    SuperAdminSeeder,
+    InternalGuard,
+  ],
   exports: [UsersService],
 })
 export class UsersModule {}

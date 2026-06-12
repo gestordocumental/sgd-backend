@@ -33,9 +33,9 @@ const PERMISSIONS_CATALOG: {
   { module: PermissionModule.USERS, action: PermissionAction.DELETE, description: 'Delete users' },
   { module: PermissionModule.USERS, action: PermissionAction.MANAGE, description: 'Full user management' },
 
-  // ORGS
-  { module: PermissionModule.ORGS, action: PermissionAction.READ,  description: 'View organization information' },
-  { module: PermissionModule.ORGS, action: PermissionAction.WRITE, description: 'Edit organization information' },
+  // ROLES
+  { module: PermissionModule.ROLES, action: PermissionAction.READ,  description: 'View and manage roles' },
+  { module: PermissionModule.ROLES, action: PermissionAction.WRITE, description: 'Create and edit roles' },
 
   // ORG_STRUCTURE
   { module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.READ,   description: 'View organizational structure' },

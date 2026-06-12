@@ -1,9 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, ConflictException, HttpException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { IsNull, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 import { UsersService } from './users.service';
+import { UserProfileService } from './user-profile.service';
+import { UserOrgService } from './user-org.service';
+import { UserRegistrationService } from './user-registration.service';
 import { User, RegistrationStatus } from './entities/user.entity';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role, RoleScope, SystemRoleName } from '../roles/entities/role.entity';
@@ -70,12 +73,12 @@ describe('UsersService', () => {
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
   let roleRepo: jest.Mocked<Repository<Role>>;
   let authClient: jest.Mocked<AuthClientService>;
-  let redis: { getdel: jest.Mock; setex: jest.Mock; del: jest.Mock };
+  let redis: { get: jest.Mock; getdel: jest.Mock; setex: jest.Mock; del: jest.Mock };
   let kafkaProducer: jest.Mocked<Pick<KafkaProducerService, 'emit' | 'emitSafe'>>;
   let orgClient: jest.Mocked<Pick<OrgClientService, 'validateOrgStructure' | 'resolveNamesById'>>;
 
   beforeEach(async () => {
-    redis = { getdel: jest.fn(), setex: jest.fn(), del: jest.fn().mockResolvedValue(1) };
+    redis = { get: jest.fn(), getdel: jest.fn(), setex: jest.fn(), del: jest.fn().mockResolvedValue(1) };
     kafkaProducer = {
       emit: jest.fn().mockResolvedValue(undefined),
       emitSafe: jest.fn(),
@@ -84,6 +87,9 @@ describe('UsersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
+        UserProfileService,
+        UserOrgService,
+        UserRegistrationService,
         {
           provide: getRepositoryToken(User),
           useValue: {
@@ -314,6 +320,99 @@ describe('UsersService', () => {
       expect(uorRepo.create).not.toHaveBeenCalled();
       expect(uorRepo.save).not.toHaveBeenCalled();
     });
+
+    it('throws NotFoundException and does not persist the user when roleId does not exist', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1', roleId: 'nonexistent-role-uuid' };
+
+      usersRepo.findOne.mockResolvedValue(null);
+      roleRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.create(dto)).rejects.toThrow(NotFoundException);
+      expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('resends invitation when pending user has an active membership in the calling org', async () => {
+      const dto = { email: 'pending@example.com', position: 'Dev' };
+      const pendingUser = makeUser({
+        email: dto.email,
+        registrationStatus: RegistrationStatus.PENDING_CREDENTIALS,
+      });
+      const uor = makeUor({ userId: pendingUser.id, orgId: 'org-uuid-1' });
+
+      usersRepo.findOne.mockResolvedValue(pendingUser);
+      uorRepo.findOne.mockResolvedValue(uor);
+      redis.setex.mockResolvedValue('OK');
+
+      const result = await service.create(dto, undefined, 'org-uuid-1');
+
+      expect(result.invitationResent).toBe(true);
+      expect(result.user).toEqual(pendingUser);
+      expect(uorRepo.findOne).toHaveBeenCalledWith({
+        where: { userId: pendingUser.id, orgId: 'org-uuid-1', removedAt: IsNull() },
+      });
+    });
+
+    it('throws ConflictException when pending user has only a soft-removed membership in the calling org', async () => {
+      const dto = { email: 'pending@example.com', position: 'Dev' };
+      const pendingUser = makeUser({
+        email: dto.email,
+        registrationStatus: RegistrationStatus.PENDING_CREDENTIALS,
+      });
+
+      usersRepo.findOne.mockResolvedValue(pendingUser);
+      uorRepo.findOne.mockResolvedValue(null); // active membership not found
+
+      await expect(service.create(dto, undefined, 'org-uuid-1')).rejects.toThrow(ConflictException);
+      expect(uorRepo.findOne).toHaveBeenCalledWith({
+        where: { userId: pendingUser.id, orgId: 'org-uuid-1', removedAt: IsNull() },
+      });
+    });
+  });
+
+  // ─── resendInvitation ─────────────────────────────────────────────────────
+
+  describe('resendInvitation', () => {
+    it('resends invitation when caller org has an active membership for the user', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.PENDING_CREDENTIALS });
+      const uor = makeUor({ userId: user.id, orgId: 'org-uuid-1' });
+
+      usersRepo.findOne.mockResolvedValue(user);
+      uorRepo.findOne.mockResolvedValue(uor);
+      redis.setex.mockResolvedValue('OK');
+
+      const result = await service.resendInvitation(user.id, 'org-uuid-1');
+
+      expect(uorRepo.findOne).toHaveBeenCalledWith({
+        where: { userId: user.id, orgId: 'org-uuid-1', removedAt: IsNull() },
+      });
+      expect(result.invitationToken).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it('throws ConflictException when caller org has only a soft-removed membership', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.PENDING_CREDENTIALS });
+
+      usersRepo.findOne.mockResolvedValue(user);
+      uorRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.resendInvitation(user.id, 'org-uuid-1')).rejects.toThrow(ConflictException);
+      expect(uorRepo.findOne).toHaveBeenCalledWith({
+        where: { userId: user.id, orgId: 'org-uuid-1', removedAt: IsNull() },
+      });
+    });
+
+    it('throws NotFoundException when user does not exist', async () => {
+      usersRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.resendInvitation('bad-id', 'org-uuid-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ConflictException when user has already completed registration', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(service.resendInvitation(user.id, 'org-uuid-1')).rejects.toThrow(ConflictException);
+      expect(uorRepo.findOne).not.toHaveBeenCalled();
+    });
   });
 
   // ─── findAll ──────────────────────────────────────────────────────────────
@@ -472,6 +571,15 @@ describe('UsersService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('throws BadRequestException when departamentoId is cleared but user has an existing areaId', async () => {
+      const user = makeUser({ departamentoId: 'dept-uuid', areaId: 'area-uuid', cargoId: null });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(
+        service.update(user.id, { departamentoId: null }, undefined, 'org-uuid'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('skips org-structure validation when all three fields are being cleared (set to null)', async () => {
       const user = makeUser({ departamentoId: 'dept-uuid', areaId: 'area-uuid', cargoId: 'cargo-uuid' });
       const dto = { departamentoId: null, areaId: null, cargoId: null };
@@ -485,9 +593,9 @@ describe('UsersService', () => {
     });
   });
 
-  // ─── remove ───────────────────────────────────────────────────────────────
+  // ─── globalRemove ─────────────────────────────────────────────────────────
 
-  describe('remove', () => {
+  describe('globalRemove', () => {
     it('soft-deletes the user and disables credentials in auth-service', async () => {
       const user = makeUser();
 
@@ -495,7 +603,7 @@ describe('UsersService', () => {
       usersRepo.softRemove.mockResolvedValue(undefined as any);
       authClient.disableCredentials.mockResolvedValue(undefined);
 
-      await service.remove(user.id);
+      await service.globalRemove(user.id);
 
       expect(usersRepo.softRemove).toHaveBeenCalledWith(user);
       expect(authClient.disableCredentials).toHaveBeenCalledWith(user.id);
@@ -504,7 +612,19 @@ describe('UsersService', () => {
     it('throws NotFoundException when the user does not exist', async () => {
       usersRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.remove('bad-id')).rejects.toThrow(NotFoundException);
+      await expect(service.globalRemove('bad-id')).rejects.toThrow(NotFoundException);
+    });
+
+    it('compensates by re-enabling credentials when softRemove fails', async () => {
+      const user = makeUser();
+
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.disableCredentials.mockResolvedValue(undefined);
+      usersRepo.softRemove.mockRejectedValue(new Error('DB error'));
+      authClient.enableCredentials.mockResolvedValue(undefined);
+
+      await expect(service.globalRemove(user.id)).rejects.toThrow('DB error');
+      expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
     });
   });
 
@@ -523,6 +643,126 @@ describe('UsersService', () => {
       expect(usersRepo.restore).toHaveBeenCalledWith(user.id);
       expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
       expect(result).toEqual(user);
+    });
+
+    it('compensates by disabling credentials when restore fails', async () => {
+      authClient.enableCredentials.mockResolvedValue(undefined);
+      usersRepo.restore.mockRejectedValue(new Error('DB error'));
+      authClient.disableCredentials.mockResolvedValue(undefined);
+
+      await expect(service.restore('user-uuid-1')).rejects.toThrow('DB error');
+      expect(authClient.disableCredentials).toHaveBeenCalledWith('user-uuid-1');
+    });
+  });
+
+  // ─── disable ──────────────────────────────────────────────────────────────
+
+  describe('disable', () => {
+    it('revokes auth access and marks user inactive', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
+      const saved = { ...user, isActive: false };
+
+      uorRepo.findOne.mockResolvedValue(makeUor());
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.disableCredentials.mockResolvedValue(undefined);
+      authClient.revokeAllTokens.mockResolvedValue(undefined);
+      usersRepo.save.mockResolvedValue(saved as any);
+
+      const result = await service.disable(user.id, { actorId: 'actor', companyId: 'org-uuid-1' });
+
+      expect(authClient.disableCredentials).toHaveBeenCalledWith(user.id);
+      expect(authClient.revokeAllTokens).toHaveBeenCalledWith(user.id);
+      expect(usersRepo.save).toHaveBeenCalled();
+      expect(result.isActive).toBe(false);
+    });
+
+    it('compensates by re-enabling credentials when DB save fails', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
+
+      uorRepo.findOne.mockResolvedValue(makeUor());
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.disableCredentials.mockResolvedValue(undefined);
+      authClient.revokeAllTokens.mockResolvedValue(undefined);
+      usersRepo.save.mockRejectedValue(new Error('DB save failed'));
+      authClient.enableCredentials.mockResolvedValue(undefined);
+
+      await expect(service.disable(user.id, { companyId: 'org-uuid-1' })).rejects.toThrow('DB save failed');
+      expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
+    });
+
+    it('throws ConflictException when user is not in ACTIVE status', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.PENDING_CREDENTIALS });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(service.disable(user.id, { isSuperAdmin: true })).rejects.toThrow(ConflictException);
+      expect(authClient.disableCredentials).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when non-superadmin tries to disable a user outside their org', async () => {
+      uorRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.disable('user-uuid-1', { companyId: 'org-uuid-1' })).rejects.toThrow(ForbiddenException);
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when non-superadmin caller has no companyId', async () => {
+      await expect(service.disable('user-uuid-1', {})).rejects.toThrow(ForbiddenException);
+      expect(uorRepo.findOne).not.toHaveBeenCalled();
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── enable ───────────────────────────────────────────────────────────────
+
+  describe('enable', () => {
+    it('restores auth access and marks user active', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE, isActive: false });
+      const saved = { ...user, isActive: true };
+
+      uorRepo.findOne.mockResolvedValue(makeUor());
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.enableCredentials.mockResolvedValue(undefined);
+      usersRepo.save.mockResolvedValue(saved as any);
+
+      const result = await service.enable(user.id, { actorId: 'actor', companyId: 'org-uuid-1' });
+
+      expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
+      expect(usersRepo.save).toHaveBeenCalled();
+      expect(result.isActive).toBe(true);
+    });
+
+    it('compensates by disabling credentials when DB save fails', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE, isActive: false });
+
+      uorRepo.findOne.mockResolvedValue(makeUor());
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.enableCredentials.mockResolvedValue(undefined);
+      usersRepo.save.mockRejectedValue(new Error('DB save failed'));
+      authClient.disableCredentials.mockResolvedValue(undefined);
+
+      await expect(service.enable(user.id, { companyId: 'org-uuid-1' })).rejects.toThrow('DB save failed');
+      expect(authClient.disableCredentials).toHaveBeenCalledWith(user.id);
+    });
+
+    it('throws ConflictException when user is not in ACTIVE status', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.PENDING_CREDENTIALS });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(service.enable(user.id, { isSuperAdmin: true })).rejects.toThrow(ConflictException);
+      expect(authClient.enableCredentials).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when non-superadmin tries to enable a user outside their org', async () => {
+      uorRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.enable('user-uuid-1', { companyId: 'org-uuid-1' })).rejects.toThrow(ForbiddenException);
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when non-superadmin caller has no companyId', async () => {
+      await expect(service.enable('user-uuid-1', {})).rejects.toThrow(ForbiddenException);
+      expect(uorRepo.findOne).not.toHaveBeenCalled();
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
     });
   });
 
@@ -634,6 +874,7 @@ describe('UsersService', () => {
       const uor = makeUor();
 
       usersRepo.findOne.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(makeRole({ id: 'role-uuid-1' }));
       uorRepo.findOne.mockResolvedValue(null);
       uorRepo.create.mockReturnValue(uor);
       uorRepo.save.mockResolvedValue(uor);
@@ -654,9 +895,20 @@ describe('UsersService', () => {
       const dto = { orgId: 'org-uuid-1', roleId: 'role-uuid-1' };
 
       usersRepo.findOne.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(makeRole({ id: 'role-uuid-1' }));
       uorRepo.findOne.mockResolvedValue(makeUor());
 
       await expect(service.assignOrg(user.id, dto, 'admin')).rejects.toThrow(ConflictException);
+    });
+
+    it('throws NotFoundException when roleId does not exist', async () => {
+      const user = makeUser();
+      const dto = { orgId: 'org-uuid-1', roleId: 'role-uuid-nonexistent' };
+
+      usersRepo.findOne.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.assignOrg(user.id, dto, 'admin')).rejects.toThrow(NotFoundException);
     });
 
     it('throws NotFoundException when user does not exist', async () => {
@@ -923,43 +1175,59 @@ describe('UsersService', () => {
       password: 'Str0ng@Pass',
     };
 
-    it('updates profile, provisions credentials, deletes token and returns UserResponseDto', async () => {
+    it('provisions credentials, commits profile+activation in one transaction, then deletes token', async () => {
       const user = makeUser({ firstName: dto.firstName, lastName: dto.lastName });
+      const completedUser = { ...user, registrationStatus: RegistrationStatus.ACTIVE, isActive: true };
 
-      redis.getdel.mockResolvedValue(user.id);
-      usersRepo.findOne.mockResolvedValue(user);
-      usersRepo.save.mockResolvedValue(user);
+      redis.get.mockResolvedValueOnce(user.id).mockResolvedValue(null);
+      usersRepo.findOne.mockResolvedValueOnce(user).mockResolvedValue(completedUser as any);
       authClient.provisionCredentials.mockResolvedValue(undefined);
 
       const result = await service.completeRegistration(dto);
 
       const tokenHash = createHash('sha256').update(validToken).digest('hex');
-      expect(redis.getdel).toHaveBeenCalledWith(`invitation:${tokenHash}`);
+      expect(redis.get).toHaveBeenCalledWith(`invitation:${tokenHash}`);
       expect(authClient.provisionCredentials).toHaveBeenCalledWith({
         userId: user.id,
         email: user.email,
         password: dto.password,
       });
+      expect(redis.del).toHaveBeenCalledWith(`invitation:${tokenHash}`);
+      expect(redis.del).toHaveBeenCalledWith(`invitation:${validToken}`);
       expect(result.email).toBe(user.email);
     });
 
     it('throws NotFoundException when the token does not exist in Redis', async () => {
-      redis.getdel.mockResolvedValue(null);
+      redis.get.mockResolvedValue(null);
 
       await expect(service.completeRegistration(dto)).rejects.toThrow(NotFoundException);
     });
 
-    it('does not delete the token when provisionCredentials fails', async () => {
+    it('preserves the token when provisionCredentials fails so the user can retry', async () => {
       const user = makeUser();
 
-      redis.getdel.mockResolvedValue(user.id);
+      redis.get.mockResolvedValueOnce(user.id).mockResolvedValue(null);
       usersRepo.findOne.mockResolvedValue(user);
-      usersRepo.save.mockResolvedValue(user);
       authClient.provisionCredentials.mockRejectedValue(new Error('auth-service down'));
 
       await expect(service.completeRegistration(dto)).rejects.toThrow(
         'Error creating access credentials',
       );
+      expect(redis.del).not.toHaveBeenCalled();
+    });
+
+    it('preserves the token when the DB transaction fails so the user can retry', async () => {
+      const user = makeUser();
+
+      redis.get.mockResolvedValueOnce(user.id).mockResolvedValue(null);
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.provisionCredentials.mockResolvedValue(undefined);
+      (usersRepo as any).manager = {
+        transaction: jest.fn().mockRejectedValue(new Error('DB error')),
+      };
+
+      await expect(service.completeRegistration(dto)).rejects.toThrow('DB error');
+      expect(redis.del).not.toHaveBeenCalled();
     });
   });
 
@@ -1002,27 +1270,16 @@ describe('UsersService', () => {
     });
   });
 
-  // ─── remove (additional paths) ────────────────────────────────────────────
+  // ─── globalRemove (additional paths) ─────────────────────────────────────
 
-  describe('remove (additional paths)', () => {
-    it('delegates to removeFromOrg when callerOrgId is provided', async () => {
-      const user = makeUser();
-      usersRepo.findOne.mockResolvedValue(user);
-      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
-
-      await service.remove(user.id, 'org-uuid-1');
-
-      expect(usersRepo.softRemove).not.toHaveBeenCalled();
-      expect(uorRepo.update).toHaveBeenCalled();
-    });
-
-    it('emits audit log on global delete when actorId is provided', async () => {
+  describe('globalRemove (additional paths)', () => {
+    it('emits audit log when actorId is provided', async () => {
       const user = makeUser();
       usersRepo.findOne.mockResolvedValue(user);
       usersRepo.softRemove.mockResolvedValue(undefined as any);
       authClient.disableCredentials.mockResolvedValue(undefined);
 
-      await service.remove(user.id, undefined, 'actor-uuid');
+      await service.globalRemove(user.id, 'actor-uuid');
 
       expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
         expect.any(String),
@@ -1214,9 +1471,8 @@ describe('UsersService', () => {
 
     it('wraps a 4xx HttpException as HttpException("Invalid registration data")', async () => {
       const user = makeUser();
-      redis.getdel.mockResolvedValue(user.id);
+      redis.get.mockResolvedValueOnce(user.id).mockResolvedValue(null);
       usersRepo.findOne.mockResolvedValue(user);
-      usersRepo.save.mockResolvedValue(user);
       authClient.provisionCredentials.mockRejectedValue(new BadRequestException('weak password'));
 
       const p = service.completeRegistration(dto);
@@ -1226,9 +1482,8 @@ describe('UsersService', () => {
 
     it('wraps a 5xx HttpException as InternalServerErrorException', async () => {
       const user = makeUser();
-      redis.getdel.mockResolvedValue(user.id);
+      redis.get.mockResolvedValueOnce(user.id).mockResolvedValue(null);
       usersRepo.findOne.mockResolvedValue(user);
-      usersRepo.save.mockResolvedValue(user);
       authClient.provisionCredentials.mockRejectedValue(
         new InternalServerErrorException('auth-service fail'),
       );
