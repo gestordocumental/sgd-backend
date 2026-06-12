@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, GatewayTimeoutException, ServiceUnavailableException, BadRequestException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, GatewayTimeoutException, ServiceUnavailableException, HttpException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
@@ -180,7 +180,9 @@ export class OrgClientService {
         message: `← [org-service] POST /internal/structure/resolve-by-ids ${status ?? 500}: ${message}`,
       });
 
-      if (status === 400) throw new BadRequestException(message);
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        throw new HttpException(message, status);
+      }
       throw new InternalServerErrorException(
         `Could not resolve org structure by IDs from org-service: ${message}`,
       );

@@ -445,7 +445,23 @@ export class AuthService {
       throw new UnauthorizedException("User not found or inactive");
     }
 
-    const userInfo = await this.getCachedUserInfo(payload.sub);
+    let userInfo: { isSuperAdmin: boolean };
+    try {
+      userInfo = await this.getCachedUserInfo(payload.sub);
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        throw new UnauthorizedException("Invalid credentials");
+      }
+      throw err;
+    }
+
+    if (!userInfo.isSuperAdmin) {
+      const companies = await this.getCachedUserCompanies(payload.sub);
+      if (companies.length === 0) {
+        throw new UnauthorizedException("Scope revoked");
+      }
+    }
+
     return this.generateTokenPair(credential, {
       isSuperAdmin: userInfo.isSuperAdmin || undefined,
     });

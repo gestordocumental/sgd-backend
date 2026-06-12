@@ -24,7 +24,8 @@ export class ClamavService {
     this.host      = config.get<string>('CLAMAV_HOST', 'localhost');
     this.port      = config.get<number>('CLAMAV_PORT', 3310);
     this.timeoutMs = config.get<number>('CLAMAV_TIMEOUT_MS', 15000);
-    this.required  = config.get<string>('CLAMAV_REQUIRED', 'false') === 'true';
+    const requiredRaw = String(config.get('CLAMAV_REQUIRED', 'false')).trim().toLowerCase();
+    this.required = ['true', '1', 'yes', 'on'].includes(requiredRaw);
   }
 
   /**
@@ -72,14 +73,22 @@ export class ClamavService {
 
       socket.on('end', () => {
         socket.destroy();
-        // Response: "stream: OK" or "stream: <ThreatName> FOUND"
         const response = Buffer.concat(chunks).toString().replace(/\0/g, '').trim();
-        if (response.endsWith('OK')) {
+
+        if (/:\s*OK$/i.test(response)) {
           resolve({ clean: true });
-        } else {
-          const match = response.match(/stream: (.+) FOUND/);
-          resolve({ clean: false, threat: match?.[1] ?? response });
+          return;
         }
+
+        const found = response.match(/:\s*(.+)\s+FOUND$/i);
+        if (found) {
+          resolve({ clean: false, threat: found[1] });
+          return;
+        }
+
+        // Covers "stream: ... ERROR" and any other unexpected response.
+        // Rejected here so the outer scan() applies the fail-open/fail-closed policy.
+        reject(new Error(`Unexpected ClamAV response: ${response || '<empty>'}`));
       });
 
       socket.on('timeout', () => {

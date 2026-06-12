@@ -5,10 +5,23 @@
 # in AuditService.ensureIndex(). Run this against any environment where the index
 # was auto-created with dynamic mapping (the RC-3 incident pattern).
 #
+# !! MAINTENANCE WINDOW REQUIRED !!
+#
+#   Steps 7-8 delete the original index and recreate it.  During that window
+#   (typically < 1 s) any write from audit-service will fail with
+#   index_not_found_exception — or, if Elasticsearch auto-creation is enabled,
+#   will recreate the index with dynamic mapping, reintroducing the RC-3 bug.
+#
+#   Before running this script you MUST:
+#     1. Scale audit-service to 0 replicas (Railway: pause the service).
+#     2. Confirm you have read this warning by setting MAINTENANCE_CONFIRMED=yes.
+#     3. After the script completes, scale audit-service back up.
+#
 # Usage:
 #   ELASTICSEARCH_URL=https://... \
 #   ELASTICSEARCH_USERNAME=elastic \
 #   ELASTICSEARCH_PASSWORD=secret \
+#   MAINTENANCE_CONFIRMED=yes \
 #   bash reindex-audit-logs.sh
 #
 # The script is idempotent: if the mapping is already correct it exits cleanly.
@@ -20,16 +33,29 @@ ES_URL="${ELASTICSEARCH_URL:?ELASTICSEARCH_URL is required}"
 ES_USER="${ELASTICSEARCH_USERNAME:?ELASTICSEARCH_USERNAME is required}"
 ES_PASS="${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}"
 
+if [ "${MAINTENANCE_CONFIRMED:-}" != "yes" ]; then
+  echo "[ERROR] This script requires a maintenance window. Scale audit-service to 0 replicas first," >&2
+  echo "        then re-run with MAINTENANCE_CONFIRMED=yes." >&2
+  exit 1
+fi
+
+command -v python3 >/dev/null 2>&1 || { echo "[ERROR] python3 is required but not installed" >&2; exit 1; }
+command -v curl    >/dev/null 2>&1 || { echo "[ERROR] curl is required but not installed"    >&2; exit 1; }
+
 INDEX="audit-logs"
 TEMP_INDEX="audit-logs-reindex-tmp"
 
-AUTH="-u ${ES_USER}:${ES_PASS}"
-HEADERS='-H "Content-Type: application/json"'
+NETRC_FILE=$(mktemp)
+trap "rm -f ${NETRC_FILE}" EXIT
+chmod 600 "${NETRC_FILE}"
+ES_HOST=$(echo "${ES_URL}" | sed -E 's|https?://([^/]+).*|\1|')
+printf 'machine %s\nlogin %s\npassword %s\n' "${ES_HOST}" "${ES_USER}" "${ES_PASS}" > "${NETRC_FILE}"
+AUTH=(--netrc-file "${NETRC_FILE}")
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 es() {
-  curl -fsSL $AUTH -H "Content-Type: application/json" "$@"
+  curl -fsSL "${AUTH[@]}" -H "Content-Type: application/json" "$@"
 }
 
 log()  { echo "[$(date -u +%H:%M:%S)] $*"; }
@@ -38,7 +64,7 @@ fail() { echo "[ERROR] $*" >&2; exit 1; }
 # ── 1. check if index exists ───────────────────────────────────────────────────
 
 log "Checking index '${INDEX}'..."
-STATUS=$(curl -o /dev/null -w "%{http_code}" -sSL $AUTH "${ES_URL}/${INDEX}")
+STATUS=$(curl -o /dev/null -w "%{http_code}" -sSL "${AUTH[@]}" "${ES_URL}/${INDEX}")
 
 if [ "$STATUS" = "404" ]; then
   log "Index does not exist — creating with correct mapping."
@@ -88,7 +114,7 @@ log "Documents to migrate: ${DOC_COUNT}"
 
 # ── 4. delete temp index if it exists from a previous failed run ───────────────
 
-TEMP_STATUS=$(curl -o /dev/null -w "%{http_code}" -sSL $AUTH "${ES_URL}/${TEMP_INDEX}")
+TEMP_STATUS=$(curl -o /dev/null -w "%{http_code}" -sSL "${AUTH[@]}" "${ES_URL}/${TEMP_INDEX}")
 if [ "$TEMP_STATUS" != "404" ]; then
   log "Removing stale temp index '${TEMP_INDEX}'..."
   es -X DELETE "${ES_URL}/${TEMP_INDEX}" > /dev/null
@@ -130,13 +156,15 @@ TASK=$(es -X POST "${ES_URL}/_reindex?wait_for_completion=true" -d "{
 
 MIGRATED=$(echo "$TASK" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('total',0))")
 FAILURES=$(echo "$TASK" | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('failures',[])))")
+[[ "$MIGRATED" =~ ^[0-9]+$ ]] || fail "Failed to parse reindex result (MIGRATED='${MIGRATED}')"
+[[ "$FAILURES" =~ ^[0-9]+$ ]] || fail "Failed to parse reindex result (FAILURES='${FAILURES}')"
 
 log "Reindex completed: ${MIGRATED} documents moved, ${FAILURES} failures."
 [ "$FAILURES" -gt 0 ] && fail "Reindex had ${FAILURES} failures — aborting. Original index untouched."
 
 # ── 7. delete original index ───────────────────────────────────────────────────
 
-log "Deleting original index '${INDEX}'..."
+log "MAINTENANCE WINDOW OPEN — audit-service must be stopped. Deleting '${INDEX}'..."
 es -X DELETE "${ES_URL}/${INDEX}" > /dev/null
 
 # ── 8. create original index with correct mapping ──────────────────────────────
@@ -164,6 +192,7 @@ es -X PUT "${ES_URL}/${INDEX}" -d '{
     "number_of_replicas": 0
   }
 }' > /dev/null
+log "MAINTENANCE WINDOW CLOSED — '${INDEX}' exists again with correct mapping. audit-service can be restarted."
 
 # ── 9. reindex temp → original ─────────────────────────────────────────────────
 
@@ -175,6 +204,8 @@ TASK2=$(es -X POST "${ES_URL}/_reindex?wait_for_completion=true" -d "{
 
 FINAL=$(echo "$TASK2" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('total',0))")
 FAILS2=$(echo "$TASK2" | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('failures',[])))")
+[[ "$FINAL"  =~ ^[0-9]+$ ]] || fail "Failed to parse reindex result (FINAL='${FINAL}')"
+[[ "$FAILS2" =~ ^[0-9]+$ ]] || fail "Failed to parse reindex result (FAILS2='${FAILS2}')"
 
 [ "$FAILS2" -gt 0 ] && fail "${FAILS2} failures restoring to '${INDEX}'. Data is intact in '${TEMP_INDEX}'."
 
@@ -183,4 +214,7 @@ FAILS2=$(echo "$TASK2" | python3 -c "import sys,json; r=json.load(sys.stdin); pr
 log "Deleting temp index '${TEMP_INDEX}'..."
 es -X DELETE "${ES_URL}/${TEMP_INDEX}" > /dev/null
 
-log "Done. ${FINAL}/${DOC_COUNT} documents migrated to '${INDEX}' with correct mapping."
+if [ "$FINAL" -ne "$DOC_COUNT" ]; then
+  log "Warning: Document count changed during reindex (initial: ${DOC_COUNT}, final: ${FINAL}). This may indicate ongoing writes during migration."
+fi
+log "Done. ${FINAL} documents migrated to '${INDEX}' with correct mapping."
