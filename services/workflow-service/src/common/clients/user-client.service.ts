@@ -50,9 +50,9 @@ export class UserClientService {
       {
         name:                     'user-service',
         timeout:                  false,   // RxJS timeout() handles per-request timeouts
-        errorThresholdPercentage: 50,
-        resetTimeout:             30_000,
-        volumeThreshold:          3,
+        errorThresholdPercentage: 75,
+        resetTimeout:             10_000,
+        volumeThreshold:          10,
       },
     );
     this.cb.on('open',     () => this.logger.warn('[circuit] user-service OPEN — failing fast', 'UserClientService'));

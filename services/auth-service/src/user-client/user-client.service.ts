@@ -15,7 +15,7 @@ import CircuitBreaker = require('opossum');
 export class UserClientService {
   private readonly userServiceUrl: string;
   private readonly internalToken: string;
-  private readonly timeoutMs = 3_000;
+  private readonly timeoutMs = 15_000;
   private readonly cb: CircuitBreaker;
 
   constructor(
@@ -33,9 +33,9 @@ export class UserClientService {
       {
         name:                     'user-service',
         timeout:                  false,   // RxJS timeout() handles per-request timeouts
-        errorThresholdPercentage: 50,
-        resetTimeout:             30_000,
-        volumeThreshold:          3,
+        errorThresholdPercentage: 75,
+        resetTimeout:             10_000,
+        volumeThreshold:          10,
         // 4xx = client/business errors (not found, forbidden, validation) — deterministic,
         // retrying would not help.  Only network failures and 5xx errors trip the circuit.
         errorFilter: (err: any) => {
