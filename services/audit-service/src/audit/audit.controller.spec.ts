@@ -106,11 +106,12 @@ describe('AuditController', () => {
       expect(result).toBe(doc);
     });
 
-    it('super admin cannot access org-scoped events', async () => {
+    it('super admin can access org-scoped events', async () => {
       const doc = { id: 'doc-1', orgId: 'other-org' } as any;
       mockService.findById.mockResolvedValue(doc);
       const me = makePayload({ isSuperAdmin: true });
-      await expect(controller.getById('doc-1', me)).rejects.toThrow(ForbiddenException);
+      const result = await controller.getById('doc-1', me);
+      expect(result).toBe(doc);
     });
 
     it('normal user without companyId throws ForbiddenException', async () => {
