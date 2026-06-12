@@ -111,13 +111,31 @@ export class AuditService implements OnModuleInit {
     const must: object[] = [];
 
     if (superAdminScope) {
-      // Super admin sin orgId → ve todos los eventos de todas las empresas.
-      // Super admin con orgId → filtra por esa empresa específica.
       if (dto.orgId) {
+        // Super admin filtrando por empresa específica → eventos de esa org
         must.push({ term: { orgId: dto.orgId } });
+      } else {
+        // Vista global de super admin → solo eventos de plataforma (orgId ausente/null)
+        must.push({ bool: { must_not: { exists: { field: 'orgId' } } } });
       }
     } else if (dto.orgId) {
-      must.push({ term: { orgId: dto.orgId } });
+      // Org user: sus propios eventos de org + eventos de company management donde su org es el recurso
+      must.push({
+        bool: {
+          should: [
+            { term: { orgId: dto.orgId } },
+            {
+              bool: {
+                must: [
+                  { bool: { must_not: { exists: { field: 'orgId' } } } },
+                  { term: { resourceId: dto.orgId } },
+                ],
+              },
+            },
+          ],
+          minimum_should_match: 1,
+        },
+      });
     }
 
     if (dto.actorId)       must.push({ term: { actorId:                    dto.actorId } });
