@@ -6,7 +6,7 @@ import { TypologiesModule } from './typologies/typologies.module';
 import { BulkImportModule } from './bulk-import/bulk-import.module';
 import { DocumentUploadModule } from './document-upload/document-upload.module';
 import { WorkflowFilesModule } from './workflow-files/workflow-files.module';
-import { KafkaModule, KAFKA_CLIENT, CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
+import { KafkaModule, KAFKA_CLIENT, KafkaProducerService, CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
 import { KafkaConsumerService } from './common/kafka/kafka-consumer.service';
 import { TypologiesService } from './typologies/typologies.service';
 
@@ -38,9 +38,9 @@ import { Kafka } from 'kafkajs';
     StorageService,
     {
       provide: KafkaConsumerService,
-      inject: [KAFKA_CLIENT, ConfigService, AppLogger],
-      useFactory: (kafka: Kafka, config: CS, logger: AppLogger) =>
-        new KafkaConsumerService(kafka, config, logger),
+      inject: [KAFKA_CLIENT, ConfigService, AppLogger, KafkaProducerService],
+      useFactory: (kafka: Kafka, config: CS, logger: AppLogger, producer: KafkaProducerService) =>
+        new KafkaConsumerService(kafka, config, logger, producer),
     },
   ],
   exports: [AppLogger],

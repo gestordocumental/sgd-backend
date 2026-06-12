@@ -89,6 +89,8 @@ function makeDoc(overrides: Record<string, any> = {}): TypologyDocument {
   } as unknown as TypologyDocument;
 }
 
+const clamav = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
 function makeDeps(doc: TypologyDocument | null = null) {
   const model: any = {
     findOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) }),
@@ -100,7 +102,7 @@ function makeDeps(doc: TypologyDocument | null = null) {
   };
   const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
   const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
-  return { model, storage, kafka, logger };
+  return { model, storage, kafka, logger, clamav };
 }
 
 // ── DocumentUploadService ──────────────────────────────────────────────────
@@ -112,8 +114,8 @@ describe('DocumentUploadService', () => {
   describe('upload()', () => {
     it('uploads a valid PDF and emits Kafka event', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       const result = await service.upload('org-1', doc.id, makeFile());
 
@@ -128,8 +130,8 @@ describe('DocumentUploadService', () => {
 
     it('passes orgName to Kafka payload when provided', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await service.upload('org-1', doc.id, makeFile(), 'Helisa SAS');
 
@@ -143,8 +145,8 @@ describe('DocumentUploadService', () => {
       const doc = makeDoc({
         documento: { r2Key: 'org/org-1/typologies/old-file.pdf', extractionStatus: ExtractionStatus.COMPLETED, originalName: 'old.pdf', mimeType: PDF_MIME, uploadedAt: new Date() },
       });
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await service.upload('org-1', doc.id, makeFile());
 
@@ -153,8 +155,8 @@ describe('DocumentUploadService', () => {
 
     it('throws BadRequestException for unsupported MIME type', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(
         service.upload('org-1', doc.id, makeFile({ mimetype: 'image/jpeg' })),
@@ -163,8 +165,8 @@ describe('DocumentUploadService', () => {
 
     it('throws BadRequestException with FILE_CONTENT_MISMATCH when buffer does not match declared MIME type', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       // PDF MIME declared but DOCX (PK ZIP) magic bytes supplied
       const spoofed = makeFile({ buffer: MAGIC_BYTES[DOCX_MIME] });
@@ -177,8 +179,8 @@ describe('DocumentUploadService', () => {
 
     it('throws BadRequestException with FILE_CONTENT_MISMATCH when DOCX bytes are submitted with XLSX MIME', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       // XLSX MIME declared but DOCX magic bytes supplied — cross-OOXML substitution
       const spoofed = makeFile({ mimetype: XLSX_MIME, buffer: DOCX_MAGIC });
@@ -191,8 +193,8 @@ describe('DocumentUploadService', () => {
 
     it('throws BadRequestException when file exceeds 20 MB', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(
         service.upload('org-1', doc.id, makeFile({ size: 21 * 1024 * 1024 })),
@@ -200,8 +202,8 @@ describe('DocumentUploadService', () => {
     });
 
     it('throws BadRequestException for invalid typology ID', async () => {
-      const { model, storage, kafka, logger } = makeDeps();
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps();
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(
         service.upload('org-1', 'not-an-id', makeFile()),
@@ -209,8 +211,8 @@ describe('DocumentUploadService', () => {
     });
 
     it('throws NotFoundException when typology does not exist', async () => {
-      const { model, storage, kafka, logger } = makeDeps(null);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(null);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(
         service.upload('org-1', makeId(), makeFile()),
@@ -219,8 +221,8 @@ describe('DocumentUploadService', () => {
 
     it('accepts DOCX files', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(
         service.upload('org-1', doc.id, makeFile({ mimetype: DOCX_MIME, originalname: 'test.docx' })),
@@ -229,8 +231,8 @@ describe('DocumentUploadService', () => {
 
     it('emits audit log when actorId is provided', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await service.upload('org-1', doc.id, makeFile(), undefined, 'actor-user-1');
 
@@ -242,9 +244,9 @@ describe('DocumentUploadService', () => {
 
     it('throws InternalServerErrorException when Kafka emit fails and deletes the uploaded file', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
       kafka.emit.mockRejectedValue(new Error('Kafka down'));
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.upload('org-1', doc.id, makeFile())).rejects.toThrow(InternalServerErrorException);
       expect(storage.delete).toHaveBeenCalled();
@@ -252,9 +254,9 @@ describe('DocumentUploadService', () => {
 
     it('deletes orphaned upload and rethrows when DB save fails', async () => {
       const doc = makeDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
       (doc.save as jest.Mock).mockRejectedValueOnce(new Error('DB error'));
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.upload('org-1', doc.id, makeFile())).rejects.toThrow('DB error');
       expect(storage.delete).toHaveBeenCalled();
@@ -288,7 +290,7 @@ describe('DocumentUploadService', () => {
       const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
       const logger = { log: jest.fn(), warn: jest.fn() };
 
-      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' });
 
       expect(oldDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
@@ -306,7 +308,7 @@ describe('DocumentUploadService', () => {
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
 
-      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await expect(
         service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '05' }),
       ).rejects.toThrow(BadRequestException);
@@ -321,7 +323,7 @@ describe('DocumentUploadService', () => {
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
 
-      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await expect(
         service.createNewVersion('org-1', oldDoc.id, makeFile({ mimetype: 'text/plain' }), {}),
       ).rejects.toThrow(BadRequestException);
@@ -334,7 +336,7 @@ describe('DocumentUploadService', () => {
       const storage = { upload: jest.fn(), delete: jest.fn() };
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
-      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
 
       // PDF MIME declared but DOCX (PK ZIP) magic bytes supplied
       const spoofed = makeFile({ buffer: MAGIC_BYTES[DOCX_MIME] });
@@ -353,7 +355,7 @@ describe('DocumentUploadService', () => {
       const storage = { upload: jest.fn(), delete: jest.fn() };
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
-      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
 
       // XLSX MIME declared but DOCX magic bytes supplied — cross-OOXML substitution
       const spoofed = makeFile({ mimetype: XLSX_MIME, buffer: DOCX_MAGIC });
@@ -373,7 +375,7 @@ describe('DocumentUploadService', () => {
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
 
-      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await expect(
         service.createNewVersion('org-1', makeId(), makeFile(), {}),
       ).rejects.toThrow(NotFoundException);
@@ -397,8 +399,8 @@ describe('DocumentUploadService', () => {
 
     it('sets PROCESSING, emits Kafka and returns success message', async () => {
       const doc = makeFailedDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       const result = await service.retryExtraction('org-1', doc.id);
 
@@ -412,8 +414,8 @@ describe('DocumentUploadService', () => {
 
     it('emits audit log when actorId is provided', async () => {
       const doc = makeFailedDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await service.retryExtraction('org-1', doc.id, undefined, 'actor-1');
 
@@ -425,32 +427,32 @@ describe('DocumentUploadService', () => {
 
     it('restores FAILED status and throws InternalServerErrorException when Kafka fails', async () => {
       const doc = makeFailedDoc();
-      const { model, storage, kafka, logger } = makeDeps(doc);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
       kafka.emit.mockRejectedValue(new Error('Kafka down'));
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(InternalServerErrorException);
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.FAILED);
     });
 
     it('throws BadRequestException for invalid typology ID', async () => {
-      const { model, storage, kafka, logger } = makeDeps();
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps();
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.retryExtraction('org-1', 'not-an-id')).rejects.toThrow(BadRequestException);
     });
 
     it('throws NotFoundException when typology does not exist', async () => {
-      const { model, storage, kafka, logger } = makeDeps(null);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(null);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.retryExtraction('org-1', makeId())).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when no document has been uploaded', async () => {
       const doc = makeDoc(); // no r2Key
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
     });
@@ -465,8 +467,8 @@ describe('DocumentUploadService', () => {
           extractionStatus: ExtractionStatus.PROCESSING,
         },
       });
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
     });
@@ -479,8 +481,8 @@ describe('DocumentUploadService', () => {
       const doc = makeDoc({
         documento: { r2Key: 'org/org-1/typologies/file.pdf', extractionStatus: ExtractionStatus.COMPLETED, originalName: 'file.pdf', mimeType: PDF_MIME, uploadedAt: new Date() },
       });
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       const result = await service.getSignedUrl('org-1', doc.id);
 
@@ -490,15 +492,15 @@ describe('DocumentUploadService', () => {
 
     it('throws NotFoundException when typology has no document', async () => {
       const doc = makeDoc(); // no r2Key
-      const { model, storage, kafka, logger } = makeDeps(doc);
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.getSignedUrl('org-1', doc.id)).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException for invalid ID', async () => {
-      const { model, storage, kafka, logger } = makeDeps();
-      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any);
+      const { model, storage, kafka, logger, clamav } = makeDeps();
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.getSignedUrl('org-1', 'bad')).rejects.toThrow(BadRequestException);
     });

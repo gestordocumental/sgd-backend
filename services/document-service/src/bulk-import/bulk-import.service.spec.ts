@@ -40,6 +40,10 @@ function makeDeps(overrides: { typologiesService?: any; orgClient?: any } = {}) 
 // ── BulkImportService ──────────────────────────────────────────────────────
 
 describe('BulkImportService', () => {
+  // ExcelJS uses JSZip internally (zip compression/decompression) which can be
+  // slow in CI environments. Tests that build real workbooks need extra headroom.
+  jest.setTimeout(30000);
+
   afterEach(() => jest.restoreAllMocks());
 
   it('imports valid rows successfully', async () => {
