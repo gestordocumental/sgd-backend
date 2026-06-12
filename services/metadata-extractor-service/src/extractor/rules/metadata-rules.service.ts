@@ -122,7 +122,10 @@ export class MetadataRulesService {
     // a docTypeWord but don't follow the "de/del/para" structure, and avoids matching
     // mid-sentence references like "...P-M-001 Manual de Control de Documentos y Registros."
     // eslint-disable-next-line security/detect-unsafe-regex
-    const docTypeStartPattern = new RegExp(`^((?:${this.docTypeWords.source}).{4,})`, 'i');
+    const docTypeStartPattern = new RegExp(
+      `^((?:${this.docTypeWords.source})\\b(?!\\s*[:\\-])[^#:\\n]{4,})`,
+      'i',
+    );
     for (const line of lines) {
       if (this.isMetadataLine(line, orgName)) continue;
       const m = line.match(docTypeStartPattern);
