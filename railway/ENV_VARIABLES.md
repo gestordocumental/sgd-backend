@@ -81,7 +81,7 @@ en Railway para cada entorno (dev / test / prod).
 | `MINIO_ACCESS_KEY` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `MINIO_SECRET_KEY` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `MINIO_BUCKET` | `documentos` | `documentos` | `documentos` | Manual |
-| `KAFKA_BROKERS` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
+| `KAFKA_BROKER` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
 | `KAFKA_CLIENT_ID` | `document-service` | `document-service` | `document-service` | Manual |
 | `KAFKA_GROUP_ID` | `document-service-group` | `document-service-group` | `document-service-group` | Manual |
 
@@ -98,7 +98,7 @@ en Railway para cada entorno (dev / test / prod).
 | `DB_NAME` | `workflow_db` | `workflow_db` | `workflow_db` | Manual |
 | `DB_USERNAME` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | Plugin |
 | `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | Plugin |
-| `KAFKA_BROKERS` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
+| `KAFKA_BROKER` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
 | `KAFKA_CLIENT_ID` | `workflow-service` | `workflow-service` | `workflow-service` | Manual |
 | `KAFKA_GROUP_ID` | `workflow-service-group` | `workflow-service-group` | `workflow-service-group` | Manual |
 
@@ -113,7 +113,7 @@ en Railway para cada entorno (dev / test / prod).
 | `REDIS_HOST` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | Plugin |
 | `REDIS_PORT` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | Plugin |
 | `REDIS_PASSWORD` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | Plugin |
-| `KAFKA_BROKERS` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
+| `KAFKA_BROKER` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | `kafka.railway.internal:9092` | Manual |
 | `KAFKA_CLIENT_ID` | `notification-service` | `notification-service` | `notification-service` | Manual |
 | `KAFKA_GROUP_ID` | `notification-service-group` | `notification-service-group` | `notification-service-group` | Manual |
 | `SMTP_HOST` | `smtp.sendgrid.net` | `smtp.sendgrid.net` | `smtp.sendgrid.net` | Manual |
@@ -130,9 +130,12 @@ en Railway para cada entorno (dev / test / prod).
 |---|---|---|---|---|
 | `NODE_ENV` | `development` | `test` | `production` | Manual |
 | `PORT` | `3000` | `3000` | `3000` | Manual |
-| `ELASTICSEARCH_NODE` | `http://elasticsearch.railway.internal:9200` | idem | idem | Manual |
-| `ELASTICSEARCH_INDEX` | `sgd-audit-logs-dev` | `sgd-audit-logs-test` | `sgd-audit-logs` | Manual |
-| `KAFKA_BROKERS` | `kafka.railway.internal:9092` | idem | idem | Manual |
+| `ELASTICSEARCH_URL` | `http://elasticsearch.railway.internal:9200` | idem | idem | Manual |
+| `ELASTICSEARCH_WRITE_USERNAME` | `elastic` | `elastic` | `elastic` | Manual |
+| `ELASTICSEARCH_WRITE_PASSWORD` | `<password>` | `<password>` | `<password>` | Manual |
+| `ELASTICSEARCH_READ_USERNAME` | `elastic` | `elastic` | `elastic` | Manual |
+| `ELASTICSEARCH_READ_PASSWORD` | `<password>` | `<password>` | `<password>` | Manual |
+| `KAFKA_BROKER` | `kafka.railway.internal:9092` | idem | idem | Manual |
 | `KAFKA_CLIENT_ID` | `audit-service` | `audit-service` | `audit-service` | Manual |
 | `KAFKA_GROUP_ID` | `audit-service-group` | `audit-service-group` | `audit-service-group` | Manual |
 

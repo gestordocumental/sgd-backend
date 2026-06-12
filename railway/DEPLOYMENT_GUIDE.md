@@ -169,7 +169,11 @@ PG_HOST     = ${{postgres.PGHOST}}
 PG_PORT     = ${{postgres.PGPORT}}
 PG_USER     = ${{postgres.PGUSER}}
 PG_PASSWORD = ${{postgres.PGPASSWORD}}
+PG_DATABASE = ${{postgres.PGDATABASE}}
 ```
+
+> **Nota**: Railway no siempre crea la base de datos inicial con el nombre `postgres`.
+> `PG_DATABASE` apunta a la BD por defecto real del plugin, que el script usa como punto de entrada para crear las demás.
 
 Esperar que el servicio corra y salga con código 0.
 Después de la primera ejecución exitosa, **eliminar este servicio** para no gastar recursos.

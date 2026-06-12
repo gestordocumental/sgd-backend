@@ -56,7 +56,7 @@ export class OrgsService {
     this.kafkaProducer.emitSafe(TOPICS.AUDIT_LOG, {
       service:      'org-service',
       actorId,
-      orgId:        null,
+      orgId:        org.id,
       action,
       resourceType: 'company',
       resourceId:   org.id,
