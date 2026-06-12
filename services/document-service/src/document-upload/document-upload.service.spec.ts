@@ -89,6 +89,8 @@ function makeDoc(overrides: Record<string, any> = {}): TypologyDocument {
   } as unknown as TypologyDocument;
 }
 
+const clamav = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
 function makeDeps(doc: TypologyDocument | null = null) {
   const model: any = {
     findOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) }),
@@ -100,7 +102,6 @@ function makeDeps(doc: TypologyDocument | null = null) {
   };
   const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
   const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
-  const clamav = { scan: jest.fn().mockResolvedValue({ clean: true }) };
   return { model, storage, kafka, logger, clamav };
 }
 

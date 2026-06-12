@@ -781,6 +781,173 @@ describe('AuthService', () => {
     });
   });
 
+  // ── refresh — TTL extension branch ───────────────────────────────────────
+
+  describe('refresh (global TTL extension)', () => {
+    it('extends global refresh token TTL when a company-scoped refresh has an active global session', async () => {
+      jwtService.verify.mockReturnValue({ sub: 'user-id', email: 'user@test.com', jti: 'token-jti', companyId: 'org-id' });
+      redis.getdel.mockResolvedValue('1');
+      redis.get.mockImplementation((key: string) => {
+        if (key === 'sa-global-rt:user-id') return Promise.resolve('global-jti');
+        return Promise.resolve(null);
+      });
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserCompanies.mockResolvedValue(['org-id']);
+
+      await service.refresh('valid.refresh.token');
+
+      expect(redis.expire).toHaveBeenCalledWith('sa-global-rt:user-id', expect.any(Number));
+      expect(redis.expire).toHaveBeenCalledWith('refresh:user-id:global-jti', expect.any(Number));
+    });
+  });
+
+  // ── saveGlobalContext ─────────────────────────────────────────────────────
+
+  describe('saveGlobalContext', () => {
+    it('stores the JTI in Redis when the token decodes to a valid JTI', async () => {
+      jwtService.decode.mockReturnValue({ jti: 'some-jti' });
+
+      await service.saveGlobalContext('user-id', 'valid.rt.token');
+
+      expect(redis.set).toHaveBeenCalledWith(
+        'sa-global-rt:user-id',
+        'some-jti',
+        'EX', expect.any(Number),
+        'NX',
+      );
+    });
+
+    it('does nothing when decoded token has no JTI', async () => {
+      jwtService.decode.mockReturnValue({ sub: 'user-id' }); // no jti field
+
+      await service.saveGlobalContext('user-id', 'token.without.jti');
+
+      expect(redis.set).not.toHaveBeenCalledWith(
+        expect.stringContaining('sa-global-rt'),
+        expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+      );
+    });
+  });
+
+  // ── exitCompanyContext ────────────────────────────────────────────────────
+
+  describe('exitCompanyContext', () => {
+    const companyPayload = { sub: 'user-id', email: 'user@test.com', jti: 'company-jti', companyId: 'org-id' };
+
+    function setupHappyPath() {
+      jwtService.verify.mockReturnValue(companyPayload);
+      redis.getdel
+        .mockResolvedValueOnce('1')          // refresh:{sub}:{jti} — company token consumed
+        .mockResolvedValueOnce('global-jti') // sa-global-rt:{sub}  — global JTI retrieved
+        .mockResolvedValueOnce('1');         // refresh:{sub}:{global-jti} — global token consumed
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserInfo.mockResolvedValue({ isSuperAdmin: false });
+    }
+
+    it('returns new token pair when all validations pass', async () => {
+      setupHappyPath();
+      const result = await service.exitCompanyContext('company.refresh.token');
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+    });
+
+    it('throws UnauthorizedException when company token is invalid or expired', async () => {
+      jwtService.verify.mockImplementation(() => { throw new Error('jwt expired'); });
+      await expect(service.exitCompanyContext('bad.token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when company session is revoked', async () => {
+      jwtService.verify.mockReturnValue(companyPayload);
+      redis.getdel.mockResolvedValueOnce(null); // company token not in Redis
+      await expect(service.exitCompanyContext('company.refresh.token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when no global session JTI is stored', async () => {
+      jwtService.verify.mockReturnValue(companyPayload);
+      redis.getdel
+        .mockResolvedValueOnce('1')   // company token consumed
+        .mockResolvedValueOnce(null); // no global JTI stored
+      await expect(service.exitCompanyContext('company.refresh.token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when global refresh token is missing from Redis', async () => {
+      jwtService.verify.mockReturnValue(companyPayload);
+      redis.getdel
+        .mockResolvedValueOnce('1')
+        .mockResolvedValueOnce('global-jti')
+        .mockResolvedValueOnce(null); // global token not in Redis
+      await expect(service.exitCompanyContext('company.refresh.token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when credential is missing or inactive', async () => {
+      jwtService.verify.mockReturnValue(companyPayload);
+      redis.getdel
+        .mockResolvedValueOnce('1')
+        .mockResolvedValueOnce('global-jti')
+        .mockResolvedValueOnce('1');
+      credRepo.findOne.mockResolvedValue(null);
+      await expect(service.exitCompanyContext('company.refresh.token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException when user not found in user-service (NotFoundException → 401)', async () => {
+      setupHappyPath();
+      userClient.getUserInfo.mockRejectedValue(new NotFoundException('not found'));
+      await expect(service.exitCompanyContext('company.refresh.token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rethrows non-NotFoundException errors from user-service lookup', async () => {
+      setupHappyPath();
+      userClient.getUserInfo.mockRejectedValue(new InternalServerErrorException('db down'));
+      await expect(service.exitCompanyContext('company.refresh.token')).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('throws UnauthorizedException when non-super-admin has no active company memberships', async () => {
+      setupHappyPath();
+      userClient.getUserCompanies.mockResolvedValue([]);
+      await expect(service.exitCompanyContext('company.refresh.token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('skips company membership check and succeeds for super-admin', async () => {
+      setupHappyPath();
+      userClient.getUserInfo.mockResolvedValue({ isSuperAdmin: true });
+
+      const result = await service.exitCompanyContext('company.refresh.token');
+
+      expect(result).toHaveProperty('accessToken');
+      expect(userClient.getUserCompanies).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── logout ────────────────────────────────────────────────────────────────
+
+  describe('logout', () => {
+    it('revokes all refresh tokens when the token is valid', async () => {
+      jwtService.verify.mockReturnValue({ sub: 'user-id', jti: 'some-jti' });
+      redis.scan.mockResolvedValue(['0', []]);
+
+      await service.logout('valid.refresh.token');
+
+      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', expect.any(Number));
+    });
+
+    it('decodes and revokes by userId when token verification fails (expired/invalid)', async () => {
+      jwtService.verify.mockImplementation(() => { throw new Error('jwt expired'); });
+      jwtService.decode.mockReturnValue({ sub: 'user-id' });
+      redis.scan.mockResolvedValue(['0', []]);
+
+      await service.logout('expired.refresh.token');
+
+      expect(redis.set).toHaveBeenCalledWith('sa-revoked:user-id', '1', 'EX', expect.any(Number));
+    });
+
+    it('does not throw when token is completely unparseable', async () => {
+      jwtService.verify.mockImplementation(() => { throw new Error('malformed'); });
+      jwtService.decode.mockReturnValue(null);
+
+      await expect(service.logout('garbage')).resolves.toBeUndefined();
+    });
+  });
+
   describe('resetPassword', () => {
     it('throws BadRequestException when reset token is missing from Redis', async () => {
       redis.getdel.mockResolvedValue(null);
