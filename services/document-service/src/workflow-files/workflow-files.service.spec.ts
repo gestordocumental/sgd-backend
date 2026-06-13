@@ -14,9 +14,9 @@ const GIF_MIME  = 'image/gif';
 const BMP_MIME  = 'image/bmp';
 const TIFF_MIME = 'image/tiff';
 
-// Minimal 2-entry ZIP buffers for DOCX and XLSX. validateMagicBytes() requires both
-// the [Content_Types].xml first-entry and a type-specific part entry, so each format needs
-// its own buffer — DOCX requires word/document.xml, XLSX requires xl/workbook.xml.
+// Minimal 2-entry ZIP buffers for DOCX and XLSX. validateMagicBytes() requires a ZIP
+// signature, a [Content_Types].xml entry (anywhere, not necessarily first), and a
+// type-specific part — word/document.xml for DOCX, xl/workbook.xml for XLSX.
 function makeOoxmlEntry(filename: string): Buffer {
   const name = Buffer.from(filename);
   const header = Buffer.alloc(30);

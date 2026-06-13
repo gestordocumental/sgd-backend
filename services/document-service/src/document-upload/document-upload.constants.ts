@@ -10,19 +10,19 @@ export const ALLOWED_MIMETYPES: Record<string, string> = {
 
 export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
-// Returns true when `b` starts with a PKZIP local file header whose first entry is
-// [Content_Types].xml — the marker that distinguishes OOXML containers from arbitrary ZIPs.
-//
-// PKZIP local file header layout (little-endian):
-//   bytes  0-3:  PK\x03\x04 signature
-//   bytes  4-25: version, flags, compression, timestamps, CRC-32, sizes
-//   bytes 26-27: filename length
-//   bytes 28-29: extra field length
-//   bytes 30+:   filename (then extra field)
+// Returns true when `b` is a PKZIP archive that contains a [Content_Types].xml
+// entry — the required root part of any OOXML container.  We no longer require
+// [Content_Types].xml to be the *first* entry because many compliant producers
+// (Excel 2016+, Apache POI, LibreOffice) place _rels/.rels or other parts first.
+// The signature check ensures the buffer is actually a ZIP before scanning for
+// the OOXML marker string, which always appears uncompressed in the local-file
+// headers or the central directory regardless of entry compression method.
 function isOoxmlZip(b: Buffer): boolean {
-  if (b.length < 49) return false; // 30-byte header + 19-char filename
-  if (!(b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04)) return false;
-  return b.readUInt16LE(26) === 19 && b.slice(30, 49).toString('ascii') === '[Content_Types].xml';
+  if (b.length < 4) return false;
+  return (
+    b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04 &&
+    b.indexOf(Buffer.from('[Content_Types].xml')) !== -1
+  );
 }
 
 /**
