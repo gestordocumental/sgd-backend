@@ -1,5 +1,5 @@
 import { KafkaConsumerService } from './kafka-consumer.service';
-import { TOPICS } from '@sgd/common';
+import { TOPICS, runWithCorrelation, withDlt } from '@sgd/common';
 import { Types } from 'mongoose';
 
 // Short-circuit the DLT wrapper and correlation context — only dispatch() logic matters.
@@ -79,6 +79,12 @@ describe('KafkaConsumerService', () => {
       }));
       expect(consumer.run).toHaveBeenCalled();
       expect(logger.log).toHaveBeenCalledWith('Kafka consumer connected and listening', 'KafkaConsumerService');
+
+      const eachMessage = (consumer.run as jest.Mock).mock.calls[0][0].eachMessage;
+      await eachMessage(msgPayload('some-topic', Buffer.from('{}')) as any);
+
+      expect(runWithCorrelation).toHaveBeenCalled();
+      expect(withDlt).toHaveBeenCalled();
     });
   });
 
@@ -162,6 +168,7 @@ describe('KafkaConsumerService', () => {
         await (svc as any).dispatch(msgPayload(TOPICS.TYPOLOGY_METADATA_EXTRACTED, Buffer.from(JSON.stringify(payload))));
 
         expect(onExtracted).not.toHaveBeenCalled();
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Invalid payload'), 'KafkaConsumerService');
       });
 
       it('skips without calling onExtracted when no handler is registered', async () => {
