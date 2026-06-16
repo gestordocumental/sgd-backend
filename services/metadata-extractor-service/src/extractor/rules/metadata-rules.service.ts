@@ -117,6 +117,21 @@ export class MetadataRulesService {
       if (m?.[1]) return m[1].trim().substring(0, 255);
     }
 
+    // Pass 2a — line that STARTS with a document type word (highest confidence for PDF headers).
+    // Catches titles like "Política control de documentos y registros" that begin with
+    // a docTypeWord but don't follow the "de/del/para" structure, and avoids matching
+    // mid-sentence references like "...P-M-001 Manual de Control de Documentos y Registros."
+    // eslint-disable-next-line security/detect-unsafe-regex
+    const docTypeStartPattern = new RegExp(
+      `^((?:${this.docTypeWords.source})\\b(?!\\s*[:\\-])[^#:\\n]{4,})`,
+      'i',
+    );
+    for (const line of lines) {
+      if (this.isMetadataLine(line, orgName)) continue;
+      const m = line.match(docTypeStartPattern);
+      if (m?.[1]) return m[1].trim().substring(0, 255);
+    }
+
     // Pass 2 — document-type word followed by "de / del / para"
     // ("Formato de Requisición de Compras", "Manual de Calidad", etc.)
     // Uses (?:^|\s) so it matches even when merged on the same line as the company name.

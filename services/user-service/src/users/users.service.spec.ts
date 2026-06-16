@@ -1457,6 +1457,70 @@ describe('UsersService', () => {
     });
   });
 
+  // ─── removeRoleFromOrg ────────────────────────────────────────────────────
+
+  describe('removeRoleFromOrg', () => {
+    it('nullifies roleId without setting removedAt', async () => {
+      const user = makeUser();
+      const role = makeRole();
+
+      usersRepo.findOne.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(role);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.removeRoleFromOrg(user.id, 'org-uuid-1', role.id);
+
+      expect(uorRepo.update).toHaveBeenCalledWith(
+        { userId: user.id, orgId: 'org-uuid-1', roleId: role.id },
+        { roleId: null, assignedBy: null },
+      );
+      expect(redis.del).toHaveBeenCalledWith('perms:user-uuid-1:org-uuid-1');
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ userId: user.id, orgId: 'org-uuid-1' }),
+      );
+    });
+
+    it('emits audit log when actorId is provided', async () => {
+      const user = makeUser();
+      const role = makeRole();
+
+      usersRepo.findOne.mockResolvedValue(user);
+      roleRepo.findOne.mockResolvedValue(role);
+      uorRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.removeRoleFromOrg(user.id, 'org-uuid-1', role.id, 'actor-uuid');
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          action: 'USER_ORG_ROLE_UPDATED',
+          actorId: 'actor-uuid',
+          metadata: { changes: { role: { from: role.name, to: null } } },
+        }),
+      );
+    });
+
+    it('throws NotFoundException when role does not exist', async () => {
+      usersRepo.findOne.mockResolvedValue(makeUser());
+      roleRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.removeRoleFromOrg('user-uuid-1', 'org-uuid-1', 'bad-role')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws NotFoundException when user does not have the role in the org', async () => {
+      usersRepo.findOne.mockResolvedValue(makeUser());
+      roleRepo.findOne.mockResolvedValue(makeRole());
+      uorRepo.update.mockResolvedValue({ affected: 0 } as any);
+
+      await expect(service.removeRoleFromOrg('user-uuid-1', 'org-uuid-99', 'role-uuid-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   // ─── completeRegistration (HttpException paths) ───────────────────────────
 
   describe('completeRegistration (HttpException paths)', () => {

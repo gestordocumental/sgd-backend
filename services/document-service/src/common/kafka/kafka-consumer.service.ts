@@ -4,7 +4,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
 import { Types } from 'mongoose';
-import { AppLogger, KAFKA_CLIENT, TOPICS, runWithCorrelation } from '@sgd/common';
+import { AppLogger, KAFKA_CLIENT, KafkaProducerService, TOPICS, runWithCorrelation, withDlt } from '@sgd/common';
 
 interface MetadataExtractedPayload {
   orgId: string;
@@ -72,6 +72,7 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
     @Inject(KAFKA_CLIENT) private readonly kafka: Kafka,
     private readonly config: ConfigService,
     private readonly logger: AppLogger,
+    private readonly producer: KafkaProducerService,
   ) {}
 
   registerHandlers(
@@ -84,16 +85,28 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
 
   async onApplicationBootstrap() {
     const groupId = this.config.getOrThrow<string>('KAFKA_CONSUMER_GROUP');
-    this.consumer = this.kafka.consumer({ groupId });
+    this.consumer = this.kafka.consumer({
+      groupId,
+      retry: { initialRetryTime: 300, retries: 3 },
+    });
 
     await this.consumer.connect();
     await this.consumer.subscribe({ topics: [TOPICS.TYPOLOGY_METADATA_EXTRACTED, TOPICS.TYPOLOGY_METADATA_EXTRACTION_FAILED], fromBeginning: false });
 
     await this.consumer.run({
       eachMessage: async (payload: EachMessagePayload) => {
-        await runWithCorrelation(payload.message, async () => {
-          await this.dispatch(payload);
-        });
+        await runWithCorrelation(payload.message, () =>
+          withDlt(
+            {
+              topic: payload.topic,
+              message: payload.message,
+              producer: this.producer,
+              logger: this.logger,
+              context: 'KafkaConsumerService',
+            },
+            () => this.dispatch(payload),
+          ),
+        );
       },
     });
 

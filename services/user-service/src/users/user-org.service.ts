@@ -177,6 +177,33 @@ export class UserOrgService {
     return { data, nextCursor, hasMore };
   }
 
+  async removeRoleFromOrg(userId: string, orgId: string, roleId: string, actorId?: string): Promise<void> {
+    const targetUser = await this.findUser(userId);
+    const role = await this.roleRepository.findOne({ where: { id: roleId } });
+    if (!role) throw new NotFoundException(`Role ${roleId} not found`);
+
+    const result = await this.userOrgRoleRepository.update(
+      { userId, orgId, roleId },
+      { roleId: null, assignedBy: null },
+    );
+    if ((result.affected ?? 0) === 0) {
+      throw new NotFoundException(`User ${userId} does not have role ${roleId} in org ${orgId}`);
+    }
+
+    await this.invalidatePermissionCache(userId, orgId);
+
+    if (actorId) {
+      this.emitAuditLog({
+        actorId,
+        orgId,
+        action:       'USER_ORG_ROLE_UPDATED',
+        resourceId:   userId,
+        resourceName: userDisplayName(targetUser),
+        metadata:     { changes: { role: { from: role.name, to: null } } },
+      });
+    }
+  }
+
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
     const targetUser = await this.findUser(userId);
     const result = await this.userOrgRoleRepository.update(

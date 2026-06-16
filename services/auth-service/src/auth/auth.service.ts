@@ -283,14 +283,11 @@ export class AuthService {
     // so the super-admin can still exit the company after long sessions.
     if (payload.companyId) {
       const globalKey = `sa-global-rt:${credential.userId}`;
-      const storedGlobal = await this.redis.get(globalKey);
-      if (storedGlobal) {
-        const globalPayload = this.jwtService.decode(storedGlobal) as Record<string, unknown> | null;
+      const storedJti = await this.redis.get(globalKey);
+      if (storedJti) {
         await Promise.all([
           this.redis.expire(globalKey, this.refreshTtlSeconds),
-          globalPayload?.sub && globalPayload?.jti
-            ? this.redis.expire(`refresh:${globalPayload.sub}:${globalPayload.jti}`, this.refreshTtlSeconds)
-            : Promise.resolve(),
+          this.redis.expire(`refresh:${credential.userId}:${storedJti}`, this.refreshTtlSeconds),
         ]);
       }
     }
@@ -402,9 +399,12 @@ export class AuthService {
    * Called by the switch-company endpoint before issuing the company-scoped pair.
    */
   async saveGlobalContext(userId: string, globalRefreshToken: string): Promise<void> {
+    const decoded = this.jwtService.decode(globalRefreshToken) as { jti?: string } | null;
+    const jti = decoded?.jti;
+    if (!jti) return;
     await this.redis.set(
       `sa-global-rt:${userId}`,
-      globalRefreshToken,
+      jti,
       'EX', this.refreshTtlSeconds,
       'NX',
     );
@@ -430,12 +430,41 @@ export class AuthService {
     const consumed = await this.redis.getdel(`refresh:${payload.sub}:${payload.jti}`);
     if (!consumed) throw new UnauthorizedException("Company session revoked");
 
-    const globalRefreshToken = await this.redis.getdel(`sa-global-rt:${payload.sub}`);
-    if (!globalRefreshToken) {
+    const storedJti = await this.redis.getdel(`sa-global-rt:${payload.sub}`);
+    if (!storedJti) {
       throw new UnauthorizedException("Global session expired — please log in again");
     }
 
-    return this.refresh(globalRefreshToken);
+    const globalTokenExists = await this.redis.getdel(`refresh:${payload.sub}:${storedJti}`);
+    if (!globalTokenExists) {
+      throw new UnauthorizedException("Global session expired — please log in again");
+    }
+
+    const credential = await this.credentialRepo.findOne({ where: { userId: payload.sub } });
+    if (!credential || credential.status !== CredentialStatus.ACTIVE) {
+      throw new UnauthorizedException("User not found or inactive");
+    }
+
+    let userInfo: { isSuperAdmin: boolean };
+    try {
+      userInfo = await this.getCachedUserInfo(payload.sub);
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        throw new UnauthorizedException("Invalid credentials");
+      }
+      throw err;
+    }
+
+    if (!userInfo.isSuperAdmin) {
+      const companies = await this.getCachedUserCompanies(payload.sub);
+      if (companies.length === 0) {
+        throw new UnauthorizedException("Scope revoked");
+      }
+    }
+
+    return this.generateTokenPair(credential, {
+      isSuperAdmin: userInfo.isSuperAdmin || undefined,
+    });
   }
 
   /**

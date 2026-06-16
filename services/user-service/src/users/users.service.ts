@@ -103,6 +103,10 @@ export class UsersService {
     return this.org.findByOrg(orgId, limit, cursor);
   }
 
+  removeRoleFromOrg(userId: string, orgId: string, roleId: string, actorId?: string): Promise<void> {
+    return this.org.removeRoleFromOrg(userId, orgId, roleId, actorId);
+  }
+
   removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
     return this.org.removeFromOrg(userId, orgId, actorId);
   }

@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, GatewayTimeoutException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, GatewayTimeoutException, ServiceUnavailableException, HttpException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
@@ -64,6 +64,11 @@ export class OrgClientService {
         errorThresholdPercentage: 50,
         resetTimeout:             30_000,
         volumeThreshold:          3,
+        errorFilter:              (err: { response?: { status?: number } }) => {
+          const status = err?.response?.status;
+          // 4xx are business-logic errors, not infrastructure failures — don't trip the circuit
+          return status != null && status >= 400 && status < 500;
+        },
       },
     );
     this.cb.on('open',     () => this.logger.warn('[circuit] org-service OPEN — failing fast', 'OrgClientService'));
@@ -119,6 +124,9 @@ export class OrgClientService {
         message: `← [org-service] POST /internal/structure/resolve ${status ?? 500}: ${message}`,
       });
 
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        throw new HttpException(message, status);
+      }
       throw new InternalServerErrorException(
         `Could not resolve org structure from org-service: ${message}`,
       );
@@ -175,7 +183,9 @@ export class OrgClientService {
         message: `← [org-service] POST /internal/structure/resolve-by-ids ${status ?? 500}: ${message}`,
       });
 
-      if (status === 400) throw error.response.data;
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        throw new HttpException(message, status);
+      }
       throw new InternalServerErrorException(
         `Could not resolve org structure by IDs from org-service: ${message}`,
       );
