@@ -262,6 +262,19 @@ describe('DocumentUploadService', () => {
       expect(storage.delete).toHaveBeenCalled();
       expect(kafka.emit).not.toHaveBeenCalled();
     });
+
+    it('bloquea la carga cuando ClamAV reporta malware', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      clamav.scan.mockResolvedValueOnce({ clean: false, threat: 'Eicar-Test-Signature' });
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      await expect(service.upload('org-1', doc.id, makeFile())).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'MALWARE_DETECTED' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+      expect(kafka.emit).not.toHaveBeenCalled();
+    });
   });
 
   // ── createNewVersion() ────────────────────────────────────────────────────
@@ -379,6 +392,25 @@ describe('DocumentUploadService', () => {
       await expect(
         service.createNewVersion('org-1', makeId(), makeFile(), {}),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('bloquea createNewVersion cuando ClamAV reporta malware', async () => {
+      const oldDoc = makeDoc();
+      const FullModel: any = function () { return makeDoc(); };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+      const storage = { upload: jest.fn(), delete: jest.fn() };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn() };
+      clamav.scan.mockResolvedValueOnce({ clean: false, threat: 'Eicar-Test-Signature' });
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'MALWARE_DETECTED' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+      expect(kafka.emit).not.toHaveBeenCalled();
     });
   });
 

@@ -72,6 +72,7 @@ function makeRepo<T extends ObjectLiteral>(): jest.Mocked<Repository<T>> {
     create: jest.fn(),
     softDelete: jest.fn(),
     createQueryBuilder: jest.fn(),
+    count: jest.fn().mockResolvedValue(0),
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
@@ -107,8 +108,9 @@ function makeDataSource() {
     getRepository: jest.fn().mockReturnValue({
       find: jest.fn().mockResolvedValue([]),
     }),
+    query: jest.fn().mockResolvedValue([]),
     _manager: manager,
-  } as unknown as jest.Mocked<DataSource> & { _manager: typeof manager };
+  } as unknown as jest.Mocked<DataSource> & { _manager: typeof manager; query: jest.Mock };
 }
 
 // ── Build service ─────────────────────────────────────────────────────────────
@@ -549,6 +551,208 @@ describe('WorkflowsService', () => {
           makeUser(),
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('findAll() — search filter', () => {
+    it('applies ILIKE filter when search is a non-empty string', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [], total: 0 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.findAll({ search: 'hello world' }, makeUser());
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('ILIKE'),
+        expect.objectContaining({ term: '%hello world%' }),
+      );
+    });
+
+    it('skips ILIKE filter when search trims to empty', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [], total: 0 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.findAll({ search: '   ' }, makeUser());
+
+      const ilikeCalls = (qb.andWhere as jest.Mock).mock.calls.filter(
+        (c: [string]) => typeof c[0] === 'string' && c[0].includes('ILIKE'),
+      );
+      expect(ilikeCalls).toHaveLength(0);
+    });
+  });
+
+  describe('update() — field-specific branches', () => {
+    function prepareUpdate(overrides: Partial<Workflow> = {}) {
+      const { service, workflowRepo, actionRepo, dataSource } = buildService();
+      workflowRepo.findOne
+        .mockResolvedValueOnce(makeWorkflow(overrides))
+        .mockResolvedValueOnce(makeWorkflow({ approvalSteps: [], attachments: [] }));
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      return { service, dataSource };
+    }
+
+    it('updates mainDocument fields when dto.mainDocument is provided', async () => {
+      const { service, dataSource } = prepareUpdate();
+
+      await service.update(
+        'wf-1',
+        { mainDocument: { storageKey: 'sk-1', originalName: 'file.pdf', mimeType: 'application/pdf' } },
+        makeUser(),
+      );
+
+      expect(dataSource._manager.update).toHaveBeenCalledWith(
+        Workflow,
+        'wf-1',
+        expect.objectContaining({ mainDocumentId: 'sk-1', mainDocumentValidated: true }),
+      );
+    });
+
+    it('updates finalUserIds when dto.finalUserIds is provided', async () => {
+      const { service, dataSource } = prepareUpdate();
+
+      await service.update('wf-1', { finalUserIds: ['ua', 'ub'] }, makeUser());
+
+      expect(dataSource._manager.update).toHaveBeenCalledWith(
+        Workflow,
+        'wf-1',
+        expect.objectContaining({ finalUserIds: ['ua', 'ub'] }),
+      );
+    });
+
+    it('replaces approval steps when dto.approvers is provided', async () => {
+      const { service, dataSource } = prepareUpdate();
+
+      await service.update('wf-1', { approvers: [{ userId: 'u-new', stepOrder: 1 }] }, makeUser());
+
+      expect(dataSource._manager.delete).toHaveBeenCalledWith(WorkflowApprovalStep, { workflowId: 'wf-1' });
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowApprovalStep,
+        expect.arrayContaining([expect.objectContaining({ userId: 'u-new', stepOrder: 1 })]),
+      );
+    });
+
+    it('replaces attachments when dto.attachments has items', async () => {
+      const { service, dataSource } = prepareUpdate();
+
+      await service.update(
+        'wf-1',
+        { attachments: [{ storageKey: 'att-1', originalName: 'doc.pdf', mimeType: 'application/pdf' }] },
+        makeUser(),
+      );
+
+      expect(dataSource._manager.delete).toHaveBeenCalledWith(WorkflowAttachment, {
+        workflowId: 'wf-1',
+        attachmentType: AttachmentType.SUPPORTING,
+      });
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowAttachment,
+        expect.arrayContaining([expect.objectContaining({ storageKey: 'att-1' })]),
+      );
+    });
+
+    it('deletes all attachments when dto.attachments is an empty array', async () => {
+      const { service, dataSource } = prepareUpdate();
+
+      await service.update('wf-1', { attachments: [] }, makeUser());
+
+      expect(dataSource._manager.delete).toHaveBeenCalledWith(WorkflowAttachment, {
+        workflowId: 'wf-1',
+        attachmentType: AttachmentType.SUPPORTING,
+      });
+    });
+  });
+
+  describe('findOne() — activeAdminCycleId branch', () => {
+    it('resolves the active cycle from allAdminCycles when activeAdminCycleId is set', async () => {
+      const { service, workflowRepo, actionRepo, dataSource } = buildService();
+      const wf = makeWorkflow({ approvalSteps: [], attachments: [], activeAdminCycleId: 'cycle-1' });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      const cycle = { id: 'cycle-1', workflowId: 'wf-1', cycleNumber: 1, steps: [] };
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([cycle]) });
+
+      const result = await service.findOne('wf-1', makeUser());
+      expect(result).toBeDefined();
+    });
+  });
+
+  describe('getStats()', () => {
+    function buildStatsService() {
+      const { service, workflowRepo, dataSource } = buildService();
+      (workflowRepo as unknown as { count: jest.Mock }).count = jest.fn()
+        .mockResolvedValueOnce(10)
+        .mockResolvedValueOnce(3);
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { status: 'DRAFT', count: '7' },
+          { status: 'PENDING_APPROVAL', count: '3' },
+        ]),
+      });
+      (dataSource as unknown as { query: jest.Mock }).query = jest.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total_bytes: '2048', total_files: '4' }]);
+      return { service, workflowRepo, dataSource };
+    }
+
+    it('returns totalWorkflows, statusCounts, myPendingTasks, weeklyTrend and storage', async () => {
+      const { service } = buildStatsService();
+
+      const result = await service.getStats('org-1', 'user-1');
+
+      expect(result.totalWorkflows).toBe(10);
+      expect(result.myPendingTasks).toBe(3);
+      expect(result.statusCounts).toEqual({ DRAFT: 7, PENDING_APPROVAL: 3 });
+      expect(result.weeklyTrend).toHaveLength(8);
+      expect(result.storageTotalBytes).toBe(2048);
+      expect(result.totalAttachments).toBe(4);
+    });
+
+    it('returns 0 for myPendingTasks when no userId is provided', async () => {
+      const { service, workflowRepo, dataSource } = buildService();
+      (workflowRepo as unknown as { count: jest.Mock }).count = jest.fn().mockResolvedValueOnce(5);
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      });
+      (dataSource as unknown as { query: jest.Mock }).query = jest.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total_bytes: '0', total_files: '0' }]);
+
+      const result = await service.getStats('org-1');
+      expect(result.myPendingTasks).toBe(0);
+    });
+  });
+
+  describe('getStoragePerOrg()', () => {
+    it('returns storage totals per org', async () => {
+      const { service, dataSource } = buildService();
+      (dataSource as unknown as { query: jest.Mock }).query = jest.fn().mockResolvedValue([
+        { org_id: 'org-1', total_bytes: '512', total_files: '2' },
+        { org_id: 'org-2', total_bytes: '1024', total_files: '3' },
+      ]);
+
+      const result = await service.getStoragePerOrg();
+
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual({ orgId: 'org-1', storageTotalBytes: 512, totalAttachments: 2 });
+      expect(result[1]).toEqual({ orgId: 'org-2', storageTotalBytes: 1024, totalAttachments: 3 });
+    });
+
+    it('returns empty array when there is no storage data', async () => {
+      const { service, dataSource } = buildService();
+      (dataSource as unknown as { query: jest.Mock }).query = jest.fn().mockResolvedValue([]);
+
+      const result = await service.getStoragePerOrg();
+      expect(result).toHaveLength(0);
     });
   });
 });

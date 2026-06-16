@@ -64,7 +64,7 @@ export class OrgClientService {
         errorThresholdPercentage: 50,
         resetTimeout:             30_000,
         volumeThreshold:          3,
-        errorFilter:              (err: any) => {
+        errorFilter:              (err: { response?: { status?: number } }) => {
           const status = err?.response?.status;
           // 4xx are business-logic errors, not infrastructure failures — don't trip the circuit
           return status != null && status >= 400 && status < 500;

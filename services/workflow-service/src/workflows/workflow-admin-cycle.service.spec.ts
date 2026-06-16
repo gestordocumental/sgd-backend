@@ -347,6 +347,28 @@ describe('WorkflowAdminCycleService', () => {
       expect(noteSaveCalls).toHaveLength(0);
     });
 
+    it('saves attachments when dto.attachments is provided', async () => {
+      const { service, workflowRepo, cycleRepo, dataSource, stepRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(
+        makeWorkflow({ status: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS }),
+      );
+      cycleRepo.findOne.mockResolvedValue(makeCycle());
+      stepRepo.findOneOrFail.mockResolvedValue(makeAdminStep());
+
+      await service.completeStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', {
+        attachments: [
+          { storageKey: 'att-key', originalName: 'doc.pdf', mimeType: 'application/pdf', fileSizeBytes: 1024 },
+        ],
+      });
+
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowAdminAttachment,
+        expect.arrayContaining([
+          expect.objectContaining({ storageKey: 'att-key', uploadedBy: 'admin-user-1' }),
+        ]),
+      );
+    });
+
     it('records ADMIN_STEP_COMPLETED and ADMIN_CYCLE_COMPLETED timeline events on last step', async () => {
       const { service, workflowRepo, cycleRepo, timelineService, stepRepo } = buildService();
       workflowRepo.findOneOrFail.mockResolvedValue(
@@ -418,6 +440,153 @@ describe('WorkflowAdminCycleService', () => {
 
       const result = await service.finalizeCycle('wf-1', 'cycle-1', 'final-user-1');
       expect(result).toBe(cycle);
+    });
+  });
+
+  describe('forwardStep()', () => {
+    const validDto = {
+      optionalReviewerId: 'optional-user-1',
+      notes: 'Forwarding for review',
+    };
+
+    function makeWfForForward() {
+      return makeWorkflow({ status: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS });
+    }
+
+    function makeCycleForForward(overrides: Partial<WorkflowAdminCycle> = {}) {
+      return makeCycle({
+        allowedOptionalReviewerIds: ['optional-user-1'],
+        steps: [makeAdminStep({ isOptional: false })],
+        ...overrides,
+      } as Partial<WorkflowAdminCycle>);
+    }
+
+    function addQbToManager(dataSource: ReturnType<typeof makeDataSource>) {
+      const qb = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue(undefined),
+      };
+      (dataSource._manager as unknown as Record<string, unknown>).createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    }
+
+    it('throws ConflictException when workflow is not ADMIN_CYCLE_IN_PROGRESS', async () => {
+      const { service, workflowRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWorkflow({ status: WorkflowStatus.DRAFT }));
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', validDto),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws NotFoundException when cycle is not found', async () => {
+      const { service, workflowRepo, cycleRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', validDto),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ConflictException when cycle is not IN_PROGRESS', async () => {
+      const { service, workflowRepo, cycleRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(makeCycle({ status: AdminCycleStatus.COMPLETED }));
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', validDto),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws NotFoundException when step is not in the cycle', async () => {
+      const { service, workflowRepo, cycleRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(makeCycleForForward({ steps: [] }));
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'missing-step', 'admin-user-1', validDto),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when user is not assigned to the step', async () => {
+      const { service, workflowRepo, cycleRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(makeCycleForForward());
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'wrong-user', validDto),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws ConflictException when step is not PENDING', async () => {
+      const { service, workflowRepo, cycleRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(
+        makeCycleForForward({ steps: [makeAdminStep({ status: AdminStepStatus.COMPLETED })] }),
+      );
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', validDto),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws BadRequestException when step is optional', async () => {
+      const { service, workflowRepo, cycleRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(
+        makeCycleForForward({ steps: [makeAdminStep({ isOptional: true })] }),
+      );
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', validDto),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when optionalReviewerId is not in the allowed list', async () => {
+      const { service, workflowRepo, cycleRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(
+        makeCycleForForward({ allowedOptionalReviewerIds: [] }),
+      );
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', validDto),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('inserts optional step, completes current step and emits kafka event on success', async () => {
+      const { service, workflowRepo, cycleRepo, dataSource, stepRepo, kafkaProducer } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(makeCycleForForward());
+      addQbToManager(dataSource);
+      const insertedStep = makeAdminStep({ id: 'new-step-1', isOptional: true });
+      dataSource._manager.save
+        .mockResolvedValueOnce({ id: 'note-1' })
+        .mockResolvedValueOnce(insertedStep);
+      stepRepo.findOneOrFail.mockResolvedValue(insertedStep);
+
+      const result = await service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', validDto);
+
+      expect(dataSource._manager.update).toHaveBeenCalledWith(
+        WorkflowAdminStep, 'astep-1', expect.objectContaining({ status: AdminStepStatus.COMPLETED }),
+      );
+      expect(kafkaProducer.emitSafe).toHaveBeenCalled();
+      expect(result.id).toBe(insertedStep.id);
+    });
+
+    it('saves attachments when dto.attachments is provided', async () => {
+      const { service, workflowRepo, cycleRepo, dataSource, stepRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWfForForward());
+      cycleRepo.findOne.mockResolvedValue(makeCycleForForward());
+      addQbToManager(dataSource);
+      const insertedStep = makeAdminStep({ id: 'new-step-1', isOptional: true });
+      dataSource._manager.save.mockResolvedValue(insertedStep);
+      stepRepo.findOneOrFail.mockResolvedValue(insertedStep);
+
+      await service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', {
+        ...validDto,
+        attachments: [{ storageKey: 'att-1', originalName: 'doc.pdf', mimeType: 'application/pdf' }],
+      });
+
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowAdminAttachment,
+        expect.arrayContaining([expect.objectContaining({ storageKey: 'att-1' })]),
+      );
     });
   });
 
