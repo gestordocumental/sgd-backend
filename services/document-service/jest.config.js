@@ -21,7 +21,6 @@ module.exports = {
     '!**/common/filters/**',
     '!**/common/guards/**',
     '!**/common/interceptors/**',
-    '!**/common/kafka/**',
     '!**/common/logger/**',
     '!**/common/metrics/**',
     '!**/common/middleware/**',
