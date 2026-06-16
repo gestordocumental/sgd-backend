@@ -1474,6 +1474,11 @@ describe('UsersService', () => {
         { userId: user.id, orgId: 'org-uuid-1', roleId: role.id },
         { roleId: null, assignedBy: null },
       );
+      expect(redis.del).toHaveBeenCalledWith('perms:user-uuid-1:org-uuid-1');
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ userId: user.id, orgId: 'org-uuid-1' }),
+      );
     });
 
     it('emits audit log when actorId is provided', async () => {

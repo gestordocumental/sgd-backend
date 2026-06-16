@@ -541,6 +541,7 @@ describe('UsersController', () => {
 
       expect(usersService.findAllSuperAdmin).toHaveBeenCalledWith(20, undefined, undefined, undefined);
       expect(result.hasMore).toBe(false);
+      expect(result.total).toBe(1);
       expect(result.data).toHaveLength(1);
       expect(result.data[0]).toBeInstanceOf(UserResponseDto);
     });

@@ -72,7 +72,7 @@ read -r -d '' INDEX_BODY <<'MAPPING' || true
 MAPPING
 
 NETRC_FILE=$(mktemp)
-trap "rm -f ${NETRC_FILE}" EXIT
+trap 'rm -f "${NETRC_FILE}"' EXIT
 chmod 600 "${NETRC_FILE}"
 ES_HOST=$(echo "${ES_URL}" | sed -E 's|https?://([^/]+).*|\1|')
 printf 'machine %s\nlogin %s\npassword %s\n' "${ES_HOST}" "${ES_USER}" "${ES_PASS}" > "${NETRC_FILE}"

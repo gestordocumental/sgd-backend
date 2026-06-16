@@ -89,8 +89,6 @@ function makeDoc(overrides: Record<string, any> = {}): TypologyDocument {
   } as unknown as TypologyDocument;
 }
 
-const clamav = { scan: jest.fn().mockResolvedValue({ clean: true }) };
-
 function makeDeps(doc: TypologyDocument | null = null) {
   const model: any = {
     findOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) }),
@@ -102,6 +100,7 @@ function makeDeps(doc: TypologyDocument | null = null) {
   };
   const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
   const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  const clamav = { scan: jest.fn().mockResolvedValue({ clean: true }) };
   return { model, storage, kafka, logger, clamav };
 }
 
@@ -262,6 +261,19 @@ describe('DocumentUploadService', () => {
       expect(storage.delete).toHaveBeenCalled();
       expect(kafka.emit).not.toHaveBeenCalled();
     });
+
+    it('bloquea la carga cuando ClamAV reporta malware', async () => {
+      const doc = makeDoc();
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      clamav.scan.mockResolvedValueOnce({ clean: false, threat: 'Eicar-Test-Signature' });
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      await expect(service.upload('org-1', doc.id, makeFile())).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'MALWARE_DETECTED' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+      expect(kafka.emit).not.toHaveBeenCalled();
+    });
   });
 
   // ── createNewVersion() ────────────────────────────────────────────────────
@@ -289,6 +301,7 @@ describe('DocumentUploadService', () => {
       };
       const kafka  = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
       const logger = { log: jest.fn(), warn: jest.fn() };
+      const clamav = { scan: jest.fn().mockResolvedValue({ clean: true }) };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' });
@@ -307,6 +320,7 @@ describe('DocumentUploadService', () => {
       const storage = { upload: jest.fn(), delete: jest.fn() };
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await expect(
@@ -322,6 +336,7 @@ describe('DocumentUploadService', () => {
       const storage = { upload: jest.fn(), delete: jest.fn() };
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await expect(
@@ -336,6 +351,7 @@ describe('DocumentUploadService', () => {
       const storage = { upload: jest.fn(), delete: jest.fn() };
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
 
       // PDF MIME declared but DOCX (PK ZIP) magic bytes supplied
@@ -355,6 +371,7 @@ describe('DocumentUploadService', () => {
       const storage = { upload: jest.fn(), delete: jest.fn() };
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
 
       // XLSX MIME declared but DOCX magic bytes supplied — cross-OOXML substitution
@@ -374,11 +391,32 @@ describe('DocumentUploadService', () => {
       const storage = { upload: jest.fn() };
       const kafka   = { emit: jest.fn() };
       const logger  = { log: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
       await expect(
         service.createNewVersion('org-1', makeId(), makeFile(), {}),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('bloquea createNewVersion cuando ClamAV reporta malware', async () => {
+      const oldDoc = makeDoc();
+      const FullModel: any = function () { return makeDoc(); };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+      const storage = { upload: jest.fn(), delete: jest.fn() };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+      clamav.scan.mockResolvedValueOnce({ clean: false, threat: 'Eicar-Test-Signature' });
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ errorCode: 'MALWARE_DETECTED' }),
+      });
+      expect(storage.upload).not.toHaveBeenCalled();
+      expect(kafka.emit).not.toHaveBeenCalled();
     });
   });
 
