@@ -22,8 +22,16 @@ export class ClamavService {
     private readonly logger: AppLogger,
   ) {
     this.host      = config.get<string>('CLAMAV_HOST', 'localhost');
-    this.port      = Number(config.get('CLAMAV_PORT', 3310));
-    this.timeoutMs = Number(config.get('CLAMAV_TIMEOUT_MS', 15000));
+    const rawPort    = Number(config.get('CLAMAV_PORT', 3310));
+    const rawTimeout = Number(config.get('CLAMAV_TIMEOUT_MS', 15000));
+    if (!Number.isFinite(rawPort) || rawPort <= 0) {
+      throw new Error('CLAMAV_PORT must be a positive number');
+    }
+    if (!Number.isFinite(rawTimeout) || rawTimeout <= 0) {
+      throw new Error('CLAMAV_TIMEOUT_MS must be a positive number');
+    }
+    this.port      = rawPort;
+    this.timeoutMs = rawTimeout;
     const requiredRaw = String(config.get('CLAMAV_REQUIRED', 'false')).trim().toLowerCase();
     this.required = ['true', '1', 'yes', 'on'].includes(requiredRaw);
   }
