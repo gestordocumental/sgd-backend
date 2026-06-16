@@ -147,25 +147,27 @@ describe('ClamavService', () => {
     });
 
     it('resolves clean:true on timeout when CLAMAV_REQUIRED=false', async () => {
-      const { svc } = makeService(false);
+      const { svc, logger } = makeService(false);
       const p = svc.scan(Buffer.from('data'));
 
       handlers['timeout']();
 
       await expect(p).resolves.toEqual({ clean: true });
+      expect(logger.warn).toHaveBeenCalled();
     });
 
     it('throws InternalServerErrorException on timeout when CLAMAV_REQUIRED=true', async () => {
-      const { svc } = makeService(true);
+      const { svc, logger } = makeService(true);
       const p = svc.scan(Buffer.from('data'));
 
       handlers['timeout']();
 
       await expect(p).rejects.toThrow(InternalServerErrorException);
+      expect(logger.error).toHaveBeenCalled();
     });
 
     it('resolves clean:true on unexpected ClamAV response when CLAMAV_REQUIRED=false', async () => {
-      const { svc } = makeService(false);
+      const { svc, logger } = makeService(false);
       const p = svc.scan(Buffer.from('data'));
 
       triggerConnect();
@@ -173,10 +175,11 @@ describe('ClamavService', () => {
       handlers['end']();
 
       await expect(p).resolves.toEqual({ clean: true });
+      expect(logger.warn).toHaveBeenCalled();
     });
 
     it('throws InternalServerErrorException on unexpected ClamAV response when CLAMAV_REQUIRED=true', async () => {
-      const { svc } = makeService(true);
+      const { svc, logger } = makeService(true);
       const p = svc.scan(Buffer.from('data'));
 
       triggerConnect();
@@ -184,6 +187,7 @@ describe('ClamavService', () => {
       handlers['end']();
 
       await expect(p).rejects.toThrow(InternalServerErrorException);
+      expect(logger.error).toHaveBeenCalled();
     });
   });
 });
