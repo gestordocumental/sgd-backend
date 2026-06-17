@@ -131,12 +131,13 @@ describe('DocumentClientService', () => {
       throwError(() => ({ response: { status: 404, data: { message: 'Missing document' } } })),
     );
 
-    await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
-      NotFoundException,
-    );
-    await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
-      'Resource not found',
-    );
+    const error = await service
+      .validateDocument('typology-1', 'doc-1')
+      .then(() => null, (e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.message).toBe('Resource not found');
+    expect(error.message).not.toContain('document-service');
   });
 
   it('maps timeout errors to GatewayTimeoutException', async () => {

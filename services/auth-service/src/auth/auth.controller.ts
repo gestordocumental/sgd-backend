@@ -289,7 +289,7 @@ export class AuthController {
   @ApiBearerAuth('JWT')
   @ApiResponse({ status: 200, description: 'Returns userId, email, companyId and isSuperAdmin' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
-  @SkipThrottle()
+  @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
   @Auth()
   @Get("me")
   me(@JwtPayloadParam() payload: JwtPayload) {
@@ -305,7 +305,7 @@ export class AuthController {
   @ApiBearerAuth('JWT')
   @ApiResponse({ status: 200, description: 'Returns array of companies' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
-  @SkipThrottle()
+  @ApiResponse({ status: 429, description: 'Too many requests — wait 60 seconds' })
   @Auth()
   @Get("me/companies")
   getMyCompanies(@JwtPayloadParam() payload: JwtPayload) {

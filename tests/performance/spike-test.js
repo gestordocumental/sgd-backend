@@ -4,8 +4,11 @@ import { Rate } from 'k6/metrics';
 
 // Prueba de pico: simula un spike repentino de usuarios
 const BASE_URL = __ENV.BASE_URL || 'https://api-dev.railway.app';
-const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || 'admin@sgd.local';
-const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'Admin1234!';
+const ADMIN_EMAIL = __ENV.ADMIN_EMAIL;
+const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+  throw new Error('Faltan ADMIN_EMAIL y/o ADMIN_PASSWORD — pásalos con -e ADMIN_EMAIL=... -e ADMIN_PASSWORD=...');
+}
 
 const errorRate = new Rate('error_rate');
 

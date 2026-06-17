@@ -236,6 +236,19 @@ describe('EmailService', () => {
       await expect(svc.sendInvitation(inviteOpts)).rejects.toThrow('Timeout');
     });
 
+    it('logs and does not throw on non-retryable failure (4xx)', async () => {
+      fetchMock.mockResolvedValue(failFetch(400, { message: 'Invalid email address' }));
+      const svc = new EmailService(makeConfig(), logger);
+
+      await svc.sendInvitation(inviteOpts);
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Non-retryable failure'),
+        undefined,
+        'EmailService',
+      );
+    });
+
     it('includes registration URL with token in HTML body', async () => {
       fetchMock.mockResolvedValue(okFetch());
       const svc = new EmailService(makeConfig(), logger);
@@ -299,6 +312,19 @@ describe('EmailService', () => {
       const svc = new EmailService(makeConfig(), logger);
 
       await expect(svc.sendPasswordReset(resetOpts)).rejects.toThrow('Internal error');
+    });
+
+    it('logs and does not throw on non-retryable failure (4xx)', async () => {
+      fetchMock.mockResolvedValue(failFetch(422, { message: 'Unprocessable entity' }));
+      const svc = new EmailService(makeConfig(), logger);
+
+      await svc.sendPasswordReset(resetOpts);
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Non-retryable failure'),
+        undefined,
+        'EmailService',
+      );
     });
   });
 });
