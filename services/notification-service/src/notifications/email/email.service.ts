@@ -52,9 +52,13 @@ export class EmailService {
     const subject = getNotificationTitle(opts.type);
     const html    = this.buildHtml(subject, opts.message, opts.workflowTitle);
 
-    const error = await this.sendEmail({ to: opts.to, subject, html });
-    if (error) {
-      this.logger.error(`Failed to send email to ${opts.to}: ${error}`, undefined, 'EmailService');
+    const result = await this.sendEmail({ to: opts.to, subject, html });
+    if (!result.ok) {
+      this.logger.error(
+        `Failed to send email to ${opts.to}: ${result.reason} (retryable=${result.retryable})`,
+        undefined,
+        'EmailService',
+      );
     } else {
       this.logger.log(`Email sent to ${opts.to} [${opts.type}]`, 'EmailService');
     }
@@ -91,11 +95,19 @@ export class EmailService {
     const subject = 'SGD Helisa — Restablece tu contraseña';
     const html    = this.buildPasswordResetHtml(resetUrl, expiresDate);
 
-    const error = await this.sendEmail({ to: opts.to, subject, html });
-    if (error) {
-      // Throw so the withDlt wrapper retries on transient Resend failures (outage, timeout).
-      // This is intentionally not swallowed — password reset is a critical user flow.
-      throw new Error(`Failed to send password reset email to ${opts.to}: ${error}`);
+    const result = await this.sendEmail({ to: opts.to, subject, html });
+    if (!result.ok) {
+      if (result.retryable) {
+        // Throw so the withDlt wrapper retries on transient failures (outage, timeout, 429).
+        throw new Error(`Failed to send password reset email to ${opts.to}: ${result.reason}`);
+      }
+      // Non-retryable (e.g. 400 invalid address, 422): log and abort — retrying won't help.
+      this.logger.error(
+        `Non-retryable failure sending password reset to ${opts.to}: ${result.reason}`,
+        undefined,
+        'EmailService',
+      );
+      return;
     }
     this.logger.log(`Password reset email sent to ${opts.to}`, 'EmailService');
   }
@@ -131,16 +143,26 @@ export class EmailService {
     const subject = 'Bienvenido a SGD Helisa — Completa tu registro';
     const html    = this.buildInvitationHtml(registrationUrl, expiresDate);
 
-    const error = await this.sendEmail({ to: opts.to, subject, html });
-    if (error) {
-      // Throw so the withDlt wrapper retries on transient Resend failures (outage, timeout).
-      // This is intentionally not swallowed — invitation delivery is a critical user flow.
-      throw new Error(`Failed to send invitation email to ${opts.to}: ${error}`);
+    const result = await this.sendEmail({ to: opts.to, subject, html });
+    if (!result.ok) {
+      if (result.retryable) {
+        // Throw so the withDlt wrapper retries on transient failures (outage, timeout, 429).
+        throw new Error(`Failed to send invitation email to ${opts.to}: ${result.reason}`);
+      }
+      // Non-retryable (e.g. 400 invalid address, 422): log and abort — retrying won't help.
+      this.logger.error(
+        `Non-retryable failure sending invitation to ${opts.to}: ${result.reason}`,
+        undefined,
+        'EmailService',
+      );
+      return;
     }
     this.logger.log(`Invitation email sent to ${opts.to}`, 'EmailService');
   }
 
-  private async sendEmail(opts: { to: string; subject: string; html: string }): Promise<string | null> {
+  private async sendEmail(
+    opts: { to: string; subject: string; html: string },
+  ): Promise<{ ok: true } | { ok: false; retryable: boolean; reason: string }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
@@ -157,12 +179,16 @@ export class EmailService {
       const body = await response.json() as { id?: string; message?: string; name?: string };
 
       if (!response.ok) {
-        return body.message ?? body.name ?? `HTTP ${response.status}`;
+        const reason = body.message ?? body.name ?? `HTTP ${response.status}`;
+        // 429 and 5xx are transient; all other 4xx are permanent client errors.
+        const retryable = response.status === 429 || response.status >= 500;
+        return { ok: false, retryable, reason };
       }
-      return null;
+      return { ok: true };
     } catch (err) {
       const cause = err instanceof Error ? ((err as any).cause ?? err) : err;
-      return `${err instanceof Error ? err.message : String(err)} | cause: ${cause instanceof Error ? cause.message : JSON.stringify(cause)}`;
+      const reason = `${err instanceof Error ? err.message : String(err)} | cause: ${cause instanceof Error ? cause.message : JSON.stringify(cause)}`;
+      return { ok: false, retryable: true, reason };
     } finally {
       clearTimeout(timeout);
     }

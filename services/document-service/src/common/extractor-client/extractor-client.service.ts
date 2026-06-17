@@ -46,7 +46,10 @@ export class ExtractorClientService {
         volumeThreshold:          3,
         errorFilter: (err: any) => {
           const s = err?.response?.status;
-          return typeof s === 'number' && s >= 400 && s < 500;
+          // 400 Bad Request and 422 Unprocessable Entity are caller errors,
+          // not extractor failures — exclude them from circuit-breaker metrics.
+          // All other codes (401, 404, 429, 5xx, network errors) count as failures.
+          return s === 400 || s === 422;
         },
       },
     );
