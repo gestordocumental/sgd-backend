@@ -97,7 +97,13 @@ export class DocumentUploadController {
     return this.service.retryExtraction(orgId, typologyId, orgName, extractUserId(auth));
   }
 
-  @ApiOperation({ summary: 'Get a temporary signed download URL for the uploaded file' })
+  @ApiOperation({
+    summary: 'Get a temporary signed download URL for the uploaded file',
+    description:
+      'Generates a fresh pre-signed R2 URL valid for SIGNED_URL_EXPIRY seconds (default 5 min). ' +
+      'Call this endpoint on-demand (e.g. on button click) rather than pre-fetching — ' +
+      'the response includes `expiresAt` so the frontend can skip a re-fetch if a cached URL is still valid.',
+  })
   @ApiOkResponse({ description: 'Signed URL generated', type: SignedUrlResponseDto })
   @Get('signed-url')
   getSignedUrl(

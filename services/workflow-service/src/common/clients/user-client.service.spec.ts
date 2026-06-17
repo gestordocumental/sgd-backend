@@ -1,4 +1,4 @@
-import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { AxiosResponse } from 'axios';
@@ -115,13 +115,16 @@ describe('UserClientService', () => {
     await expect(service.getUsersByPosition('org-1', {})).rejects.toThrow(BadRequestException);
   });
 
-  it('maps 404 responses to BadRequestException with resource context', async () => {
+  it('maps 404 responses to NotFoundException without leaking internal service name', async () => {
     httpService.get.mockReturnValue(
       throwError(() => ({ response: { status: 404, data: { message: 'Missing user' } } })),
     );
 
     await expect(service.validateUserExists('missing-user')).rejects.toThrow(
-      'Resource not found in user-service: Missing user',
+      NotFoundException,
+    );
+    await expect(service.validateUserExists('missing-user')).rejects.toThrow(
+      'Resource not found',
     );
   });
 

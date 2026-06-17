@@ -80,7 +80,13 @@ export class WorkflowFilesController {
     return this.service.upload(orgId, file);
   }
 
-  @ApiOperation({ summary: 'Obtener URL firmada de descarga para un archivo de workflow' })
+  @ApiOperation({
+    summary: 'Obtener URL firmada de descarga para un archivo de workflow',
+    description:
+      'Genera una URL R2 pre-firmada válida por SIGNED_URL_EXPIRY segundos (por defecto 5 min). ' +
+      'Llamar on-demand (ej. al hacer clic en "Descargar") — la respuesta incluye `expiresAt` ' +
+      'para que el frontend omita una nueva petición si la URL cacheada sigue vigente.',
+  })
   @ApiOkResponse({ schema: { example: { signedUrl: 'https://...', expiresAt: '2025-01-01T00:00:00Z' } } })
   @Post('signed-url')
   async getSignedUrl(

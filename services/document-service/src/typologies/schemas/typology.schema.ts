@@ -161,3 +161,11 @@ TypologySchema.index(
     },
   },
 );
+
+// Covers findAll: find({ orgId, typologyStatus }).sort({ createdAt: -1 }) — avoids in-memory sort.
+TypologySchema.index({ orgId: 1, typologyStatus: 1, createdAt: -1 });
+
+// Covers findHistory: find({ orgId, 'datosDeclarados.codigo' }).sort({ createdAt: -1 }).
+// The partial unique index above is restricted to ACTIVE docs and cannot serve this query
+// (history includes DELETED/ARCHIVED). This non-partial index fills that gap.
+TypologySchema.index({ orgId: 1, 'datosDeclarados.codigo': 1, createdAt: -1 });

@@ -337,9 +337,9 @@ describe('TypologiesService', () => {
   // ── findHistory ───────────────────────────────────────────────────────────
 
   describe('findHistory()', () => {
-    it('returns all typologies with the same codigo (including deleted)', async () => {
+    it('returns all typologies with the same codigo (including deleted), capped at 50', async () => {
       const docs = [makeDoc(), makeDoc({ deletedAt: new Date() })];
-      const chain = { sort: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue(docs) };
+      const chain = { sort: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue(docs) };
       const { Model } = makeModel();
       Model.find = jest.fn().mockReturnValue(chain);
 
@@ -347,6 +347,7 @@ describe('TypologiesService', () => {
       const result = await service.findHistory('org-1', 'POL-001');
 
       expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1', 'datosDeclarados.codigo': 'POL-001' });
+      expect(chain.limit).toHaveBeenCalledWith(50);
       expect(result).toHaveLength(2);
     });
   });

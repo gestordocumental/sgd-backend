@@ -51,6 +51,12 @@ export class AuditService implements OnModuleInit {
           },
         },
         settings: {
+          // Single shard, no replicas — acceptable for the initial deployment.
+          // Limitation: no HA; if the Elasticsearch node goes down, audit logs are
+          // unavailable until it recovers (data is not lost, just inaccessible).
+          // To add a replica on a multi-node cluster:
+          //   PUT /audit-logs/_settings { "index.number_of_replicas": 1 }
+          // Note: number_of_shards cannot be changed after index creation without reindexing.
           number_of_shards:   1,
           number_of_replicas: 0,
         },
