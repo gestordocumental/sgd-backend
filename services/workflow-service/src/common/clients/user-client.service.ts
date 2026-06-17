@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   GatewayTimeoutException,
   BadRequestException,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
@@ -187,8 +188,8 @@ export class UserClientService {
     });
 
     if (status === 400) throw new BadRequestException(message);
-    if (status === 404) throw new BadRequestException(`Resource not found in ${target}: ${message}`);
+    if (status === 404) throw new NotFoundException('Resource not found');
 
-    throw new InternalServerErrorException(`Error communicating with ${target}: ${message}`);
+    throw new InternalServerErrorException('An unexpected error occurred — please try again');
   }
 }

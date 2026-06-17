@@ -59,6 +59,7 @@ export class WorkflowTimelineService {
     return this.timelineRepo.find({
       where: { workflowId },
       order: { createdAt: 'ASC' },
+      take: 500,
     });
   }
 

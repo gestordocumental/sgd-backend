@@ -235,6 +235,7 @@ export class TypologiesService {
     return this.model
       .find({ orgId, 'datosDeclarados.codigo': codigo })
       .sort({ createdAt: -1 })
+      .limit(50)
       .exec();
   }
 

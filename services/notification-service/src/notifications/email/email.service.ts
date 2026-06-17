@@ -93,10 +93,11 @@ export class EmailService {
 
     const error = await this.sendEmail({ to: opts.to, subject, html });
     if (error) {
-      this.logger.error(`Failed to send password reset email to ${opts.to}: ${error}`, undefined, 'EmailService');
-    } else {
-      this.logger.log(`Password reset email sent to ${opts.to}`, 'EmailService');
+      // Throw so the withDlt wrapper retries on transient Resend failures (outage, timeout).
+      // This is intentionally not swallowed — password reset is a critical user flow.
+      throw new Error(`Failed to send password reset email to ${opts.to}: ${error}`);
     }
+    this.logger.log(`Password reset email sent to ${opts.to}`, 'EmailService');
   }
 
   async sendInvitation(opts: {
@@ -132,10 +133,11 @@ export class EmailService {
 
     const error = await this.sendEmail({ to: opts.to, subject, html });
     if (error) {
-      this.logger.error(`Failed to send invitation email to ${opts.to}: ${error}`, undefined, 'EmailService');
-    } else {
-      this.logger.log(`Invitation email sent to ${opts.to}`, 'EmailService');
+      // Throw so the withDlt wrapper retries on transient Resend failures (outage, timeout).
+      // This is intentionally not swallowed — invitation delivery is a critical user flow.
+      throw new Error(`Failed to send invitation email to ${opts.to}: ${error}`);
     }
+    this.logger.log(`Invitation email sent to ${opts.to}`, 'EmailService');
   }
 
   private async sendEmail(opts: { to: string; subject: string; html: string }): Promise<string | null> {

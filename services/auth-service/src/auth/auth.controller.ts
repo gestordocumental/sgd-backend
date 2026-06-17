@@ -229,6 +229,7 @@ export class AuthController {
   @ApiHeader({ name: CSRF_HEADER_NAME, required: true, description: 'Must echo the sgd_csrf_token cookie value' })
   @ApiResponse({ status: 204, description: 'Logged out successfully' })
   @ApiResponse({ status: 401, description: 'Missing or invalid CSRF token' })
+  @SkipThrottle()
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   async logout(
@@ -288,6 +289,7 @@ export class AuthController {
   @ApiBearerAuth('JWT')
   @ApiResponse({ status: 200, description: 'Returns userId, email, companyId and isSuperAdmin' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
+  @SkipThrottle()
   @Auth()
   @Get("me")
   me(@JwtPayloadParam() payload: JwtPayload) {
@@ -303,6 +305,7 @@ export class AuthController {
   @ApiBearerAuth('JWT')
   @ApiResponse({ status: 200, description: 'Returns array of companies' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
+  @SkipThrottle()
   @Auth()
   @Get("me/companies")
   getMyCompanies(@JwtPayloadParam() payload: JwtPayload) {

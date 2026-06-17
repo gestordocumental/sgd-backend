@@ -222,30 +222,18 @@ describe('EmailService', () => {
       );
     });
 
-    it('logs error when invitation email fails', async () => {
+    it('throws when invitation email fails (enables DLT retry)', async () => {
       fetchMock.mockResolvedValue(failFetch(500, { message: 'Internal error' }));
       const svc = new EmailService(makeConfig(), logger);
 
-      await svc.sendInvitation(inviteOpts);
-
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining('invitation email'),
-        undefined,
-        'EmailService',
-      );
+      await expect(svc.sendInvitation(inviteOpts)).rejects.toThrow('invitation email');
     });
 
-    it('handles fetch exception during invitation send', async () => {
+    it('throws when fetch throws during invitation send (enables DLT retry)', async () => {
       fetchMock.mockRejectedValue(new Error('Timeout'));
       const svc = new EmailService(makeConfig(), logger);
 
-      await svc.sendInvitation(inviteOpts);
-
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Timeout'),
-        undefined,
-        'EmailService',
-      );
+      await expect(svc.sendInvitation(inviteOpts)).rejects.toThrow('Timeout');
     });
 
     it('includes registration URL with token in HTML body', async () => {
@@ -306,17 +294,11 @@ describe('EmailService', () => {
       );
     });
 
-    it('logs error when password reset email fails', async () => {
+    it('throws when password reset email fails (enables DLT retry)', async () => {
       fetchMock.mockResolvedValue(failFetch(500, { message: 'Internal error' }));
       const svc = new EmailService(makeConfig(), logger);
 
-      await svc.sendPasswordReset(resetOpts);
-
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Internal error'),
-        undefined,
-        'EmailService',
-      );
+      await expect(svc.sendPasswordReset(resetOpts)).rejects.toThrow('Internal error');
     });
   });
 });
