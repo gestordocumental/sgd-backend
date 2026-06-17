@@ -1,227 +1,286 @@
-# Migration Runbook — Document Management System
+# Runbook de Migraciones — Sistema de Gestión Documental
 
-> **Audience:** Backend engineers and DevOps performing production deployments that include TypeORM migrations.
-> **Scope:** PostgreSQL databases for all services (user-service, workflow-service, auth-service, org-service, document-service, audit-service, notification-service, metadata-extractor-service).
-
----
-
-## Table of Contents
-
-1. [Pre-deployment checklist](#1-pre-deployment-checklist)
-2. [Running migrations in production](#2-running-migrations-in-production)
-3. [Rollback window and procedure](#3-rollback-window-and-procedure)
-4. [Contingency — migration fails mid-execution](#4-contingency--migration-fails-mid-execution)
-5. [TypeORM transaction behaviour in PostgreSQL](#5-typeorm-transaction-behaviour-in-postgresql)
-6. [Migration safety catalogue](#6-migration-safety-catalogue)
-7. [Approval requirements for destructive migrations](#7-approval-requirements-for-destructive-migrations)
-8. [Known eventual-consistency windows](#8-known-eventual-consistency-windows)
+> **Audiencia:** Ingenieros backend y DevOps que realizan despliegues a producción que incluyen migraciones TypeORM.
+> **Alcance:** Bases de datos PostgreSQL de todos los servicios (user-service, workflow-service, auth-service, org-service, notification-service).
 
 ---
 
-## 1. Pre-deployment checklist
+## Tabla de contenidos
 
-Complete every item before running migrations against a production (or staging) database.
-
-- [ ] **Full database snapshot taken** — use Railway's "Create backup" button, `pg_dump`, or your cloud provider's point-in-time restore. Label the backup with the deployment tag (e.g. `pre-deploy-v1.4.0-2026-05-25`). Verify the dump is restorable before proceeding.
-- [ ] **Review the pending migration list** — run `npm run migration:show` (or `typeorm migration:show`) in each affected service and compare the output with the [safety catalogue](#6-migration-safety-catalogue) below.
-- [ ] **Flag destructive migrations** — if any pending migration is classified **DESTRUCTIVE** or **CONDITIONAL**, obtain explicit written approval from the team lead before deploying (see [section 7](#7-approval-requirements-for-destructive-migrations)).
-- [ ] **Confirm rollback feasibility** — for every pending migration, check whether `down()` is safe. If it is not, decide in advance what the contingency will be (snapshot restore vs. manual data repair).
-- [ ] **Announce deployment window** — notify the team of the start time and expected downtime, if any.
+1. [Lista de verificación pre-despliegue](#1-lista-de-verificación-pre-despliegue)
+2. [Ejecutar migraciones en producción](#2-ejecutar-migraciones-en-producción)
+3. [Ventana de rollback y procedimiento](#3-ventana-de-rollback-y-procedimiento)
+4. [Contingencia — migración falla a mitad de ejecución](#4-contingencia--migración-falla-a-mitad-de-ejecución)
+5. [Comportamiento de transacciones TypeORM en PostgreSQL](#5-comportamiento-de-transacciones-typeorm-en-postgresql)
+6. [Catálogo de seguridad de migraciones](#6-catálogo-de-seguridad-de-migraciones)
+7. [Requisitos de aprobación para migraciones destructivas](#7-requisitos-de-aprobación-para-migraciones-destructivas)
+8. [Ventanas de consistencia eventual conocidas](#8-ventanas-de-consistencia-eventual-conocidas)
 
 ---
 
-## 2. Running migrations in production
+## 1. Lista de verificación pre-despliegue
 
-Each service exposes a `migration:run` npm script that wraps `typeorm migration:run`. Railway executes this automatically on deploy via the service `Dockerfile` start command. For manual execution:
+Completar cada ítem antes de ejecutar migraciones contra una base de datos de producción (o staging).
+
+- [ ] **Snapshot completo de la base de datos tomado** — usar el botón "Create backup" de Railway, `pg_dump`, o la restauración a punto en el tiempo del proveedor cloud. Etiquetar el backup con el tag del despliegue (ej. `pre-deploy-v1.4.0-2026-05-25`). Verificar que el dump es restaurable antes de continuar.
+- [ ] **Revisar la lista de migraciones pendientes** — ejecutar `npm run migration:show` (o `typeorm migration:show`) en cada servicio afectado y comparar la salida con el [catálogo de seguridad](#6-catálogo-de-seguridad-de-migraciones) más abajo.
+- [ ] **Marcar migraciones destructivas** — si alguna migración pendiente está clasificada como **DESTRUCTIVA** o **CONDICIONAL**, obtener aprobación escrita explícita del líder técnico antes de desplegar (ver [sección 7](#7-requisitos-de-aprobación-para-migraciones-destructivas)).
+- [ ] **Confirmar viabilidad del rollback** — para cada migración pendiente, verificar si `down()` es seguro. Si no lo es, decidir de antemano cuál será el plan de contingencia (restauración de snapshot vs. reparación manual de datos).
+- [ ] **Anunciar la ventana de despliegue** — notificar al equipo la hora de inicio y el tiempo de inactividad esperado, si lo hubiera.
+
+---
+
+## 2. Ejecutar migraciones en producción
+
+Cada servicio expone un script npm `migration:run` que envuelve `typeorm migration:run`. Railway lo ejecuta automáticamente al desplegar a través del comando de inicio del `Dockerfile`. Para ejecución manual:
 
 ```bash
-# Inside the service directory
+# Dentro del directorio del servicio
 npm run migration:run
 ```
 
-For Railway deployments, migrations run as part of the container start sequence. If you need to run them manually:
+Para despliegues en Railway, las migraciones se ejecutan como parte de la secuencia de inicio del contenedor. Si necesitas ejecutarlas manualmente:
 
 ```bash
-railway run --service <service-name> npm run migration:run
+railway run --service <nombre-del-servicio> npm run migration:run
 ```
 
-**Never run `migration:run` directly against production while the service is receiving traffic** unless the migration is online-safe (additive columns/indexes that tolerate concurrent reads/writes).
+**Nunca ejecutar `migration:run` directamente contra producción mientras el servicio está recibiendo tráfico**, a menos que la migración sea segura en línea (columnas/índices aditivos que toleran lecturas/escrituras concurrentes).
 
 ---
 
-## 3. Rollback window and procedure
+## 3. Ventana de rollback y procedimiento
 
-### 3-minute rule
+### Regla de los 3 minutos
 
-If a deployment failure is detected **within 3 minutes** of the migration completing and no data has been written by the new code:
+Si se detecta un fallo en el despliegue **dentro de los 3 minutos** de que la migración se completó y el nuevo código no ha escrito datos:
 
-1. Stop or redeploy the previous service image immediately.
-2. Run the revert command:
+1. Detener o redesplegar la imagen anterior del servicio inmediatamente.
+2. Ejecutar el comando de reversión:
    ```bash
-   npm run migration:revert   # reverts the last applied migration
+   npm run migration:revert   # revierte la última migración aplicada
    ```
-3. Verify the database state with a spot check on the affected tables.
-4. Re-run the previous successful deployment.
+3. Verificar el estado de la base de datos con una inspección puntual de las tablas afectadas.
+4. Re-ejecutar el despliegue exitoso anterior.
 
-> **Warning:** `migration:revert` only reverts the *most recently applied* migration. To revert multiple migrations, run the command once per migration in reverse order.
+> **Advertencia:** `migration:revert` solo revierte la migración *más recientemente aplicada*. Para revertir múltiples migraciones, ejecutar el comando una vez por migración en orden inverso.
 
-### When `migration:revert` is NOT safe
+### Cuándo `migration:revert` NO es seguro
 
-Do **not** run `migration:revert` if the pending migration is classified **DESTRUCTIVE** or **LOSSY** (see catalogue). In those cases the `down()` function either throws an error or causes permanent data loss. Use the **snapshot restore path** instead:
+**No** ejecutar `migration:revert` si la migración pendiente está clasificada como **DESTRUCTIVA** o **CON PÉRDIDA** (ver catálogo). En esos casos la función `down()` lanza un error o causa pérdida permanente de datos. Usar el **camino de restauración de snapshot** en su lugar:
 
-1. Halt all traffic to the affected service (set Railway service to 0 replicas or enable maintenance mode via Kong).
-2. Restore the pre-deployment database snapshot to a new database instance.
-3. Update the service's `DATABASE_URL` environment variable to point to the restored instance.
-4. Redeploy the previous service image.
-5. Validate data integrity before re-enabling traffic.
-6. Schedule a post-mortem to fix the migration's `down()` before the next attempt.
-
----
-
-## 4. Contingency — migration fails mid-execution
-
-TypeORM wraps each migration in a PostgreSQL transaction by default (see [section 5](#5-typeorm-transaction-behaviour-in-postgresql)). If the migration throws at any point:
-
-- PostgreSQL **rolls back the entire migration automatically** — no partial schema changes remain.
-- The migration is marked as not applied in the `migrations` table.
-- The service will fail to start (TypeORM's `migrationsRun: true` option causes startup abort on failure).
-
-**Recovery steps for a failed migration:**
-
-1. Read the error output carefully — `typeorm` logs the failing SQL statement.
-2. Fix the migration source file (or the underlying data issue) in a feature branch.
-3. Re-run the pre-deployment checklist.
-4. Re-deploy.
-
-> **Exception:** Migrations that use `transaction: false` (opt-out, rare) are NOT atomic. If such a migration fails mid-way, manual repair is required. Check the migration file for `transaction: false` before deploying.
+1. Detener todo el tráfico al servicio afectado (establecer el servicio Railway en 0 réplicas o activar el modo mantenimiento vía Kong).
+2. Restaurar el snapshot pre-despliegue en una nueva instancia de base de datos.
+3. Actualizar las variables `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME` y `DB_PASSWORD` del servicio para apuntar a la instancia restaurada (en Railway: desconectar el plugin Postgres actual y conectar el nuevo, o actualizar las variables manualmente).
+4. Redesplegar la imagen anterior del servicio.
+5. Validar la integridad de los datos antes de re-habilitar el tráfico.
+6. Programar un post-mortem para corregir el `down()` de la migración antes del próximo intento.
 
 ---
 
-## 5. TypeORM transaction behaviour in PostgreSQL
+## 4. Contingencia — migración falla a mitad de ejecución
 
-- By default, TypeORM wraps every `up()` and `down()` execution in a single DDL transaction.
-- PostgreSQL supports transactional DDL (`CREATE TABLE`, `ALTER TABLE`, `DROP INDEX`, etc.), so a failure at any step rolls back the entire migration.
-- **Exception: `CREATE INDEX CONCURRENTLY` and `DROP INDEX CONCURRENTLY`** cannot run inside a transaction. Any migration that uses these must set `transaction: false` and is therefore **not atomic**.
-- If a migration must be non-transactional, document it explicitly in the migration file with a comment and update the catalogue below.
+TypeORM envuelve cada migración en una transacción PostgreSQL por defecto (ver [sección 5](#5-comportamiento-de-transacciones-typeorm-en-postgresql)). Si la migración lanza una excepción en cualquier punto:
+
+- PostgreSQL **revierte automáticamente toda la migración** — no quedan cambios parciales de esquema.
+- La migración queda marcada como no aplicada en la tabla `migrations`.
+- El servicio fallará al iniciar (`migrationsRun: true` en TypeORM causa abort en el arranque ante un fallo).
+
+**Pasos de recuperación ante una migración fallida:**
+
+1. Leer el output del error cuidadosamente — `typeorm` registra la sentencia SQL fallida.
+2. Corregir el archivo fuente de la migración (o el problema de datos subyacente) en una rama de feature.
+3. Re-ejecutar la lista de verificación pre-despliegue.
+4. Re-desplegar.
+
+> **Excepción:** Las migraciones que usan `transaction: false` (opt-out, poco frecuente) NO son atómicas. Si dicha migración falla a mitad de camino, se requiere reparación manual. Verificar el archivo de migración por `transaction: false` antes de desplegar.
 
 ---
 
-## 6. Migration safety catalogue
+## 5. Comportamiento de transacciones TypeORM en PostgreSQL
 
-### Classification legend
+- Por defecto, TypeORM envuelve cada ejecución de `up()` y `down()` en una única transacción DDL.
+- PostgreSQL soporta DDL transaccional (`CREATE TABLE`, `ALTER TABLE`, `DROP INDEX`, etc.), por lo que un fallo en cualquier paso revierte toda la migración.
+- **Excepción: `CREATE INDEX CONCURRENTLY` y `DROP INDEX CONCURRENTLY`** no pueden ejecutarse dentro de una transacción. Cualquier migración que use estos comandos debe establecer `transaction: false` y por tanto **no es atómica**.
+- Si una migración debe ser no-transaccional, documentarlo explícitamente en el archivo de migración con un comentario y actualizar el catálogo a continuación.
 
-| Label | Meaning |
+---
+
+## 6. Catálogo de seguridad de migraciones
+
+### Leyenda de clasificación
+
+| Etiqueta | Significado |
 |---|---|
-| ✅ SAFE | `down()` is a clean inverse; `migration:revert` is safe |
-| ⚠️ CONDITIONAL | `down()` may fail at runtime depending on current data state |
-| ❌ DESTRUCTIVE | `down()` permanently destroys data or does not restore what `up()` deleted |
-| ❌ LOSSY | `down()` partially restores data; information is permanently lost |
+| ✅ SEGURA | `down()` es un inverso limpio; `migration:revert` es seguro |
+| ⚠️ CONDICIONAL | `down()` puede fallar en tiempo de ejecución según el estado actual de los datos |
+| ❌ DESTRUCTIVA | `down()` destruye datos permanentemente o no restaura lo que `up()` eliminó |
+| ❌ CON PÉRDIDA | `down()` restaura parcialmente los datos; información se pierde permanentemente |
+| 🔒 DOWN VACÍO | `down()` está vacío intencionalmente — PostgreSQL no puede eliminar valores de un enum sin recrear el tipo. El valor permanece en el esquema al revertir pero no causa daño |
 
 ---
 
-### user-service migrations
+### Migraciones de auth-service
 
-| Migration | Description | Rollback safety |
+| Migración | Descripción | Seguridad de rollback |
 |---|---|---|
-| `1741451800000-AddSystemRoleNameUniqueIndex` | Adds a partial unique index on system role names | ✅ SAFE — `down()` drops the index cleanly |
-| `1772994203515-ReplaceEmailIndexWithPartialIndex` | Replaces the global email uniqueness constraint with a partial index (active users only) | ⚠️ CONDITIONAL — `down()` throws `Error('Cannot restore global email uniqueness while duplicate emails exist')` if soft-deleted users share an email with an active user. Verify no such duplicates before reverting. |
-| `1773120000000-SeedPermissionsAndSystemRoles` | Seeds all permissions and system roles (ADMIN, EMPLOYEE, etc.) | ❌ DESTRUCTIVE — `down()` issues `DELETE FROM permissions` and `DELETE FROM system_roles` wiping all seeded data. Reverting effectively destroys the RBAC baseline. Do NOT revert; restore from snapshot instead. |
-| `1774692345732-DeleteSuperAdminRole` | Removes the legacy `SUPER_ADMIN` role row and its permission bindings | ❌ DESTRUCTIVE — `down()` only recreates the enum type variant; it does **not** reinsert the deleted role rows or permission associations. The role data is permanently gone after `up()` runs. |
-| `1775900000000-AddWorkflowsManagePermission` | Seeds the `workflow:manage` permission and binds it to ADMIN role | ✅ SAFE — `down()` cleanly deletes the seeded rows |
-| `1776000000000-AddIsOptionalReviewerToUsers` | Adds `isOptionalReviewer boolean` column to `users` table | ✅ SAFE — additive column; `down()` drops it cleanly |
+| `1700000000000-InitialSchema` | Crea la tabla `credentials` con email, hash de contraseña y estado | ✅ SEGURA — `down()` elimina la tabla limpiamente |
+| `1700000000001-DropRefreshTokenHash` | Elimina la columna `refresh_token_hash` (reemplazada por refresh tokens basados en Redis) | ❌ DESTRUCTIVA — `down()` re-agrega la columna como TEXT nullable; los datos originales del hash se pierden permanentemente |
+| `1776900000000-AddCredentialSoftDelete` | Agrega `deleted_at` a `credentials`; reemplaza la restricción global de email único con un índice parcial sobre filas activas | ⚠️ CONDICIONAL — `down()` aborta si credenciales eliminadas (soft-delete) comparten un email con una fila activa (violaría la restricción global que se está restaurando). Verificar que no existan duplicados de email entre filas activas y eliminadas antes de revertir |
 
 ---
 
-### workflow-service migrations
+### Migraciones de user-service
 
-| Migration | Description | Rollback safety |
+| Migración | Descripción | Seguridad de rollback |
 |---|---|---|
-| `1746600000000-ReplaceApprovalActionAttachmentsWithJsonb` | Replaces a separate attachments table with a `jsonb` column on `approval_actions`; migrates existing rows | ❌ LOSSY — `down()` restores only the **first** attachment per action. If any action had multiple attachments, all but the first are permanently lost after `up()` runs. Do NOT revert; restore from snapshot instead. |
-| `1748300000000-AddOptionalReviewers` | Adds `optionalReviewers jsonb` and related columns to workflow tables | ✅ SAFE — additive columns; `down()` drops them cleanly |
-| `1776100000000-AddIdempotencyKeys` | Creates the `idempotency_keys` table for duplicate-request protection | ✅ SAFE — `down()` drops the table cleanly |
+| `1700000000000-InitialSchema` | Crea las tablas base: `users`, `roles`, `permissions`, `user_org_roles` | ✅ SEGURA — `down()` elimina todas las tablas limpiamente |
+| `1741451800000-AddSystemRoleNameUniqueIndex` | Agrega un índice único parcial sobre nombres de roles de sistema | ✅ SEGURA — `down()` elimina el índice limpiamente |
+| `1772994203515-ReplaceEmailIndexWithPartialIndex` | Reemplaza la restricción global de unicidad de email con un índice parcial (solo usuarios activos) | ⚠️ CONDICIONAL — `down()` lanza error si usuarios eliminados (soft-delete) comparten email con un usuario activo. Verificar que no existan duplicados antes de revertir |
+| `1773120000000-SeedPermissionsAndSystemRoles` | Siembra todos los permisos y roles de sistema | ❌ DESTRUCTIVA — `down()` ejecuta `DELETE FROM permissions` y `DELETE FROM system_roles`, eliminando toda la base RBAC. No usar `migration:revert`; restaurar desde snapshot |
+| `1773824671815-AddRegistrationStatusToUsers` | Agrega la columna enum `registration_status` a `users` | ✅ SEGURA — columna aditiva; `down()` la elimina y restaura el default de `is_active` |
+| `1774692345732-DeleteSuperAdminRole` | Elimina la fila de rol `SUPER_ADMIN` legacy y sus vínculos de permisos | ❌ DESTRUCTIVA — `down()` solo recrea el valor del enum; las filas de rol eliminadas y sus asociaciones de permisos no se restauran |
+| `1775000000000-AddSoftDeleteToUserOrgRoles` | Agrega la columna `deleted_at` a `user_org_roles` | ✅ SEGURA — columna aditiva; `down()` la elimina limpiamente |
+| `1775186318602-MakeRoleIdNullableInUserOrgRoles` | Hace nullable `role_id` en `user_org_roles` | ❌ DESTRUCTIVA — `down()` elimina todas las filas donde `role_id IS NULL` antes de restaurar NOT NULL. Usuarios sin asignación de rol pierden permanentemente su registro de membresía en la org |
+| `1775500000000-AddOrgStructureFieldsToUsers` | Agrega columnas `department_id`, `area_id`, `position_id` a `users` | ✅ SEGURA — columnas nullable aditivas; `down()` las elimina limpiamente |
+| `1775500001000-MakePositionNullable` | Hace nullable el campo `position` | ✅ SEGURA — `down()` restaura NOT NULL con un valor por defecto |
+| `1775600000000-AddOrgStructureEnumValue` | Agrega el valor `ORG_STRUCTURE` al enum de módulos de permisos | 🔒 DOWN VACÍO — PostgreSQL no puede eliminar valores de enum; la etiqueta es inofensiva una vez que la migración hermana `1775600000001` elimina las filas dependientes en su `down()` |
+| `1775600000001-SeedOrgStructurePermissions` | Siembra los permisos `ORG_STRUCTURE` y los vincula a roles | ✅ SEGURA — `down()` elimina las filas sembradas limpiamente |
+| `1775700000000-AddAvatarUrlToUsers` | Agrega la columna `avatar_url` a `users` | ✅ SEGURA — columna nullable aditiva; `down()` la elimina limpiamente |
+| `1775800000000-AddRemovedAtToUserOrgRoles` | Agrega timestamp `removed_at` a `user_org_roles` | ✅ SEGURA — columna nullable aditiva; `down()` la elimina limpiamente |
+| `1775900000000-AddWorkflowsManagePermission` | Siembra el permiso `WORKFLOWS:MANAGE` y lo vincula al rol ADMIN | ✅ SEGURA — `down()` elimina las filas sembradas limpiamente |
+| `1776000000000-AddIsOptionalReviewerToUsers` | Agrega la columna `is_optional_reviewer` a `users` (luego movida a `user_org_roles`) | ✅ SEGURA — columna aditiva; `down()` la elimina limpiamente |
+| `1776100000000-MoveIsOptionalReviewerToUserOrgRoles` | Mueve `is_optional_reviewer` de `users` a `user_org_roles` (granularidad por org) | ✅ SEGURA — `down()` usa `BOOL_OR` para restaurar el flag global en `users` antes de eliminar la columna por org; los datos se preservan |
+| `1776200000000-AddCompositeIndexOrgIdUserIdOnUserOrgRoles` | Agrega índice compuesto `(org_id, user_id)` en `user_org_roles` | ✅ SEGURA — `down()` elimina el índice limpiamente |
+| `1776300000000-AddWorkflowWriteApproveToEditor` | Siembra los permisos `WORKFLOWS:WRITE` y `WORKFLOWS:APPROVE` para el rol EDITOR | ✅ SEGURA — `down()` elimina las filas sembradas limpiamente |
+| `1776400000000-CleanupUnusedPermissions` | Elimina los permisos en desuso `DOCUMENTS:READ` y `ORGS:MANAGE` y sus vínculos a roles | ✅ SEGURA — `down()` restaura las filas eliminadas con sus UUIDs originales vía tabla de backup |
+| `1776500000000-AddAuditorRole` | Crea el rol de sistema `AUDITOR` con `AUDIT:READ`; mueve `AUDIT:READ` fuera del rol `VIEWER` | ✅ SEGURA — `down()` restaura `AUDIT:READ` en `VIEWER` y elimina el rol `AUDITOR` |
+| `1776600000000-RemoveSuperAdminRole` | Elimina `SUPER_ADMIN` del enum de roles y limpia los datos relacionados | ❌ DESTRUCTIVA — `down()` restaura el valor del enum y la fila del rol pero explícitamente **no restaura** las asignaciones en `user_org_roles`. Cualquier usuario que tuviese este rol lo pierde permanentemente |
+| `1776700000000-AddUsersReadToEditor` | Siembra el permiso `USERS:READ` para el rol EDITOR | ✅ SEGURA — `down()` elimina la fila sembrada limpiamente |
+| `1776700000000-RenameOrgsPermissionToRoles` | Renombra el módulo de permiso `ORGS` a `ROLES` en todas las filas | ⚠️ CONDICIONAL — `down()` realiza el renombramiento inverso; seguro solo si no se agregaron nuevos permisos `ROLES` después de que `up()` se ejecutó |
+| `1776800000000-DropTwoFactorEnabled` | Elimina la columna booleana `two_factor_enabled` en desuso de `users` | ⚠️ CONDICIONAL — `down()` re-agrega la columna como `NOT NULL DEFAULT false`; los valores originales (siempre `false`) no se almacenan, pero es aceptable dado que la columna nunca fue utilizada |
 
 ---
 
-### auth-service / org-service / document-service / audit-service / notification-service / metadata-extractor-service
+### Migraciones de org-service
 
-No custom migrations are tracked at the time of this writing. Update this section when migrations are added to those services.
+| Migración | Descripción | Seguridad de rollback |
+|---|---|---|
+| `1747000000000-CreateOrgs` | Crea la tabla `orgs` (esquema inicial) | ✅ SEGURA — `down()` elimina la tabla limpiamente |
+| `1775300000000-CreateOrgStructure` | Crea las tablas `departamentos`, `areas`, `cargos` | ✅ SEGURA — `down()` elimina las tres tablas limpiamente |
+| `1775400000000-MakeCargoAreaNullable` | Hace nullable `area_id` en `cargos` para permitir cargos a nivel de departamento | ⚠️ CONDICIONAL — `down()` aborta si existe algún cargo con `area_id IS NULL`; esas filas violarían la restricción NOT NULL que se está restaurando |
+| `1775500000000-AddOrgSearchTrigram` | Agrega índices trigram de pg_trgm en `orgs.name` y `orgs.nit` usando `CREATE INDEX CONCURRENTLY` | ✅ SEGURA — `down()` elimina ambos índices con `DROP INDEX CONCURRENTLY`. **Nota:** esta migración usa `transaction: false` — si falla a mitad de ejecución NO es atómica y puede requerir limpieza manual de índices |
 
 ---
 
-## 7. Approval requirements for destructive migrations
+### Migraciones de workflow-service
 
-Any migration classified **❌ DESTRUCTIVE** or **❌ LOSSY** requires:
+| Migración | Descripción | Seguridad de rollback |
+|---|---|---|
+| `1714300000000-InitialWorkflowSchema` | Crea todas las tablas de workflow: `workflows`, `workflow_approval_steps`, `workflow_approval_actions`, `workflow_timeline`, etc. | ✅ SEGURA — `down()` elimina todas las tablas en orden inverso de dependencia |
+| `1746500000000-AddApprovalActionAttachment` | Agrega una tabla separada `workflow_approval_attachments` (reemplazada por `1746600000000`) | ✅ SEGURA — `down()` elimina la tabla limpiamente |
+| `1746600000000-ReplaceApprovalActionAttachmentsWithJsonb` | Reemplaza la tabla de adjuntos con una columna `jsonb` en `approval_actions`; migra filas existentes | ❌ CON PÉRDIDA — `down()` restaura solo el **primer** adjunto por acción. Los adjuntos múltiples por acción se pierden permanentemente. No usar `migration:revert`; restaurar desde snapshot |
+| `1747000000000-AddPendingReviewCycleStatus` | Agrega `PENDING_REVIEW_CYCLE` al enum de estado de workflow | 🔒 DOWN VACÍO — el valor del enum no puede eliminarse; permanece en el esquema pero no causa daño |
+| `1747100000000-FixApprovalActionsCascade` | Corrige el cascade FK en `workflow_approval_actions.step_id` a `ON DELETE CASCADE` | ✅ SEGURA — `down()` restaura la restricción FK anterior |
+| `1748200000000-AddRejectedWorkflowStatus` | Agrega `REJECTED` al enum de estado de workflow | 🔒 DOWN VACÍO — el valor del enum no puede eliminarse; permanece en el esquema pero no causa daño |
+| `1748300000000-AddOptionalReviewers` | Agrega columnas `optional_reviewers jsonb` y relacionadas a las tablas de workflow | ✅ SEGURA — columnas aditivas; `down()` las elimina limpiamente |
+| `1776100000000-AddIdempotencyKeys` | Crea la tabla `idempotency_keys` para protección contra requests duplicados | ✅ SEGURA — `down()` elimina la tabla limpiamente |
+| `1776200000000-AddWorkflowUpdatedTimelineEvent` | Agrega `WORKFLOW_UPDATED` al enum `timeline_event_type_enum` | 🔒 DOWN VACÍO — el valor del enum no puede eliminarse; permanece en el esquema pero no causa daño |
 
-1. **Written approval** from the team lead in the PR description before merging.
-2. **Mandatory snapshot** taken immediately before the deployment window opens (not earlier, to minimise data delta).
-3. **A data-repair script** committed alongside the migration that can recreate the lost data from other sources (audit logs, S3, etc.) in the event of an emergency rollback via snapshot restore.
-4. **Explicit rollback plan** documented in the PR — specifically, the path to restore service if the deployment is rolled back within the window.
+---
 
-For the currently catalogued destructive migrations, the practical rollback strategy is **snapshot restore only**. `migration:revert` must not be used for:
+### Migraciones de notification-service
+
+| Migración | Descripción | Seguridad de rollback |
+|---|---|---|
+| `1748000000000-InitialSchema` | Crea la tabla `notifications` | ✅ SEGURA — `down()` elimina la tabla limpiamente |
+| `1748100000000-AddOrgToNotifications` | Agrega columnas `org_id` y `org_name` más índice a `notifications` | ✅ SEGURA — columnas aditivas; `down()` elimina ambas columnas y el índice limpiamente |
+
+---
+
+### document-service / audit-service / metadata-extractor-service
+
+Estos servicios usan MongoDB (document-service) y Elasticsearch (audit-service) — ninguno usa migraciones TypeORM. Los cambios de esquema son manejados por la capa de aplicación al arrancar. No aplica catálogo de migraciones PostgreSQL.
+
+---
+
+## 7. Requisitos de aprobación para migraciones destructivas
+
+Cualquier migración clasificada como **❌ DESTRUCTIVA** o **❌ CON PÉRDIDA** requiere:
+
+1. **Aprobación escrita** del líder técnico en la descripción del PR antes de hacer merge.
+2. **Snapshot obligatorio** tomado inmediatamente antes de que se abra la ventana de despliegue (no antes, para minimizar el delta de datos).
+3. **Un script de reparación de datos** commiteado junto a la migración que pueda recrear los datos perdidos desde otras fuentes (logs de auditoría, S3, etc.) en caso de rollback de emergencia vía restauración de snapshot.
+4. **Plan de rollback explícito** documentado en el PR — específicamente, el camino para restaurar el servicio si el despliegue se revierte dentro de la ventana.
+
+Para las migraciones destructivas actualmente catalogadas, la estrategia práctica de rollback es **restauración de snapshot únicamente**. No debe usarse `migration:revert` para:
 
 - `1774692345732-DeleteSuperAdminRole`
 - `1773120000000-SeedPermissionsAndSystemRoles`
 - `1746600000000-ReplaceApprovalActionAttachmentsWithJsonb`
+- `1776600000000-RemoveSuperAdminRole`
+- `1775186318602-MakeRoleIdNullableInUserOrgRoles`
+- `1700000000001-DropRefreshTokenHash`
 
 ---
 
-## 8. Known eventual-consistency windows
+## 8. Ventanas de consistencia eventual conocidas
 
-This section catalogues cross-service operations where a failure mid-sequence can leave data in an inconsistent state between two independent databases. Each entry describes the risk, the current mitigation, and the manual recovery procedure.
+Esta sección cataloga las operaciones entre servicios donde un fallo a mitad de secuencia puede dejar los datos en un estado inconsistente entre dos bases de datos independientes. Cada entrada describe el riesgo, la mitigación actual y el procedimiento de recuperación manual.
 
 ---
 
-### 8.1 User soft-delete → credential disable (user-service → auth-service)
+### 8.1 Soft-delete de usuario → deshabilitar credencial (user-service → auth-service)
 
-**Services involved:** user-service (PostgreSQL `user_db`), auth-service (PostgreSQL `auth_db`)
+**Servicios involucrados:** user-service (PostgreSQL `user_db`), auth-service (PostgreSQL `auth_db`)
 
-**Operation sequence:**
+**Secuencia de operación:**
 
 ```text
-1. user-service: softRemove(user)       → user.deleted_at = NOW()
-2. user-service: authClient.disableCredentials(userId) → PATCH /auth/credentials/:id/disable
+1. user-service: softRemove(user)                        → user.deleted_at = NOW()
+2. user-service: authClient.disableCredentials(userId)   → PATCH /auth/credentials/:id/disable
 ```
 
-**Failure window:** If step 2 fails after step 1 completes, the user record is soft-deleted but credentials remain `ACTIVE`. The user can still log in until the credential is manually disabled or their refresh token expires.
+**Ventana de fallo:** Si el paso 2 falla después de que el paso 1 se completó, el registro del usuario queda eliminado (soft-delete) pero las credenciales permanecen `ACTIVE`. El usuario puede seguir iniciando sesión hasta que la credencial se deshabilite manualmente o expire su refresh token.
 
-**Current mitigation:**
-- `AuthClientService.internalPatch` retries up to **2 times** (3 total attempts) with exponential backoff (500 ms, 1 000 ms) before propagating the error.
-- If all retries fail, the HTTP response to the admin returns an error, prompting a manual retry.
-- Since `disableCredentials` is **idempotent**, retrying the full `DELETE /api/v1/users/:id` operation from the admin UI is safe.
+**Mitigación actual:**
+- `AuthClientService.internalPatch` reintenta hasta **2 veces** (3 intentos totales) con backoff exponencial (500 ms, 1.000 ms) antes de propagar el error.
+- Si todos los reintentos fallan, la respuesta HTTP al administrador devuelve un error, indicando un reintento manual.
+- Como `disableCredentials` es **idempotente**, reintentar la operación completa `DELETE /api/v1/users/:id` desde la UI de administración es seguro.
 
-**Manual recovery (if inconsistency is discovered):**
+**Recuperación manual (si se detecta la inconsistencia):**
 
 ```bash
-# 1. Identify the affected userId from user-service logs (correlationId) or DB query
-# 2. Call auth-service directly to disable the credential:
+# 1. Identificar el userId afectado desde los logs de user-service (correlationId) o consulta a BD
+# 2. Llamar directamente a auth-service para deshabilitar la credencial:
 curl -X PATCH https://<auth-service-url>/api/v1/auth/credentials/<userId>/disable \
   -H "x-internal-token: <INTERNAL_TOKEN_USER_AUTH>"
 
-# 3. Optionally revoke all active refresh tokens:
+# 3. Opcionalmente revocar todos los refresh tokens activos:
 curl -X PATCH https://<auth-service-url>/api/v1/auth/credentials/<userId>/revoke-tokens \
   -H "x-internal-token: <INTERNAL_TOKEN_USER_AUTH>"
 ```
 
-**Detection query (auth_db):**
+**Consulta de detección (auth_db):**
 
 ```sql
--- Credentials that are still ACTIVE but whose userId does not appear in user_db.users
--- Run after exporting the list of soft-deleted userIds from user_db:
+-- Credenciales que siguen ACTIVE pero cuyo userId no aparece en user_db.users
+-- Ejecutar después de exportar la lista de userIds eliminados desde user_db:
 SELECT id, email, user_id, status
 FROM credentials
 WHERE status = 'active'
-  AND user_id IN ('<userId1>', '<userId2>');  -- paste list from user_db query
+  AND user_id IN ('<userId1>', '<userId2>');  -- pegar lista desde consulta en user_db
 ```
 
-**Consistency horizon:** At most the duration of the retry window (~1.5 s) plus the remaining TTL of any active access token (`JWT_EXPIRATION`, default 1 h). After that the user cannot issue new sessions.
+**Horizonte de consistencia:** Como máximo la duración de la ventana de reintentos (~1,5 s) más el TTL restante de cualquier access token activo (`JWT_EXPIRATION`, por defecto 1 h). Después de ese período el usuario no puede iniciar nuevas sesiones.
 
 ---
 
-### 8.2 User restore → credential enable (user-service → auth-service)
+### 8.2 Restauración de usuario → habilitar credencial (user-service → auth-service)
 
-Same topology as 8.1 but in reverse. If `enableCredentials` fails after `usersRepository.restore`, the user record is active but the credential stays `DISABLED`.
+Misma topología que 8.1 pero en sentido inverso. Si `enableCredentials` falla después de `usersRepository.restore`, el registro del usuario queda activo pero la credencial permanece `DISABLED`.
 
-**Manual recovery:**
+**Recuperación manual:**
 
 ```bash
 curl -X PATCH https://<auth-service-url>/api/v1/auth/credentials/<userId>/enable \

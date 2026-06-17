@@ -20,11 +20,11 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 1,
       stages: [
-        { duration: '1m', target: 10  },
-        { duration: '2m', target: 25  },
-        { duration: '2m', target: 50  },
-        { duration: '3m', target: 100 },
-        { duration: '2m', target: 100 }, // sustain al pico
+        { duration: '1m', target: 50  },
+        { duration: '2m', target: 100  },
+        { duration: '2m', target: 150  },
+        { duration: '3m', target: 200 },
+        { duration: '2m', target: 250 }, // sustain al pico
         { duration: '2m', target: 0   }, // ramp down
       ],
     },

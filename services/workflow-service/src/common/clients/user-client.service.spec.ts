@@ -120,12 +120,13 @@ describe('UserClientService', () => {
       throwError(() => ({ response: { status: 404, data: { message: 'Missing user' } } })),
     );
 
-    await expect(service.validateUserExists('missing-user')).rejects.toThrow(
-      NotFoundException,
-    );
-    await expect(service.validateUserExists('missing-user')).rejects.toThrow(
-      'Resource not found',
-    );
+    const error = await service
+      .validateUserExists('missing-user')
+      .then(() => null, (e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.message).toBe('Resource not found');
+    expect(error.message).not.toContain('user-service');
   });
 
   it('maps timeout errors to GatewayTimeoutException', async () => {

@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Railway PostgreSQL — Init Script
 #
-# Crea las 4 bases de datos que necesitan los microservicios.
+# Crea las 5 bases de datos que necesitan los microservicios.
 # Se ejecuta una sola vez como servicio de Railway que sale con código 0.
 #
 # Variables de entorno requeridas (del plugin PostgreSQL de Railway):
@@ -27,7 +27,7 @@ run_sql() {
 }
 
 # Crear cada DB solo si no existe (idempotente)
-for DB in auth_db org_db user_db workflow_db; do
+for DB in auth_db org_db user_db workflow_db notification_db; do
   EXISTS=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DEFAULT_DB" \
     -tAc "SELECT 1 FROM pg_database WHERE datname='$DB'")
 
@@ -40,7 +40,7 @@ for DB in auth_db org_db user_db workflow_db; do
 done
 
 # Otorgar permisos al usuario Railway en cada DB
-for DB in auth_db org_db user_db workflow_db; do
+for DB in auth_db org_db user_db workflow_db notification_db; do
   psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB" \
     -c "GRANT ALL ON SCHEMA public TO \"$PG_USER\";" 2>/dev/null || true
 done
