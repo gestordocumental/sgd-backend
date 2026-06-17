@@ -37,7 +37,7 @@ Extrae metadatos estructurados (nombre, código, versión) de archivos documenta
 | `typology.metadata.extraction.failed` | Produce | Error durante el parseo o descarga |
 
 **Flujo completo:**
-```
+```text
 document-service
   → typology.file.uploaded
       → metadata-extractor-service (descarga R2, parsea)

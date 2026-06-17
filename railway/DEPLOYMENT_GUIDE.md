@@ -188,7 +188,7 @@ Después de la primera ejecución exitosa, **eliminar este servicio** para no ga
 - Habilitar dominio público: **Settings → Networking → Generate Domain**
 
 **Variables de entorno** (todas requeridas — `entrypoint.sh` aborta si alguna falta):
-```
+```env
 KONG_DATABASE                             = off
 KONG_JWT_SECRET                           = <mismo valor que JWT_SECRET del auth-service>
 KONG_NGINX_PROXY_CLIENT_BODY_BUFFER_SIZE  = 10m
@@ -251,7 +251,8 @@ Consultar `railway/ENV_VARIABLES.md` para la lista completa de variables de cada
 Puntos a tener en cuenta:
 - **user-service**: necesita Redis y Kafka además de PostgreSQL.
 - **notification-service**: necesita PostgreSQL, Redis y Kafka. Usa **Resend** para email (`RESEND_API_KEY`), no SMTP.
-- **document-service**: necesita MongoDB (plugin), Kafka y credenciales de Cloudflare R2.
+- **document-service**: necesita MongoDB (plugin), Kafka, credenciales de Cloudflare R2 y ClamAV
+  (`CLAMAV_HOST`, `CLAMAV_PORT`; en prod `CLAMAV_REQUIRED=true`).
 - **metadata-extractor-service**: no tiene base de datos propia; comparte bucket R2 con document-service (solo lectura).
 - **audit-service**: en `NODE_ENV=production` requiere `ELASTICSEARCH_USERNAME/PASSWORD` genéricos **además** de los de rol (`WRITE_*`/`READ_*`). Si solo se configuran los de rol, el servicio crashea al arrancar.
 
@@ -294,28 +295,28 @@ Los despliegues a Railway están completamente automatizados. Esta sección expl
 
 ### 6.1 Flujo normal (push a una rama)
 
-```
+```text
 git push origin feature/xxx
         │
         ▼
-   PR hacia dev
+   PR hacia develop
         │
         ▼
    ci.yml  ←── runs on PR + push
    (lint, tests, build, security)
         │ CI OK ✓
         ▼
-   merge a dev
+   merge a develop
         │
         ▼
    deploy-services.yml
    (detecta qué servicios cambiaron → despliega solo esos)
         │
         ▼
-   Railway entorno: develop
+   Railway entorno: dev
 ```
 
-El mismo patrón aplica para `dev → test` y `test → master`, con la diferencia de que el merge a `master` requiere aprobación manual (ver sección 6.3).
+El mismo patrón aplica para `develop → test` y `test → main`, con la diferencia de que el merge a `main` requiere aprobación manual (ver sección 6.3).
 
 ### 6.2 Qué hace `deploy-services.yml`
 
@@ -337,11 +338,11 @@ El mismo patrón aplica para `dev → test` y `test → master`, con la diferenc
 
 | Rama | Entorno Railway | GitHub Environment |
 |---|---|---|
-| `dev` | `develop` | `develop` |
-| `test` | `staging` | `staging` |
-| `master` | `production` | `production` |
+| `develop` | `dev` | `dev` |
+| `test` | `test` | `test` |
+| `main` | `prod` | `production` |
 
-**Secret requerido**: `RAILWAY_TOKEN` debe estar configurado en cada GitHub Environment (`develop`, `staging`, `production`) en: **repo → Settings → Environments**.
+**Secret requerido**: `RAILWAY_TOKEN` debe estar configurado en cada GitHub Environment (`dev`, `test`, `production`) en: **repo → Settings → Environments**.
 
 ### 6.3 Aprobar un deploy a producción
 
@@ -349,12 +350,12 @@ El merge a `master` está bloqueado por `promote-to-prod.yml`, que actúa como g
 
 Pasos para aprobar:
 
-1. Se abre el PR de `test` → `master`
+1. Se abre el PR de `test` → `main`
 2. El workflow `promote-to-prod.yml` queda en estado **waiting**
 3. El aprobador va a: **GitHub → Actions → el run de "Promote to Production" → Review deployments**
 4. Selecciona el environment `production` y aprueba
 5. El PR puede mergearse
-6. `deploy-services.yml` detecta el push a `master` y despliega a production en Railway
+6. `deploy-services.yml` detecta el push a `main` y despliega a prod en Railway
 
 > Los reviewers autorizados se configuran en: **repo → Settings → Environments → production → Required reviewers**.
 
@@ -363,7 +364,7 @@ Pasos para aprobar:
 Útil para re-deplorar un servicio sin hacer push (por ejemplo, tras cambiar una variable de entorno en Railway o para forzar un redeploy de emergencia).
 
 1. Ir a **GitHub → Actions → "Deploy - Microservicios" → Run workflow**
-2. Seleccionar la rama (`dev`, `test` o `master`)
+2. Seleccionar la rama (`develop`, `test` o `main`)
 3. Elegir el servicio del desplegable
 4. Ejecutar
 

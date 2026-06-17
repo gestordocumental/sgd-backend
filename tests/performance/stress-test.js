@@ -3,11 +3,15 @@ import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
 const BASE_URL      = __ENV.BASE_URL       || 'https://api-dev.railway.app';
-const ADMIN_EMAIL   = __ENV.ADMIN_EMAIL    || 'admin@sgd.local';
-const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'Admin1234!';
+const ADMIN_EMAIL   = __ENV.ADMIN_EMAIL;
+const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+  throw new Error('Faltan ADMIN_EMAIL y/o ADMIN_PASSWORD — pásalos con -e ADMIN_EMAIL=... -e ADMIN_PASSWORD=...');
+}
 // 50 usuarios: ~8 VUs por token en la carga pico (400 VUs).
 const N_USERS = parseInt(__ENV.N_USERS || '50', 10);
 const TEST_PASSWORD = 'K6#LoadTest!A';
+const ERROR_LOG_EVERY_N = parseInt(__ENV.ERROR_LOG_EVERY_N || '50', 10);
 
 const errorRate   = new Rate('error_rate');
 const listDuration = new Trend('list_resources_duration', true);
@@ -78,7 +82,7 @@ export function setup() {
     );
 
     if (createRes.status !== 201) {
-      console.warn(`[setup] No se pudo crear ${email}: ${createRes.status} ${createRes.body}`);
+      console.warn(`[setup] No se pudo crear ${email}: status=${createRes.status}`);
       continue;
     }
 
@@ -87,7 +91,7 @@ export function setup() {
       userId = JSON.parse(createRes.body).id;
     } catch (_) {}
     if (!userId) {
-      console.warn(`[setup] Respuesta inesperada al crear ${email}: ${createRes.body}`);
+      console.warn(`[setup] Respuesta inesperada al crear ${email}: status=${createRes.status}`);
       continue;
     }
     // Registrar para cleanup inmediatamente — los continues posteriores no deben dejar al usuario sin borrar
@@ -109,7 +113,7 @@ export function setup() {
     );
 
     if (provisionRes.status !== 200 && provisionRes.status !== 201) {
-      console.warn(`[setup] No se pudo provisionar ${email}: ${provisionRes.status} ${provisionRes.body}`);
+      console.warn(`[setup] No se pudo provisionar ${email}: status=${provisionRes.status}`);
       continue;
     }
 
@@ -135,7 +139,7 @@ export function setup() {
     }
 
     if (!loginRes || (loginRes.status !== 200 && loginRes.status !== 201)) {
-      console.warn(`[setup] Login falló definitivamente para ${email}: ${loginRes?.status} ${loginRes?.body}`);
+      console.warn(`[setup] Login falló definitivamente para ${email}: status=${loginRes?.status}`);
       continue;
     }
 
@@ -144,7 +148,7 @@ export function setup() {
       globalToken = JSON.parse(loginRes.body).accessToken;
     } catch (_) {}
     if (!globalToken) {
-      console.warn(`[setup] No se obtuvo accessToken para ${email}: ${loginRes.body}`);
+      console.warn(`[setup] No se obtuvo accessToken para ${email}: status=${loginRes.status}`);
       continue;
     }
 
@@ -293,6 +297,7 @@ function authHeaders(token) {
 }
 
 function logError(endpoint, status) {
+  if (__ITER % ERROR_LOG_EVERY_N !== 0) return;
   // Categorize to distinguish JWT expiry (401) from rate limiting (429) from other failures
   const category = status === 401 ? 'EXPIRED_TOKEN' : status === 429 ? 'RATE_LIMITED' : `HTTP_${status}`;
   console.warn(`[ERROR] ${endpoint} → ${status} (${category}) VU=${__VU} iter=${__ITER}`);

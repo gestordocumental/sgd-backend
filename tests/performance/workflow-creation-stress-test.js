@@ -3,11 +3,15 @@ import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
 const BASE_URL       = __ENV.BASE_URL        || 'https://api-dev.railway.app';
-const ADMIN_EMAIL    = __ENV.ADMIN_EMAIL     || 'admin@sgd.local';
-const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD  || 'Admin1234!';
+const ADMIN_EMAIL    = __ENV.ADMIN_EMAIL;
+const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+  throw new Error('Faltan ADMIN_EMAIL y/o ADMIN_PASSWORD — pásalos con -e ADMIN_EMAIL=... -e ADMIN_PASSWORD=...');
+}
 // 30 usuarios: cada VU usa 3 del pool (creator, approver, finalUser rotando)
 const N_USERS        = parseInt(__ENV.N_USERS || '30', 10);
 const TEST_PASSWORD  = 'K6#LoadTest!A';
+const ERROR_LOG_EVERY_N = parseInt(__ENV.ERROR_LOG_EVERY_N || '50', 10);
 
 const errorRate      = new Rate('error_rate');
 const createDuration = new Trend('workflow_create_duration', true);
@@ -111,7 +115,7 @@ export function setup() {
     if (createRes.status === 201) {
       try { userId = JSON.parse(createRes.body).id; } catch (_) {}
       if (!userId) {
-        console.warn(`[setup] Respuesta inesperada al crear ${email}: ${createRes.body}`);
+        console.warn(`[setup] Respuesta inesperada al crear ${email}: status=${createRes.status}`);
         continue;
       }
     } else if (createRes.status === 409) {
@@ -119,7 +123,7 @@ export function setup() {
       try { parsedBody = JSON.parse(createRes.body); } catch (_) {}
       userId = parsedBody?.userId;
       if (!userId) {
-        console.warn(`[setup] 409 sin userId para ${email}: ${createRes.body}`);
+        console.warn(`[setup] 409 sin userId para ${email}: status=${createRes.status}`);
         continue;
       }
       const restoreRes = http.post(
@@ -128,13 +132,13 @@ export function setup() {
         { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` } },
       );
       if (restoreRes.status !== 200 && restoreRes.status !== 201) {
-        console.warn(`[setup] No se pudo restaurar ${email}: ${restoreRes.status} ${restoreRes.body}`);
+        console.warn(`[setup] No se pudo restaurar ${email}: status=${restoreRes.status}`);
         continue;
       }
       isRestored = true;
       console.log(`[setup] Usuario restaurado: ${email}`);
     } else {
-      console.warn(`[setup] No se pudo crear ${email}: ${createRes.status} ${createRes.body}`);
+      console.warn(`[setup] No se pudo crear ${email}: status=${createRes.status}`);
       continue;
     }
 
@@ -148,7 +152,7 @@ export function setup() {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` } },
     );
     if (provisionRes.status !== 200 && provisionRes.status !== 201) {
-      console.warn(`[setup] No se pudo provisionar ${email}: ${provisionRes.status} ${provisionRes.body}`);
+      console.warn(`[setup] No se pudo provisionar ${email}: status=${provisionRes.status}`);
       continue;
     }
 
@@ -179,7 +183,7 @@ export function setup() {
     let globalToken;
     try { globalToken = JSON.parse(loginRes.body).accessToken; } catch (_) {}
     if (!globalToken) {
-      console.warn(`[setup] No se obtuvo accessToken para ${email}: ${loginRes.body}`);
+      console.warn(`[setup] No se obtuvo accessToken para ${email}: status=${loginRes.status}`);
       continue;
     }
 
@@ -304,6 +308,7 @@ function authHeaders(token) {
 }
 
 function logError(endpoint, status) {
+  if (__ITER % ERROR_LOG_EVERY_N !== 0) return;
   const category = status === 401 ? 'EXPIRED_TOKEN' : status === 429 ? 'RATE_LIMITED' : `HTTP_${status}`;
   console.warn(`[ERROR] ${endpoint} → ${status} (${category}) VU=${__VU} iter=${__ITER}`);
 }

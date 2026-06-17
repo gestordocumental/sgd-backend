@@ -32,7 +32,7 @@ Entrega notificaciones a usuarios en tiempo real (SSE) y por email (Resend). Con
 
 ### Flujo de conexión SSE
 
-```
+```text
 1. Cliente autentica con JWT normal → POST /stream/ticket → { ticket, expiresIn: 30 }
 2. Cliente abre EventSource con GET /stream?ticket=<uuid>
 3. SseTicketGuard valida el ticket en Redis (se consume una sola vez)

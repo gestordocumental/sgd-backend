@@ -43,7 +43,9 @@ export class JwtGuard implements CanActivate {
 
     const request = ctx.switchToHttp().getRequest<{ headers: Record<string, string>; params: Record<string, string>; user?: Record<string, unknown> }>();
 
-    // Allow service-to-service calls via x-internal-token
+    // TODO: INTERNAL_TOKEN bypasses JWT on all routes — broad blast radius if leaked.
+    //       Migrate S2S callers to per-pair InternalGuard tokens on /internal/* endpoints
+    //       and user-JWT forwarding on normal routes, then remove this branch.
     const internalToken = request.headers['x-internal-token'];
     if (internalToken) {
       const expected = Buffer.from(this.configService.getOrThrow<string>('INTERNAL_TOKEN'));

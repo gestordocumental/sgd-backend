@@ -148,7 +148,7 @@ Los tests de integración levantan transacciones reales contra PostgreSQL y Redi
 
 ```bash
 # Asegúrate de que docker compose esté corriendo
-docker compose up -d postgres redis
+docker compose up -d postgresql redis
 
 cd services/auth-service
 
@@ -370,7 +370,7 @@ taskkill /PID <pid> /F
 ```
 
 ### Los tests de integración fallan con `ECONNREFUSED`
-La infraestructura Docker no está corriendo. Ejecuta `docker compose up -d postgres redis` y espera unos segundos antes de volver a correr los tests.
+La infraestructura Docker no está corriendo. Ejecuta `docker compose up -d postgresql redis` y espera unos segundos antes de volver a correr los tests.
 
 ### Migración falla con `relation already exists`
 La migración ya fue aplicada pero TypeORM no lo registró. Verifica el estado con `npm run migration:show` y, si es necesario, inserta el registro manualmente en la tabla `migrations`.

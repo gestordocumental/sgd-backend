@@ -98,7 +98,7 @@ Ver `services/document-service/.env.example`. Variables críticas:
 ## Notas de arquitectura
 
 **Dos sistemas de token interno coexisten en este servicio:**
-1. `JwtGuard` (legado) — acepta el header `x-internal-token` con el valor de `INTERNAL_TOKEN` en cualquier ruta
-2. `InternalGuard` (nuevo) — valida `INTERNAL_TOKEN_WORKFLOW_DOC` + CIDR check en rutas `/internal/*`
+1. `JwtGuard` — acepta el header `x-internal-token` con el valor de `INTERNAL_TOKEN` en **cualquier ruta** (incluyendo endpoints protegidos con `@OrgMember` y `@SuperAdminOnly`). ⚠️ Este bypass tiene blast radius amplio: si `INTERNAL_TOKEN` se filtra, un atacante puede llamar cualquier endpoint sin JWT. Está marcado para deprecar — ver `TODO` en `jwt.guard.ts`.
+2. `InternalGuard` — valida `INTERNAL_TOKEN_WORKFLOW_DOC` + CIDR check solo en rutas `/internal/*`. Es el modelo correcto: scope limitado + defensa en profundidad por IP.
 
-Ambos deben estar configurados o el servicio rechazará llamadas legítimas.
+Ambos deben estar configurados mientras coexisten. La migración pendiente es mover todos los callers S2S de rutas normales a reenvío de JWT de usuario o a endpoints `/internal/*` con `InternalGuard`, y eliminar el bypass genérico.

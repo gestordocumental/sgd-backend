@@ -111,12 +111,12 @@ services/<nombre>/
 │   ├── <dominio>/            # Controllers, services, DTOs, entities/schemas
 │   ├── common/
 │   │   ├── guards/           # JwtGuard (verifica firma HMAC-SHA256)
-│   │   ├── decorators/       # @OrgMember(), @RequireSuperAdmin(), @JwtPayload()
+│   │   ├── decorators/       # @OrgMember(), @SuperAdminOnly(), @JwtPayloadParam()
 │   │   ├── filters/          # HttpExceptionFilter global
 │   │   ├── interceptors/     # LoggingInterceptor
 │   │   ├── middleware/       # CorrelationMiddleware (x-correlation-id)
 │   │   ├── logger/           # AppLogger (Winston + AsyncLocalStorage)
-│   │   └── kafka/            # KafkaProducerService / KafkaConsumerService
+│   │   └── kafka/            # KafkaProducerService / runWithCorrelation() / withDlt()
 │   └── health/               # TerminusModule (/health)
 └── migrations/               # Migraciones TypeORM (solo servicios con PostgreSQL)
 ```
@@ -311,7 +311,7 @@ Cada servicio expone su documentación interactiva en `/api/v1/<servicio>/docs`.
 | user-service | http://localhost:3001/api/v1/users/docs | http://localhost:8000/api/v1/users/docs |
 | org-service | http://localhost:3002/api/v1/org/docs | http://localhost:8000/api/v1/org/docs |
 | document-service | http://localhost:3003/api/v1/documents/docs | http://localhost:8000/api/v1/documents/docs |
-| metadata-extractor | http://localhost:3004/api/v1/metadata-extractor/docs | http://localhost:8000/api/v1/metadata-extractor/docs |
+| metadata-extractor | — (worker sin endpoints públicos) | — |
 | workflow-service | http://localhost:3005/api/v1/workflows/docs | http://localhost:8000/api/v1/workflows/docs |
 | notification-service | http://localhost:3006/api/v1/notifications/docs | http://localhost:8000/api/v1/notifications/docs |
 | audit-service | http://localhost:3007/api/v1/audit/docs | http://localhost:8000/api/v1/audit/docs |
@@ -381,6 +381,7 @@ Cada servicio expone su documentación interactiva en `/api/v1/<servicio>/docs`.
 ```bash
 git clone <url-del-repo>
 cd document-management-system
+npm ci   # instala dependencias de todos los workspaces (packages/* y services/*)
 ```
 
 ---
@@ -420,28 +421,28 @@ Abrir una terminal por servicio:
 
 ```bash
 # Terminal 1 — auth-service
-cd services/auth-service && cp .env.example .env && npm install && npm run start:dev
+cd services/auth-service && cp .env.example .env && npm run start:dev
 
 # Terminal 2 — user-service
-cd services/user-service && cp .env.example .env && npm install && npm run start:dev
+cd services/user-service && cp .env.example .env && npm run start:dev
 
 # Terminal 3 — org-service
-cd services/org-service && cp .env.example .env && npm install && npm run start:dev
+cd services/org-service && cp .env.example .env && npm run start:dev
 
 # Terminal 4 — document-service
-cd services/document-service && cp .env.example .env && npm install && npm run start:dev
+cd services/document-service && cp .env.example .env && npm run start:dev
 
 # Terminal 5 — metadata-extractor-service
-cd services/metadata-extractor-service && cp .env.example .env && npm install && npm run start:dev
+cd services/metadata-extractor-service && cp .env.example .env && npm run start:dev
 
 # Terminal 6 — workflow-service
-cd services/workflow-service && cp .env.example .env && npm install && npm run start:dev
+cd services/workflow-service && cp .env.example .env && npm run start:dev
 
 # Terminal 7 — notification-service
-cd services/notification-service && cp .env.example .env && npm install && npm run start:dev
+cd services/notification-service && cp .env.example .env && npm run start:dev
 
 # Terminal 8 — audit-service
-cd services/audit-service && cp .env.example .env && npm install && npm run start:dev
+cd services/audit-service && cp .env.example .env && npm run start:dev
 ```
 
 ---
@@ -850,7 +851,7 @@ openssl rand -hex 32   # INTERNAL_TOKEN_<ORIGEN>_<DESTINO>  (uno por par de serv
 ```
 
 > **Regla de oro:** `JWT_SECRET` de dev ≠ test ≠ prod.
-> `JWT_SECRET` debe ser **igual** en auth-service, user-service, org-service, document-service, workflow-service y notification-service dentro del mismo entorno.
+> `JWT_SECRET` debe ser **igual** en auth-service, user-service, org-service, document-service, workflow-service, notification-service y audit-service dentro del mismo entorno.
 > `KONG_JWT_SECRET` debe ser **igual** al `JWT_SECRET` de auth-service.
 > Cada `INTERNAL_TOKEN_*` debe ser idéntico en el servicio emisor y en el receptor (ver `railway/ENV_VARIABLES.md`).
 

@@ -121,7 +121,7 @@ Ver `services/workflow-service/.env.example`. Variables críticas:
 
 ## Estados de un workflow
 
-```
+```text
 DRAFT
   └─► PENDING_APPROVAL
         ├─► AVAILABLE_FOR_FINAL_USERS  (aprobado o ciclo admin completado)

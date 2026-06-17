@@ -29,7 +29,7 @@ moduleNameMapper: {
 
 ### `AppLogger`
 
-Logger estructurado basado en Winston. Emite JSON con `correlationId`, `serviceName` y nivel de log. Incluir en el módulo raíz del servicio como provider.
+Logger estructurado basado en Winston. Emite JSON con `correlationId`, `service` y nivel de log. Incluir en el módulo raíz del servicio como provider.
 
 ```typescript
 import { AppLogger } from '@sgd/common';

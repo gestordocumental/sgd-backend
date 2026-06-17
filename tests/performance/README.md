@@ -32,8 +32,8 @@ Crea 50 usuarios de prueba (`k6test000–049`), los autentica en `setup()` y lue
 ```bash
 k6 run \
   -e BASE_URL=https://api-dev.railway.app \
-  -e ADMIN_EMAIL=admin@sgd.local \
-  -e ADMIN_PASSWORD=Admin1234! \
+  -e ADMIN_EMAIL=<ADMIN_EMAIL> \
+  -e ADMIN_PASSWORD=<ADMIN_PASSWORD> \
   tests/performance/stress-test.js
 ```
 
@@ -44,8 +44,8 @@ Crea 30 usuarios de prueba (`k6wf000–029`), hace switch-company y pre-carga ti
 ```bash
 k6 run \
   -e BASE_URL=https://api-dev.railway.app \
-  -e ADMIN_EMAIL=admin@sgd.local \
-  -e ADMIN_PASSWORD=Admin1234! \
+  -e ADMIN_EMAIL=<ADMIN_EMAIL> \
+  -e ADMIN_PASSWORD=<ADMIN_PASSWORD> \
   tests/performance/workflow-creation-stress-test.js
 ```
 
@@ -58,8 +58,8 @@ Dispara 200 VUs en 10 segundos. Cada VU hace login con las credenciales de admin
 ```bash
 k6 run \
   -e BASE_URL=https://api-dev.railway.app \
-  -e ADMIN_EMAIL=admin@sgd.local \
-  -e ADMIN_PASSWORD=Admin1234! \
+  -e ADMIN_EMAIL=<ADMIN_EMAIL> \
+  -e ADMIN_PASSWORD=<ADMIN_PASSWORD> \
   tests/performance/spike-test.js
 ```
 
