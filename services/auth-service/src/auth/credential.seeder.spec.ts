@@ -98,4 +98,25 @@ describe('CredentialSeeder', () => {
     );
     expect(repo.findOne).not.toHaveBeenCalled();
   });
+
+  it.each([
+    'Ab1!',           // too short (< 8 chars)
+    'alllower1!',     // no uppercase
+    'NoDigits!!A',    // no digit
+    'NoSymbol1234A',  // no symbol
+  ])('throws when SUPER_ADMIN_PASSWORD does not meet complexity policy (%s)', async (weakPassword) => {
+    config.get.mockImplementation((key: string) => ({
+      SUPER_ADMIN_EMAIL: 'admin@example.com',
+      SUPER_ADMIN_PASSWORD: weakPassword,
+    }[key]));
+    const seeder = new CredentialSeeder(
+      repo as unknown as Repository<Credential>,
+      config as unknown as ConfigService,
+    );
+
+    await expect(seeder.onApplicationBootstrap()).rejects.toThrow(
+      'SUPER_ADMIN_PASSWORD must be at least 8 characters and include an uppercase letter, a number, and a symbol',
+    );
+    expect(repo.findOne).not.toHaveBeenCalled();
+  });
 });

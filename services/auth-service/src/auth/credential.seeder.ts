@@ -24,6 +24,13 @@ export class CredentialSeeder implements OnApplicationBootstrap {
     if (!email)    throw new Error('SUPER_ADMIN_EMAIL is required for super-admin seeding');
     if (!password) throw new Error('SUPER_ADMIN_PASSWORD is required for super-admin seeding');
 
+    const POLICY = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+    if (!POLICY.test(password)) {
+      throw new Error(
+        'SUPER_ADMIN_PASSWORD must be at least 8 characters and include an uppercase letter, a number, and a symbol',
+      );
+    }
+
     const existing = await this.credentialRepo.findOne({
       where: [{ userId: SUPER_ADMIN_USER_ID }, { email }],
     });

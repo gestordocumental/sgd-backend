@@ -1,4 +1,4 @@
-# Variables de entorno por servicio y entorno
+﻿# Variables de entorno por servicio y entorno
 
 Referencia completa de todas las variables que se deben configurar
 en Railway para cada entorno (dev / test / prod).
@@ -15,15 +15,15 @@ en Railway para cada entorno (dev / test / prod).
 |---|---|---|---|---|
 | `NODE_ENV` | `development` | `test` | `production` | Manual |
 | `PORT` | `3000` | `3000` | `3000` | Manual |
-| `DB_HOST` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | Plugin |
-| `DB_PORT` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | Plugin |
+| `DB_HOST` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | Plugin |
+| `DB_PORT` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | Plugin |
 | `DB_NAME` | `auth_db` | `auth_db` | `auth_db` | Manual |
-| `DB_USERNAME` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | Plugin |
-| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | Plugin |
+| `DB_USERNAME` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | Plugin |
+| `DB_PASSWORD` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | Plugin |
 | `DB_POOL_SIZE` | `5` | `5` | `5` | Manual |
-| `REDIS_HOST` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | Plugin |
-| `REDIS_PORT` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | Plugin |
-| `REDIS_PASSWORD` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | Plugin |
+| `REDIS_HOST` | `${{redis.REDISHOST}}` | `${{redis.REDISHOST}}` | `${{redis.REDISHOST}}` | Plugin |
+| `REDIS_PORT` | `${{redis.REDISPORT}}` | `${{redis.REDISPORT}}` | `${{redis.REDISPORT}}` | Plugin |
+| `REDIS_PASSWORD` | `${{redis.REDISPASSWORD}}` | `${{redis.REDISPASSWORD}}` | `${{redis.REDISPASSWORD}}` | Plugin |
 | `JWT_SECRET` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `JWT_SECRET_KID` | `v1` | `v1` | `v1` | Manual |
 | `JWT_SECRET_PREV` | *(vacío)* | *(vacío)* | *(vacío)* | Manual |
@@ -56,15 +56,15 @@ en Railway para cada entorno (dev / test / prod).
 |---|---|---|---|---|
 | `NODE_ENV` | `development` | `test` | `production` | Manual |
 | `PORT` | `3000` | `3000` | `3000` | Manual |
-| `DB_HOST` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | Plugin |
-| `DB_PORT` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | Plugin |
+| `DB_HOST` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | Plugin |
+| `DB_PORT` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | Plugin |
 | `DB_NAME` | `user_db` | `user_db` | `user_db` | Manual |
-| `DB_USERNAME` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | Plugin |
-| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | Plugin |
+| `DB_USERNAME` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | Plugin |
+| `DB_PASSWORD` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | Plugin |
 | `DB_POOL_SIZE` | `5` | `5` | `5` | Manual |
-| `REDIS_HOST` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | Plugin |
-| `REDIS_PORT` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | Plugin |
-| `REDIS_PASSWORD` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | Plugin |
+| `REDIS_HOST` | `${{redis.REDISHOST}}` | `${{redis.REDISHOST}}` | `${{redis.REDISHOST}}` | Plugin |
+| `REDIS_PORT` | `${{redis.REDISPORT}}` | `${{redis.REDISPORT}}` | `${{redis.REDISPORT}}` | Plugin |
+| `REDIS_PASSWORD` | `${{redis.REDISPASSWORD}}` | `${{redis.REDISPASSWORD}}` | `${{redis.REDISPASSWORD}}` | Plugin |
 | `JWT_SECRET` | mismo que auth-service | idem | idem | Manual |
 | `JWT_SECRET_KID` | `v1` | `v1` | `v1` | Manual |
 | `JWT_SECRET_PREV` | *(vacío)* | *(vacío)* | *(vacío)* | Manual |
@@ -99,11 +99,11 @@ en Railway para cada entorno (dev / test / prod).
 |---|---|---|---|---|
 | `NODE_ENV` | `development` | `test` | `production` | Manual |
 | `PORT` | `3000` | `3000` | `3000` | Manual |
-| `DB_HOST` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | Plugin |
-| `DB_PORT` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | Plugin |
+| `DB_HOST` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | Plugin |
+| `DB_PORT` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | Plugin |
 | `DB_NAME` | `org_db` | `org_db` | `org_db` | Manual |
-| `DB_USERNAME` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | Plugin |
-| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | Plugin |
+| `DB_USERNAME` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | Plugin |
+| `DB_PASSWORD` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | Plugin |
 | `DB_POOL_SIZE` | `5` | `5` | `5` | Manual |
 | `JWT_SECRET` | mismo que auth-service | idem | idem | Manual |
 | `JWT_SECRET_KID` | `v1` | `v1` | `v1` | Manual |
@@ -184,11 +184,11 @@ en Railway para cada entorno (dev / test / prod).
 |---|---|---|---|---|
 | `NODE_ENV` | `development` | `test` | `production` | Manual |
 | `PORT` | `3000` | `3000` | `3000` | Manual |
-| `DB_HOST` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | Plugin |
-| `DB_PORT` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | Plugin |
+| `DB_HOST` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | Plugin |
+| `DB_PORT` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | Plugin |
 | `DB_NAME` | `workflow_db` | `workflow_db` | `workflow_db` | Manual |
-| `DB_USERNAME` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | Plugin |
-| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | Plugin |
+| `DB_USERNAME` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | Plugin |
+| `DB_PASSWORD` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | Plugin |
 | `DB_POOL_SIZE` | `5` | `5` | `5` | Manual |
 | `JWT_SECRET` | mismo que auth-service | idem | idem | Manual |
 | `JWT_SECRET_KID` | `v1` | `v1` | `v1` | Manual |
@@ -213,14 +213,14 @@ en Railway para cada entorno (dev / test / prod).
 |---|---|---|---|---|
 | `NODE_ENV` | `development` | `test` | `production` | Manual |
 | `PORT` | `3000` | `3000` | `3000` | Manual |
-| `REDIS_HOST` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | `${{Redis.REDISHOST}}` | Plugin |
-| `REDIS_PORT` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | `${{Redis.REDISPORT}}` | Plugin |
-| `REDIS_PASSWORD` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | `${{Redis.REDISPASSWORD}}` | Plugin |
-| `DB_HOST` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | `${{Postgres.PGHOST}}` | Plugin |
-| `DB_PORT` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | `${{Postgres.PGPORT}}` | Plugin |
+| `REDIS_HOST` | `${{redis.REDISHOST}}` | `${{redis.REDISHOST}}` | `${{redis.REDISHOST}}` | Plugin |
+| `REDIS_PORT` | `${{redis.REDISPORT}}` | `${{redis.REDISPORT}}` | `${{redis.REDISPORT}}` | Plugin |
+| `REDIS_PASSWORD` | `${{redis.REDISPASSWORD}}` | `${{redis.REDISPASSWORD}}` | `${{redis.REDISPASSWORD}}` | Plugin |
+| `DB_HOST` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | `${{postgres.PGHOST}}` | Plugin |
+| `DB_PORT` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | `${{postgres.PGPORT}}` | Plugin |
 | `DB_NAME` | `notification_db` | `notification_db` | `notification_db` | Manual |
-| `DB_USERNAME` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | `${{Postgres.PGUSER}}` | Plugin |
-| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | `${{Postgres.PGPASSWORD}}` | Plugin |
+| `DB_USERNAME` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | `${{postgres.PGUSER}}` | Plugin |
+| `DB_PASSWORD` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | `${{postgres.PGPASSWORD}}` | Plugin |
 | `DB_POOL_SIZE` | `5` | `5` | `5` | Manual |
 | `JWT_SECRET` | mismo que auth-service | idem | idem | Manual |
 | `JWT_SECRET_KID` | `v1` | `v1` | `v1` | Manual |
