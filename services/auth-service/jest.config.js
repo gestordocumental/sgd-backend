@@ -43,6 +43,7 @@ module.exports = {
   coverageDirectory: '../coverage',
   testEnvironment: 'node',
   setupFiles: ['reflect-metadata'],
+  forceExit: true,
   coverageThreshold: {
     global: {
       statements: 85,

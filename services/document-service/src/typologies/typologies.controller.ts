@@ -136,9 +136,9 @@ export class TypologiesController {
     return typologies.map(TypologyResponseDto.fromDocument);
   }
 
-  @ApiOperation({ summary: 'Get full history (including archived/deleted) for a given codigo' })
+  @ApiOperation({ summary: 'Get full history (including archived/deleted) for a given codigo — capped at 50 versions' })
   @ApiParam({ name: 'codigo', description: 'Typology codigo' })
-  @ApiOkResponse({ description: 'Typology history', type: TypologyResponseDto, isArray: true })
+  @ApiOkResponse({ description: 'Typology history (most recent first, max 50)', type: TypologyResponseDto, isArray: true })
   @Get('history/:codigo')
   async findHistory(
     @Param('orgId') orgId: string,

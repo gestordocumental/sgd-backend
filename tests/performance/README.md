@@ -17,68 +17,114 @@ sudo apt-get update && sudo apt-get install k6
 
 ## Scripts disponibles
 
-| Script | Descripción |
-|---|---|
-| `stress-test.js` | Ramp-up gradual 1→150 VUs — encuentra el límite de usuarios concurrentes |
-| `spike-test.js` | Spike repentino a 200 VUs — mide la resiliencia ante picos |
+| Script | Tipo | VUs máx | Duración | Descripción |
+|---|---|---|---|---|
+| `stress-test.js` | Lectura | 400 | ~16 min | Ramp-up gradual — mide límite de usuarios leyendo datos |
+| `workflow-creation-stress-test.js` | Escritura | 250 | ~12 min | Ramp-up gradual — mide límite de usuarios creando workflows |
+| `spike-test.js` | Spike | 200 | ~2.5 min | Spike repentino — mide resiliencia de login ante picos |
 
 ## Cómo correr
 
-### Stress test (ramp-up gradual)
+### Stress test — lectura (ramp-up gradual)
+
+Crea 50 usuarios de prueba (`k6test000–049`), los autentica en `setup()` y luego cada VU repite el ciclo de lectura.
+
 ```bash
 k6 run \
   -e BASE_URL=https://api-dev.railway.app \
-  -e ADMIN_EMAIL=admin@sgd.local \
-  -e ADMIN_PASSWORD=Admin1234! \
+  -e ADMIN_EMAIL=<ADMIN_EMAIL> \
+  -e ADMIN_PASSWORD=<ADMIN_PASSWORD> \
   tests/performance/stress-test.js
 ```
 
-### Spike test
+### Workflow creation stress test — escritura (ramp-up gradual)
+
+Crea 30 usuarios de prueba (`k6wf000–029`), hace switch-company y pre-carga tipologías en `setup()`. Cada VU crea un workflow real en cada iteración.
+
 ```bash
 k6 run \
   -e BASE_URL=https://api-dev.railway.app \
-  -e ADMIN_EMAIL=admin@sgd.local \
-  -e ADMIN_PASSWORD=Admin1234! \
+  -e ADMIN_EMAIL=<ADMIN_EMAIL> \
+  -e ADMIN_PASSWORD=<ADMIN_PASSWORD> \
+  tests/performance/workflow-creation-stress-test.js
+```
+
+Opcionalmente, fijar la org con `-e ORG_ID=<uuid>` para saltar la búsqueda automática.
+
+### Spike test
+
+Dispara 200 VUs en 10 segundos. Cada VU hace login con las credenciales de admin en cada iteración — mide el endpoint de autenticación bajo carga repentina.
+
+```bash
+k6 run \
+  -e BASE_URL=https://api-dev.railway.app \
+  -e ADMIN_EMAIL=<ADMIN_EMAIL> \
+  -e ADMIN_PASSWORD=<ADMIN_PASSWORD> \
   tests/performance/spike-test.js
 ```
 
-### Con reporte HTML (requiere k6-reporter)
-```bash
-k6 run --out json=results.json tests/performance/stress-test.js
-```
+## Flujos simulados
 
-## Interpretar resultados
+### stress-test.js
 
-### Métricas clave
+`setup()` crea y autentica 50 usuarios de prueba (una sola vez). Cada VU en `default()` ejecuta este ciclo con su propio token pre-cargado:
 
-- **`http_req_duration`** — tiempo de respuesta. Busca `p(95)` y `p(99)`.
-- **`error_rate`** — porcentaje de requests fallidas. Debe estar bajo 5%.
-- **`login_duration`** — tiempo de login específicamente.
-- **`http_req_failed`** — total de requests con error HTTP.
-- **`vus`** — usuarios virtuales activos en cada momento.
+1. `GET /api/v1/users?page=1&limit=10`
+2. `GET /api/v1/org/mine?ids=<orgId>`
+3. `GET /api/v1/workflows?page=1&limit=10`
+4. `GET /api/v1/auth/me`
+5. Think time 0.5–1.5 s y repite
 
-### Thresholds configurados
+### workflow-creation-stress-test.js
 
-| Threshold | Límite | Significado |
-|---|---|---|
-| `http_req_duration p(95)` | < 2000ms | 95% de requests responden en < 2s |
-| `error_rate` | < 5% | Menos del 5% de requests fallidas |
+`setup()` crea 30 usuarios de prueba, hace switch-company por cada uno y obtiene los IDs de tipologías disponibles. Cada VU en `default()`:
 
-> El login ocurre solo en `setup()` (una vez, fuera del loop de carga), por lo que no existe threshold de `login_duration` en el test principal.
+1. Selecciona 3 usuarios del pool rotando: creator, approver, finalUser
+2. `POST /api/v1/workflows` — crea un workflow con título único `K6 WF VU{n} iter{n} {timestamp}`
+3. Think time 1–3 s y repite
 
-### Señales de que encontraste el límite
+### spike-test.js
 
-- `error_rate` sube por encima del 5%
-- `p(95)` supera los 2000ms
-- Los checks de status 200 empiezan a fallar
-- El número de VUs donde esto ocurre es tu límite de usuarios concurrentes
+Sin `setup()` — cada VU en `default()` hace login fresco en cada iteración:
 
-## Flujo que simula stress-test.js
-
-Cada usuario virtual hace:
 1. `POST /api/v1/auth/login` — obtiene token
-2. `GET /api/v1/users?page=1&limit=10`
-3. `GET /api/v1/org?page=1&limit=10`
-4. `GET /api/v1/workflows?page=1&limit=10`
-5. `GET /api/v1/auth/me`
-6. Espera 1-3 segundos (think time) y repite
+2. `GET /api/v1/auth/me`
+3. Sleep 1 s y repite
+
+## Thresholds configurados
+
+| Script | Métrica | Límite |
+|---|---|---|
+| `stress-test.js` | `http_req_duration p(95)` | < 2 000 ms |
+| `stress-test.js` | `error_rate` | < 5 % |
+| `workflow-creation-stress-test.js` | `http_req_duration p(95)` | < 3 000 ms |
+| `workflow-creation-stress-test.js` | `workflow_create_duration p(95)` | < 3 000 ms |
+| `workflow-creation-stress-test.js` | `error_rate` | < 5 % |
+| `spike-test.js` | `http_req_duration p(95)` | < 5 000 ms |
+| `spike-test.js` | `error_rate` | < 10 % |
+
+## Métricas clave
+
+| Métrica | Script | Descripción |
+|---|---|---|
+| `http_req_duration` | todos | Latencia total de cada request. Revisar `p(95)` y `p(99)` |
+| `error_rate` | todos | Porcentaje de requests fallidas. Debe mantenerse bajo el threshold |
+| `list_resources_duration` | stress-test | Latencia de los 4 endpoints de lectura |
+| `workflow_create_duration` | workflow-creation | Latencia exclusiva del `POST /api/v1/workflows` |
+| `vus` | todos | Usuarios virtuales activos en cada momento |
+
+## Señales de que encontraste el límite
+
+- `error_rate` supera el threshold configurado
+- `p(95)` de `http_req_duration` supera el límite
+- Los checks de status 200/201 empiezan a fallar masivamente
+- El VU count donde esto ocurre es el límite de concurrencia del sistema
+
+## Resultados de referencia
+
+| Test | Entorno | VUs pico | p95 | Error rate | Notas |
+|---|---|---|---|---|---|
+| `workflow-creation-stress-test.js` | Railway dev | 100 | 1 630 ms | 0 % | 15 751 workflows creados en ~12 min |
+| `stress-test.js` | Railway dev | 400 | — | ~50 % | Tokens JWT expiraron a mitad del test (setup ~7 min + test 16 min > TTL 15 min) |
+
+> El 50 % de error en `stress-test.js` a 400 VUs se debe a expiración de JWT, no a saturación del servidor. Los tokens se minan en `setup()` y expiran antes de que termine el test. Para ejecutarlo sin errores por expiración, reducir el número de stages o aumentar `JWT_EXPIRATION` en auth-service durante la prueba.

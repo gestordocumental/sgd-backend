@@ -1,4 +1,4 @@
-import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { of, throwError, TimeoutError } from 'rxjs';
@@ -126,14 +126,18 @@ describe('DocumentClientService', () => {
     await expect(service.getTypologyInfo('org-1', 'typology-1')).rejects.toThrow(BadRequestException);
   });
 
-  it('maps 404 responses to BadRequestException with resource context', async () => {
+  it('maps 404 responses to NotFoundException without leaking internal service name', async () => {
     httpService.post.mockReturnValue(
       throwError(() => ({ response: { status: 404, data: { message: 'Missing document' } } })),
     );
 
-    await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
-      'Resource not found in document-service: Missing document',
-    );
+    const error = await service
+      .validateDocument('typology-1', 'doc-1')
+      .then(() => null, (e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.message).toBe('Resource not found');
+    expect(error.message).not.toContain('document-service');
   });
 
   it('maps timeout errors to GatewayTimeoutException', async () => {

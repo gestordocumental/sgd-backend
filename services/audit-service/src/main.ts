@@ -11,6 +11,8 @@ if (process.env.DISABLE_TLS_VERIFY === 'true') {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('DISABLE_TLS_VERIFY no puede habilitarse en producción');
   }
+  // eslint-disable-next-line no-console
+  console.warn('[audit-service] DISABLE_TLS_VERIFY=true — TLS verification disabled. Development only.');
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 

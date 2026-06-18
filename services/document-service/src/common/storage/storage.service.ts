@@ -22,8 +22,26 @@ export class StorageService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    this.bucket        = this.config.getOrThrow<string>('STORAGE_BUCKET');
-    this.expirySeconds = Number(this.config.get<string>('SIGNED_URL_EXPIRY') ?? '300');
+    this.bucket = this.config.getOrThrow<string>('STORAGE_BUCKET');
+
+    const rawExpiry = Number(this.config.get<string>('SIGNED_URL_EXPIRY') ?? '300');
+    if (!Number.isFinite(rawExpiry) || rawExpiry <= 0) {
+      throw new Error(`Invalid SIGNED_URL_EXPIRY: "${this.config.get('SIGNED_URL_EXPIRY')}"`);
+    }
+    // Cap at 1 hour in production — longer windows keep R2 objects exposed unnecessarily.
+    const MAX_PROD_EXPIRY = 3600;
+    if (process.env['NODE_ENV'] === 'production' && rawExpiry > MAX_PROD_EXPIRY) {
+      throw new Error(
+        `SIGNED_URL_EXPIRY (${rawExpiry}s) exceeds the production maximum of ${MAX_PROD_EXPIRY}s`,
+      );
+    }
+    if (rawExpiry > 900) {
+      this.logger.warn(
+        `SIGNED_URL_EXPIRY is ${rawExpiry}s — recommended ≤900s; URLs stay valid longer than a typical user session`,
+        'StorageService',
+      );
+    }
+    this.expirySeconds = rawExpiry;
 
     this.client = new S3Client({
       endpoint:        this.config.getOrThrow<string>('STORAGE_ENDPOINT'),

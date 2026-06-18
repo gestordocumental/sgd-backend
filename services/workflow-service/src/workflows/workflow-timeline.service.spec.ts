@@ -121,12 +121,13 @@ describe('WorkflowTimelineService', () => {
   });
 
   describe('getTimeline()', () => {
-    it('returns timeline events ordered by createdAt ASC', async () => {
+    it('returns timeline events ordered by createdAt ASC, capped at 500', async () => {
       const events = await service.getTimeline('wf-1');
 
       expect(repo.find).toHaveBeenCalledWith({
         where: { workflowId: 'wf-1' },
         order: { createdAt: 'ASC' },
+        take: 500,
       });
       expect(events).toHaveLength(1);
     });

@@ -421,7 +421,7 @@ export class WorkflowsController {
   @Get(':id/timeline')
   @OrgMember()
   @RequirePermission('WORKFLOWS', 'READ')
-  @ApiOperation({ summary: 'Línea de tiempo completa del workflow' })
+  @ApiOperation({ summary: 'Línea de tiempo del workflow — limitada a 500 eventos, en orden cronológico' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiResponse({ status: 200, type: [TimelineEventResponseDto] })
   getTimeline(

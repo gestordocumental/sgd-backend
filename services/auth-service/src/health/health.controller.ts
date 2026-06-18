@@ -6,6 +6,7 @@ import {
   HealthIndicatorResult,
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Redis } from 'ioredis';
 
 @ApiTags('Health')
@@ -17,6 +18,7 @@ export class HealthController {
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
+  @SkipThrottle()
   @ApiOperation({ summary: 'Startup probe' })
   @ApiOkResponse({ schema: { example: { status: 'ok', service: 'auth-service' } } })
   @Get('startup')
@@ -24,6 +26,7 @@ export class HealthController {
     return { status: 'ok', service: 'auth-service' };
   }
 
+  @SkipThrottle()
   @ApiOperation({ summary: 'Liveness probe' })
   @ApiOkResponse({ schema: { example: { status: 'ok', service: 'auth-service' } } })
   @Get('live')
@@ -31,6 +34,7 @@ export class HealthController {
     return { status: 'ok', service: 'auth-service' };
   }
 
+  @SkipThrottle()
   @ApiOperation({ summary: 'Readiness probe' })
   @ApiOkResponse({
     schema: {

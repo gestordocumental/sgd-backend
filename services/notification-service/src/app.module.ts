@@ -40,6 +40,8 @@ import { Notification } from './notifications/entities/notification.entity';
             parseInt8: true,
             keepAlive: true,
             keepAliveInitialDelayMillis: 10000,
+            idleTimeoutMillis: 60000,       // drop idle connections after 60s; pool will reconnect on next query
+            connectionTimeoutMillis: 10000, // fail fast if can't acquire connection within 10s
             max: poolSize,
           },
         };
