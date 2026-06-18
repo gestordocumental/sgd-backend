@@ -166,8 +166,8 @@ en Railway para cada entorno (dev / test / prod).
 | `PORT` | `3000` | `3000` | `3000` | Manual |
 | `STORAGE_ENDPOINT` | `https://<account>.r2.cloudflarestorage.com` | idem | idem | Manual |
 | `STORAGE_REGION` | `auto` | `auto` | `auto` | Manual |
-| `STORAGE_ACCESS_KEY` | mismo que document-service | idem | idem | Manual |
-| `STORAGE_SECRET_KEY` | mismo que document-service | idem | idem | Manual |
+| `STORAGE_ACCESS_KEY` | `<token R2 solo lectura>` | idem | idem | Manual |
+| `STORAGE_SECRET_KEY` | `<token R2 solo lectura>` | idem | idem | Manual |
 | `STORAGE_BUCKET` | `documentos` | `documentos` | `documentos` | Manual |
 | `STORAGE_FORCE_PATH` | `false` | `false` | `false` | Manual |
 | `KAFKA_BROKER` | `kafka.railway.internal:9092` | idem | idem | Manual |
@@ -290,6 +290,11 @@ en Railway para cada entorno (dev / test / prod).
    debe configurarse en AMBOS servicios: el que lo envía y el que lo recibe.
    Ejemplo: `INTERNAL_TOKEN_AUTH_USER` debe ser idéntico en auth-service y en user-service.
    Nunca reutilizar el mismo valor entre pares distintos.
+   Nota user↔org: la comunicación es bidireccional pero usa **dos secretos independientes**:
+   - `INTERNAL_TOKEN_USER_ORG` (user→org): generado en user-service, copiado en org-service
+     con el mismo valor. No tiene relación con el siguiente.
+   - `INTERNAL_TOKEN_ORG_USER` (org→user): generado en org-service, copiado en user-service
+     con el mismo valor. Son secretos distintos; nunca deben tener el mismo valor.
 
 3. **`JWT_SECRET` compartido**: todos los servicios que validan tokens JWT deben tener el mismo
    `JWT_SECRET` (y `JWT_SECRET_KID`) que el auth-service del mismo entorno.
@@ -306,8 +311,13 @@ en Railway para cada entorno (dev / test / prod).
 6. **MongoDB**: el plugin de MongoDB en Railway expone la URL completa como `MONGO_URL`.
    Usarla directamente: `MONGODB_URI=${{MongoDB.MONGO_URL}}`.
 
-7. **metadata-extractor-service**: comparte el mismo bucket R2 que document-service
-   (acceso de solo lectura). Usar las mismas credenciales de storage que document-service.
+7. **metadata-extractor-service**: comparte el mismo bucket R2 que document-service pero
+   **solo necesita leer** (`s3:GetObject`). Crear un API token separado en el dashboard de
+   Cloudflare R2 con permiso de solo lectura — **no** usar las mismas credenciales de
+   document-service, que tienen acceso de escritura. Pasos:
+   - Cloudflare R2 → Manage R2 API tokens → Create API token
+   - Permissions: **Object Read only** sobre el bucket `documentos`
+   - Copiar el Access Key ID y Secret al `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY` de este servicio.
 
 8. **`INTERNAL_TOKEN` del document-service**: el `JwtGuard` local valida el header
    `x-internal-token` contra este token genérico en cualquier ruta. Es independiente de

@@ -207,7 +207,7 @@ npm run test:cov
 
 Usa el formato [Conventional Commits](https://www.conventionalcommits.org/):
 
-```
+```text
 <tipo>(<scope>): <descripción en imperativo>
 
 feat(auth): agregar endpoint de revocación de tokens por dispositivo
@@ -246,7 +246,7 @@ Reglas clave:
 
 ## 8. Flujo de ramas y PRs
 
-```
+```text
 feature/xxx  ──── PR ────►  dev  ──── PR ────►  test  ──── PR ────►  master
                              │                    │                     │
                              ▼                    ▼                     ▼
