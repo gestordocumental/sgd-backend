@@ -1,7 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { HealthCheck, HealthCheckService, MongooseHealthIndicator } from '@nestjs/terminus';
-import { SkipThrottle } from '@nestjs/throttler';
 
 @ApiTags('Health')
 @Controller('health')
@@ -11,7 +10,6 @@ export class HealthController {
     private readonly mongoose: MongooseHealthIndicator,
   ) {}
 
-  @SkipThrottle()
   @ApiOperation({ summary: 'Startup probe' })
   @ApiOkResponse({ schema: { example: { status: 'ok', service: 'document-service' } } })
   @Get('startup')
@@ -19,7 +17,6 @@ export class HealthController {
     return { status: 'ok', service: 'document-service' };
   }
 
-  @SkipThrottle()
   @ApiOperation({ summary: 'Liveness probe' })
   @ApiOkResponse({ schema: { example: { status: 'ok', service: 'document-service' } } })
   @Get('live')
@@ -27,7 +24,6 @@ export class HealthController {
     return { status: 'ok', service: 'document-service' };
   }
 
-  @SkipThrottle()
   @ApiOperation({ summary: 'Readiness probe' })
   @ApiOkResponse({
     schema: {

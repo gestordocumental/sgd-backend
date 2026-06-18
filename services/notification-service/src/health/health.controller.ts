@@ -5,7 +5,6 @@ import {
   HealthCheckService,
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
-import { SkipThrottle } from '@nestjs/throttler';
 
 @ApiTags('Health')
 @Controller('health')
@@ -15,7 +14,6 @@ export class HealthController {
     private readonly db: TypeOrmHealthIndicator,
   ) {}
 
-  @SkipThrottle()
   @ApiOperation({ summary: 'Startup probe' })
   @ApiOkResponse({ schema: { example: { status: 'ok', service: 'notification-service' } } })
   @Get('startup')
@@ -23,7 +21,6 @@ export class HealthController {
     return { status: 'ok', service: 'notification-service' };
   }
 
-  @SkipThrottle()
   @ApiOperation({ summary: 'Liveness probe' })
   @ApiOkResponse({ schema: { example: { status: 'ok', service: 'notification-service' } } })
   @Get('live')
@@ -31,7 +28,6 @@ export class HealthController {
     return { status: 'ok', service: 'notification-service' };
   }
 
-  @SkipThrottle()
   @ApiOperation({ summary: 'Readiness probe — verifica conexión a PostgreSQL' })
   @ApiOkResponse({
     schema: {
