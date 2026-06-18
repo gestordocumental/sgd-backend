@@ -232,6 +232,17 @@ services:
         strip_path: false
     # Sin plugin jwt — ruta pública
 
+  # ── user-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
+  - name: user-service-public
+    url: http://user-service.railway.internal:3000
+    routes:
+      - name: complete-registration
+        paths:
+          - /api/users/complete-registration
+        methods: [POST]
+        strip_path: false
+    # Sin plugin jwt — ruta pública
+
   # ── user-service ───────────────────────────────────────────────────────
   - name: user-service
     url: http://user-service.railway.internal:3000
