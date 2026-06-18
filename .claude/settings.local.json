@@ -6,7 +6,8 @@
       "Bash(npm test:*)",
       "Bash(xargs grep:*)",
       "Bash(find C:/Users/juanc/proyectos/GD_helisa_ms/proyectos/document-management-system-web/sgd-frontend/src -name admin.tsx -o -name dashboard*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git worktree *)"
     ]
   }
 }
