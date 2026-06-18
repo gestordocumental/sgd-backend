@@ -36,8 +36,9 @@ yarn-error.log*
 lerna-debug.log*
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
-# Local settings contain personal paths and expanded permissions — never commit.
-.claude/settings.local.json
+# Carpeta local de configuración y memoria — contiene rutas personales y
+# permisos expandidos que no deben subirse al repositorio.
+.claude/
 
 # ── IDEs ──────────────────────────────────────────────────────────────────────
 .vscode/
