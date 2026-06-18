@@ -1,6 +1,6 @@
 # Guía de Despliegue — Railway (3 Entornos)
 
-Guía paso a paso para configurar dev, test y prod en Railway desde cero.
+Guía paso a paso para configurar dev, test y production en Railway desde cero.
 
 ---
 
@@ -9,9 +9,9 @@ Guía paso a paso para configurar dev, test y prod en Railway desde cero.
 ```
 Rama git     Entorno Railway   NODE_ENV       URL Kong
 ──────────────────────────────────────────────────────────────
-develop   →  dev               development    https://api-dev.railway.app
-test      →  test              test           https://api-test.railway.app
-main      →  prod              production     https://api.tudominio.com
+dev       →  develop           development    https://api-dev.railway.app
+test      →  staging           test           https://api-test.railway.app
+master    →  production        production     https://api.tudominio.com
 ```
 
 ## Flujo de promoción de código
@@ -20,15 +20,15 @@ main      →  prod              production     https://api.tudominio.com
 feature/xxx
      │ PR
      ▼
-  develop ──── CI valida ────► Railway despliega en dev
+   dev ──── CI valida ────► Railway despliega en develop
      │
      │ PR (tests manuales OK)
      ▼
-   test ──── CI valida ────► Railway despliega en test
+   test ──── CI valida ────► Railway despliega en staging
      │
      │ PR (QA aprueba + GitHub approval gate)
      ▼
-   main ──── CI valida ────► Railway despliega en prod
+   master ──── CI valida ────► Railway despliega en production
 ```
 
 ---
@@ -38,13 +38,13 @@ feature/xxx
 ### 1.1 Crear las ramas base
 
 ```bash
-git checkout -b develop
-git push origin develop
+git checkout -b dev
+git push origin dev
 
 git checkout -b test
 git push origin test
 
-# main ya existe
+# master ya existe
 ```
 
 ### 1.2 Configurar Branch Protection Rules en GitHub
@@ -56,8 +56,8 @@ Ir a: **repo → Settings → Branches → Add rule**
 - ✅ Require status checks: `CI OK`
 - ✅ Require branches to be up to date
 
-**Para `main`:**
-- Branch name pattern: `main`
+**Para `master`:**
+- Branch name pattern: `master`
 - ✅ Require status checks: `CI OK`
 - ✅ Require pull request reviews: 1 approver
 - ✅ Require review from Code Owners
@@ -72,7 +72,7 @@ Ir a: **repo → Settings → Environments → New environment**
 - ✅ Wait timer: 0 minutos (o más si quieres un delay)
 
 Esto hace que el workflow `promote-to-prod.yml` espere aprobación manual
-antes de que el PR a `main` pueda ser mergeado.
+antes de que el PR a `master` pueda ser mergeado.
 
 ---
 
@@ -90,21 +90,21 @@ antes de que el PR a `main` pueda ser mergeado.
 En Railway: **proyecto → Environments (esquina superior)**
 
 Crear:
-- `prod` (Railway crea `production` por defecto, renombrarlo a `prod`)
-- `test`
-- `dev`
+- `production` (Railway crea `production` por defecto — mantener el nombre)
+- `staging`
+- `develop`
 
 **Vincular cada entorno a su rama:**
 - Cada servicio → Settings → Source → Branch:
-  - entorno `dev`  → rama `develop`
-  - entorno `test` → rama `test`
-  - entorno `prod` → rama `main`
+  - entorno `develop`    → rama `dev`
+  - entorno `staging`    → rama `test`
+  - entorno `production` → rama `master`
 
 ---
 
 ## FASE 3 — Infraestructura por entorno
 
-Repetir estos pasos en los 3 entornos (dev, test, prod).
+Repetir estos pasos en los 3 entornos (develop, staging, production).
 Cambiar de entorno con el selector en la esquina superior de Railway.
 
 ### 3.1 Agregar plugins nativos
@@ -208,15 +208,15 @@ AUTH_SESSION_RATE_LIMIT                   = 2000
 ```
 NODE_ENV                   = development|test|production
 PORT                       = 3000
-DB_HOST                    = ${{Postgres.PGHOST}}
-DB_PORT                    = ${{Postgres.PGPORT}}
+DB_HOST                    = ${{postgres.PGHOST}}
+DB_PORT                    = ${{postgres.PGPORT}}
 DB_NAME                    = auth_db
-DB_USERNAME                = ${{Postgres.PGUSER}}
-DB_PASSWORD                = ${{Postgres.PGPASSWORD}}
+DB_USERNAME                = ${{postgres.PGUSER}}
+DB_PASSWORD                = ${{postgres.PGPASSWORD}}
 DB_POOL_SIZE               = 5
-REDIS_HOST                 = ${{Redis.REDISHOST}}
-REDIS_PORT                 = ${{Redis.REDISPORT}}
-REDIS_PASSWORD             = ${{Redis.REDISPASSWORD}}
+REDIS_HOST                 = ${{redis.REDISHOST}}
+REDIS_PORT                 = ${{redis.REDISPORT}}
+REDIS_PASSWORD             = ${{redis.REDISPASSWORD}}
 JWT_SECRET                 = <openssl rand -hex 32>
 JWT_SECRET_KID             = v1
 JWT_REFRESH_SECRET         = <openssl rand -hex 32>
@@ -224,7 +224,7 @@ JWT_REFRESH_SECRET_KID     = v1
 JWT_EXPIRATION             = 3600s
 JWT_REFRESH_EXPIRATION     = 7d
 SUPER_ADMIN_EMAIL          = admin@empresa.com
-SUPER_ADMIN_PASSWORD       = <openssl rand -hex 16>
+SUPER_ADMIN_PASSWORD       = <openssl rand -base64 16>
 INTERNAL_TOKEN_AUTH_USER   = <openssl rand -hex 32>   # mismo valor en user-service
 INTERNAL_TOKEN_USER_AUTH   = <openssl rand -hex 32>   # mismo valor en user-service
 INTERNAL_ALLOWED_CIDRS     = 100.64.0.0/10
@@ -258,7 +258,7 @@ Puntos a tener en cuenta:
 
 ---
 
-## FASE 5 — Monitoring (solo entorno prod)
+## FASE 5 — Monitoring (solo entorno production)
 
 ### 5.1 Prometheus
 
@@ -268,7 +268,7 @@ Puntos a tener en cuenta:
 
 **Variables:**
 ```
-ENVIRONMENT = prod
+ENVIRONMENT = production
 ```
 
 ### 5.2 Grafana
@@ -299,24 +299,24 @@ Los despliegues a Railway están completamente automatizados. Esta sección expl
 git push origin feature/xxx
         │
         ▼
-   PR hacia develop
+   PR hacia dev
         │
         ▼
    ci.yml  ←── runs on PR + push
    (lint, tests, build, security)
         │ CI OK ✓
         ▼
-   merge a develop
+   merge a dev
         │
         ▼
    deploy-services.yml
    (detecta qué servicios cambiaron → despliega solo esos)
         │
         ▼
-   Railway entorno: dev
+   Railway entorno: develop
 ```
 
-El mismo patrón aplica para `develop → test` y `test → main`, con la diferencia de que el merge a `main` requiere aprobación manual (ver sección 6.3).
+El mismo patrón aplica para `dev → test` y `test → master`, con la diferencia de que el merge a `master` requiere aprobación manual (ver sección 6.3).
 
 ### 6.2 Qué hace `deploy-services.yml`
 
@@ -338,11 +338,11 @@ El mismo patrón aplica para `develop → test` y `test → main`, con la difere
 
 | Rama | Entorno Railway | GitHub Environment |
 |---|---|---|
-| `develop` | `dev` | `dev` |
-| `test` | `test` | `test` |
-| `main` | `prod` | `production` |
+| `dev` | `develop` | `develop` |
+| `test` | `staging` | `staging` |
+| `master` | `production` | `production` |
 
-**Secret requerido**: `RAILWAY_TOKEN` debe estar configurado en cada GitHub Environment (`dev`, `test`, `production`) en: **repo → Settings → Environments**.
+**Secret requerido**: `RAILWAY_TOKEN` debe estar configurado en cada GitHub Environment (`develop`, `staging`, `production`) en: **repo → Settings → Environments**.
 
 ### 6.3 Aprobar un deploy a producción
 
@@ -350,12 +350,12 @@ El merge a `master` está bloqueado por `promote-to-prod.yml`, que actúa como g
 
 Pasos para aprobar:
 
-1. Se abre el PR de `test` → `main`
+1. Se abre el PR de `test` → `master`
 2. El workflow `promote-to-prod.yml` queda en estado **waiting**
 3. El aprobador va a: **GitHub → Actions → el run de "Promote to Production" → Review deployments**
 4. Selecciona el environment `production` y aprueba
 5. El PR puede mergearse
-6. `deploy-services.yml` detecta el push a `main` y despliega a prod en Railway
+6. `deploy-services.yml` detecta el push a `master` y despliega a production en Railway
 
 > Los reviewers autorizados se configuran en: **repo → Settings → Environments → production → Required reviewers**.
 
@@ -364,7 +364,7 @@ Pasos para aprobar:
 Útil para re-deplorar un servicio sin hacer push (por ejemplo, tras cambiar una variable de entorno en Railway o para forzar un redeploy de emergencia).
 
 1. Ir a **GitHub → Actions → "Deploy - Microservicios" → Run workflow**
-2. Seleccionar la rama (`develop`, `test` o `main`)
+2. Seleccionar la rama (`dev`, `test` o `master`)
 3. Elegir el servicio del desplegable
 4. Ejecutar
 

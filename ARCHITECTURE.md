@@ -20,7 +20,7 @@ Visión general de las decisiones de diseño, patrones de comunicación e infrae
 
 ## 1. Vista general
 
-```
+```text
                           Internet
                               │
                     ┌─────────▼──────────┐
@@ -87,7 +87,7 @@ El sistema usa dos canales de comunicación, elegidos según la naturaleza de la
 
 Se usa cuando un servicio necesita una respuesta inmediata para continuar procesando la request del usuario.
 
-```
+```text
 auth-service  ──── GET /:id/effective-permissions ────► user-service
 auth-service  ──── GET /:id/companies             ────► user-service
 workflow-service ── GET /internal/typologies/:id/info ► document-service
@@ -100,7 +100,7 @@ Todas las llamadas internas usan el patrón `INTERNAL_TOKEN_<EMISOR>_<RECEPTOR>`
 
 Se usa para desacoplar servicios y permitir que cada uno procese a su ritmo sin bloquear la request original.
 
-```
+```text
 Ejemplo: flujo de extracción de metadatos
 
 document-service
@@ -131,7 +131,7 @@ Las llamadas HTTP entre servicios no usan el JWT del usuario — usan tokens ded
 
 **Patrón**: `INTERNAL_TOKEN_<EMISOR>_<RECEPTOR>`
 
-```
+```text
 INTERNAL_TOKEN_AUTH_USER   → auth-service llama a user-service
 INTERNAL_TOKEN_USER_AUTH   → user-service llama a auth-service
 INTERNAL_TOKEN_ORG_USER    → org-service llama a user-service
@@ -157,7 +157,7 @@ La renovación del access token usa **Double-Submit Cookie** como protección CS
 
 Los permisos son modulares con la forma `(módulo, acción)`:
 
-```
+```text
 USERS:READ    USERS:WRITE    USERS:DELETE    USERS:MANAGE
 ROLES:READ    ROLES:WRITE
 DOCUMENTS:READ  DOCUMENTS:WRITE
@@ -195,7 +195,7 @@ Los archivos (documentos de tipologías, avatares de usuarios, adjuntos de workf
 
 Antes de que cualquier archivo llegue a R2, document-service lo escanea contra el daemon `clamd` usando el protocolo INSTREAM (TCP):
 
-```
+```text
 POST /upload (buffer en memoria)
   └─► ClamavService.scan(buffer)   ← TCP a clamd:3310
         ├─► clean: true  → sube a R2, produce typology.file.uploaded
@@ -214,7 +214,7 @@ En Railway, `clamd` corre como servicio independiente accesible en `clamav.railw
 
 ### Topología de topics
 
-```
+```text
 Emisor                    Topic                              Consumidor(es)
 ────────────────────────────────────────────────────────────────────────────
 auth-service          auth.password-reset              notification-service
@@ -269,7 +269,7 @@ Separada de los logs técnicos. Cada acción relevante emite un mensaje a `audit
 
 El monorepo tiene un único paquete interno (`packages/common`) que centraliza la infraestructura transversal compartida por todos los servicios:
 
-```
+```text
 packages/common/src/
 ├── tracing/        initTracing() — OpenTelemetry
 ├── correlation/    correlationStorage, getCorrelationId()

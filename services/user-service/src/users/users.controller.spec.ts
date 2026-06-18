@@ -11,6 +11,12 @@ import { UserOrgRoleResponseDto } from './dto/user-org-role-response.dto';
 import { UserWithOrgRolesDto } from './dto/user-with-org-roles.dto';
 import { StorageService } from '../common/storage/storage.service';
 
+// file-type is ESM-only and lives in the monorepo root node_modules.
+// jest.config.js maps it to src/__mocks__/file-type.js so Jest can resolve it.
+const mockFileTypeFromBuffer = (
+  require('file-type') as { fileTypeFromBuffer: jest.Mock }
+).fileTypeFromBuffer;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const INTERNAL_TOKEN = 'super-secret-token';
@@ -55,6 +61,7 @@ const makeUor = (overrides: Partial<UserOrgRole> = {}): UserOrgRole => ({
 describe('UsersController', () => {
   let controller: UsersController;
   let usersService: jest.Mocked<UsersService>;
+  let storageService: jest.Mocked<StorageService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -121,6 +128,7 @@ describe('UsersController', () => {
 
     controller = module.get(UsersController);
     usersService = module.get(UsersService);
+    storageService = module.get(StorageService);
   });
 
   // ─── POST / ───────────────────────────────────────────────────────────────
@@ -710,6 +718,95 @@ describe('UsersController', () => {
       );
 
       expect(usersService.setOptionalReviewer).toHaveBeenCalled();
+    });
+  });
+
+  // ─── PATCH me/avatar ─────────────────────────────────────────────────────
+
+  describe('uploadAvatar', () => {
+    const userId = 'user-uuid-1';
+    const caller = { sub: userId };
+
+    const makeFile = (overrides: Partial<Express.Multer.File> = {}): Express.Multer.File => ({
+      fieldname: 'avatar',
+      originalname: 'photo.jpg',
+      encoding: '7bit',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('fake-image'),
+      size: 1024,
+      stream: null as any,
+      destination: '',
+      filename: '',
+      path: '',
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockFileTypeFromBuffer.mockReset();
+    });
+
+    it('throws BadRequestException when no file is provided', async () => {
+      await expect(
+        controller.uploadAvatar(caller as any, undefined as any),
+      ).rejects.toThrow(new BadRequestException('No file uploaded'));
+      expect(usersService.uploadAvatar).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when file-type returns null (unrecognized content)', async () => {
+      mockFileTypeFromBuffer.mockResolvedValue(null);
+
+      await expect(
+        controller.uploadAvatar(caller as any, makeFile()),
+      ).rejects.toThrow(new BadRequestException('File content does not match an allowed image format'));
+    });
+
+    it('throws BadRequestException when file bytes are a non-image type (e.g. PDF disguised as JPEG)', async () => {
+      mockFileTypeFromBuffer.mockResolvedValue({ mime: 'application/pdf', ext: 'pdf' });
+
+      await expect(
+        controller.uploadAvatar(caller as any, makeFile()),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.uploadAvatar).not.toHaveBeenCalled();
+    });
+
+    it('uploads to storage and returns updated UserResponseDto for a valid image', async () => {
+      mockFileTypeFromBuffer.mockResolvedValue({ mime: 'image/jpeg', ext: 'jpg' });
+
+      const existingUser = makeUser({ id: userId, avatarUrl: null });
+      const updatedUser  = makeUser({ id: userId, avatarUrl: 'https://cdn.example.com/avatars/new.jpg' });
+      usersService.findOne.mockResolvedValue(existingUser);
+      storageService.upload.mockResolvedValue('https://cdn.example.com/avatars/new.jpg');
+      usersService.uploadAvatar.mockResolvedValue(updatedUser);
+
+      const result = await controller.uploadAvatar(caller as any, makeFile());
+
+      expect(result).toBeInstanceOf(UserResponseDto);
+      expect(result.avatarUrl).toBe('https://cdn.example.com/avatars/new.jpg');
+      expect(storageService.upload).toHaveBeenCalledWith(
+        expect.stringMatching(/^avatars\/.+\.jpg$/),
+        expect.any(Buffer),
+        'image/jpeg',
+      );
+      expect(storageService.delete).not.toHaveBeenCalled();
+    });
+
+    it('deletes the previous avatar from storage after a successful upload', async () => {
+      mockFileTypeFromBuffer.mockResolvedValue({ mime: 'image/png', ext: 'png' });
+
+      const oldKey      = 'avatars/old.png';
+      const existingUser = makeUser({ id: userId, avatarUrl: 'https://cdn.example.com/avatars/old.png' });
+      const updatedUser  = makeUser({ id: userId, avatarUrl: 'https://cdn.example.com/avatars/new.png' });
+      usersService.findOne.mockResolvedValue(existingUser);
+      storageService.extractKey.mockReturnValue(oldKey);
+      storageService.upload.mockResolvedValue('https://cdn.example.com/avatars/new.png');
+      storageService.delete.mockResolvedValue(undefined);
+      usersService.uploadAvatar.mockResolvedValue(updatedUser);
+
+      await controller.uploadAvatar(caller as any, makeFile({ mimetype: 'image/png' }));
+
+      // delete is fire-and-forget (void .catch()), flush microtask queue
+      await new Promise(setImmediate);
+      expect(storageService.delete).toHaveBeenCalledWith(oldKey);
     });
   });
 });

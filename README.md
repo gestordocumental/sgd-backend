@@ -1,4 +1,4 @@
-# Sistema de Gestión Documental — Backend
+﻿# Sistema de Gestión Documental — Backend
 
 Plataforma de gestión documental multi-tenant basada en microservicios.
 Desplegada en Railway (dev / test / prod). Localmente se ejecuta con Docker Compose + `npm run start:dev`.
@@ -867,17 +867,17 @@ JWT_REFRESH_SECRET_KID=v1
 JWT_EXPIRATION=3600s
 JWT_REFRESH_EXPIRATION=7d
 SUPER_ADMIN_EMAIL=admin@empresa.com
-SUPER_ADMIN_PASSWORD=<openssl rand -hex 16>
+SUPER_ADMIN_PASSWORD=<openssl rand -base64 16>
 INTERNAL_TOKEN_AUTH_USER=<openssl rand -hex 32>
 INTERNAL_TOKEN_USER_AUTH=<openssl rand -hex 32>
 DB_NAME=auth_db
-DB_HOST=${{Postgres.PGHOST}}
-DB_PORT=${{Postgres.PGPORT}}
-DB_USERNAME=${{Postgres.PGUSER}}
-DB_PASSWORD=${{Postgres.PGPASSWORD}}
-REDIS_HOST=${{Redis.REDISHOST}}
-REDIS_PORT=${{Redis.REDISPORT}}
-REDIS_PASSWORD=${{Redis.REDISPASSWORD}}
+DB_HOST=${{postgres.PGHOST}}
+DB_PORT=${{postgres.PGPORT}}
+DB_USERNAME=${{postgres.PGUSER}}
+DB_PASSWORD=${{postgres.PGPASSWORD}}
+REDIS_HOST=${{redis.REDISHOST}}
+REDIS_PORT=${{redis.REDISPORT}}
+REDIS_PASSWORD=${{redis.REDISPASSWORD}}
 USER_SERVICE_URL=http://user-service.railway.internal:3000
 KAFKA_BROKER=kafka.railway.internal:9092
 KAFKA_CLIENT_ID=auth-service

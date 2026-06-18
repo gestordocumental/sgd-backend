@@ -45,39 +45,6 @@ listeners:
 provisioning:
   enabled: true
   topics:
-    # Heartbeat (sección 5.1 — monitoreo continuo)
-    - name: service.health.event
-      partitions: 1
-      replicationFactor: 1
-      config:
-        retention.ms: "86400000"    # 24h
-
-    # Eventos de documentos
-    - name: document.created
-      partitions: 3
-      replicationFactor: 1
-      config:
-        retention.ms: "604800000"   # 7 días
-
-    - name: document.approved
-      partitions: 3
-      replicationFactor: 1
-      config:
-        retention.ms: "604800000"
-
-    - name: document.rejected
-      partitions: 3
-      replicationFactor: 1
-      config:
-        retention.ms: "604800000"
-
-    # Eventos de flujo de aprobación
-    - name: workflow.step.completed
-      partitions: 3
-      replicationFactor: 1
-      config:
-        retention.ms: "604800000"
-
     # Notificaciones
     - name: notification.send
       partitions: 2

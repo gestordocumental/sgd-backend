@@ -39,7 +39,7 @@ Token requerido: `INTERNAL_TOKEN_WORKFLOW_DOC`
 | `GET` | `/my-available` | Workflows disponibles para el usuario como usuario final |
 | `GET` | `/` | Listar todos (requiere `WORKFLOWS:MANAGE`) |
 | `GET` | `/:id` | Detalle de un workflow |
-| `GET` | `/:id/timeline` | Historial de eventos del workflow |
+| `GET` | `/:id/timeline` | Historial de eventos del workflow (máx. 500 items) |
 
 ### Ciclo de vida base
 
