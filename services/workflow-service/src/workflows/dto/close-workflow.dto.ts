@@ -4,7 +4,7 @@ import { Transform } from 'class-transformer';
 
 /**
  * [RN-14] No se puede cerrar si hay un ciclo administrativo activo.
- * [RN-16] Solo el usuario final que inició el último ciclo puede cerrar.
+ * [RN-16] Solo un usuario final designado puede cerrar.
  */
 export class CloseWorkflowDto {
   @ApiPropertyOptional({

@@ -331,21 +331,27 @@ flowchart TD
 
 | ID | Regla |
 |---|---|
-| RN-01 | Solo el **creador** del workflow puede iniciar el ciclo de aprobación |
+| RN-01 | Solo el **creador** del workflow puede iniciar el ciclo de aprobación y solo desde estado **DRAFT** |
 | RN-02 | El workflow debe tener **al menos 1 aprobador** definido para iniciar aprobación |
 | RN-03 | El **documento principal** debe estar validado (metadatos confirmados) antes de iniciar aprobación |
-| RN-04 | Solo el **aprobador del paso activo** puede aprobar o rechazar |
-| RN-05 | El rechazo en cualquier paso envía el workflow a estado **REJECTED** (terminal). No hay vuelta atrás |
-| RN-06 | Tras rechazo, el creador puede corregir y reenviar (**resubmit**) — el workflow retoma desde el paso rechazado, no desde el inicio |
-| RN-07 | Solo los **usuarios finales** designados pueden crear ciclos administrativos |
-| RN-08 | No puede existir más de un **ciclo administrativo activo** simultáneamente |
-| RN-09 | Solo el **usuario asignado** al paso administrativo activo puede completarlo |
+| RN-04 | Solo el **aprobador del paso activo** puede aprobar |
+| RN-05 | Al rechazar, las observaciones son obligatorias y deben tener al menos 10 caracteres |
+| RN-06 | Solo el **aprobador del paso activo** puede rechazar |
+| RN-07 | Solo se puede reenviar (**resubmit**) un workflow en estado **RETURNED_TO_CREATOR** |
+| RN-08 | Solo el **creador** del workflow puede reenviar (**resubmit**) |
+| RN-09 | Solo workflows en estado **DRAFT** pueden modificarse |
 | RN-10 | Un revisor opcional **no puede reenviar** su paso a otro revisor opcional |
-| RN-11 | Solo el **revisor opcional autorizado** (del pool definido al crear el ciclo) puede recibir reenvíos |
-| RN-12 | Solo los **usuarios finales** pueden cerrar un workflow |
-| RN-13 | Solo se puede cerrar un workflow en estado **AVAILABLE_FOR_FINAL_USERS** |
-| RN-14 | Solo workflows en estado **DRAFT** o **CANCELLED** pueden eliminarse permanentemente |
-| RN-15 | Al aprobar el último paso, si no hay usuarios finales asignados explícitamente, el sistema los **resuelve automáticamente** por la estructura organizacional de la tipología (cargo, área, departamento) |
+| RN-11 | Solo se puede crear un ciclo administrativo si el workflow está en **PENDING_REVIEW_CYCLE** o **AVAILABLE_FOR_FINAL_USERS** |
+| RN-12 | No puede existir más de un **ciclo administrativo activo** simultáneamente |
+| RN-13 | Solo el **usuario asignado** al paso administrativo activo puede completarlo |
+| RN-14 | Solo se puede cerrar un workflow en estado **AVAILABLE_FOR_FINAL_USERS**; no se puede cerrar con un ciclo administrativo activo |
+| RN-15 | Solo los **usuarios finales** designados pueden crear ciclos administrativos |
+| RN-16 | Solo los **usuarios finales** designados pueden cerrar un workflow |
+| RN-17 | Solo workflows en estado **DRAFT** o **CANCELLED** pueden eliminarse sin permiso especial |
+| RN-18 | Solo el **revisor opcional autorizado** (del pool definido al crear el ciclo) puede recibir reenvíos |
+| RN-19 | Al reenviar (**resubmit**), el workflow retoma desde el paso rechazado, no desde el inicio |
+| RN-20 | Al reenviar (**resubmit**), el paso rechazado vuelve a estado **PENDING** |
+| RN-21 | Al aprobar el último paso, si no hay usuarios finales asignados explícitamente, el sistema los **resuelve automáticamente** por la estructura organizacional de la tipología (cargo, área, departamento) |
 
 ---
 

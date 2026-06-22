@@ -24,7 +24,7 @@ export class AdminStepInputDto {
 }
 
 /**
- * [RN-11] Solo se puede crear si el workflow está en AVAILABLE_FOR_FINAL_USERS.
+ * [RN-11] Solo se puede crear si el workflow está en PENDING_REVIEW_CYCLE o AVAILABLE_FOR_FINAL_USERS.
  * [RN-15] Solo un usuario final (en finalUserIds) puede iniciar el ciclo.
  */
 export class CreateAdminCycleDto {
