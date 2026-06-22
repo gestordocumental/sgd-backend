@@ -243,7 +243,10 @@ Las llamadas HTTP entre microservicios usan tokens dedicados por par emisor-rece
 | auth-service | user-service | `INTERNAL_TOKEN_AUTH_USER` |
 | user-service | auth-service | `INTERNAL_TOKEN_USER_AUTH` |
 | org-service | user-service | `INTERNAL_TOKEN_ORG_USER` |
+| user-service | org-service | `INTERNAL_TOKEN_USER_ORG` |
 | workflow-service | document-service | `INTERNAL_TOKEN_WORKFLOW_DOC` |
+| notification-service | user-service | `INTERNAL_TOKEN_NOTIF_USER` |
+| notification-service | org-service | `INTERNAL_TOKEN_NOTIF_ORG` |
 
 ---
 

@@ -22,7 +22,7 @@
 
 ## 1. Arquitectura de datos
 
-El sistema SGD Helisa sigue el patrón **Database-per-Service**: cada microservicio gestiona su propia base de datos de forma independiente. No existen claves foráneas a nivel de motor de base de datos entre servicios; la integridad referencial entre servicios se garantiza en la capa de aplicación.
+El sistema SGD Helisa sigue el patrón **Database-per-Service**: cada microservicio gestiona su propia base de datos de forma independiente. No existen claves foráneas entre servicios definidas en el motor de base de datos; la integridad referencial entre servicios se garantiza en la capa de aplicación.
 
 | Servicio | Motor | Base de datos |
 |---|---|---|
@@ -989,7 +989,7 @@ erDiagram
 
 ## 8. Referencias cruzadas entre servicios
 
-Al tratarse de una arquitectura de microservicios, no existen claves foráneas a nivel de base de datos entre servicios. Las referencias son IDs lógicas cuya consistencia se mantiene desde la capa de aplicación.
+Al tratarse de una arquitectura de microservicios, no existen claves foráneas entre servicios definidas en las bases de datos. Las referencias son IDs lógicas cuya consistencia se mantiene desde la capa de aplicación.
 
 ```mermaid
 graph TD
