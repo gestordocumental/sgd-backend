@@ -361,7 +361,7 @@ sequenceDiagram
     Note over Kong: JWT validado por Kong
     Kong->>Notif: POST /stream/ticket
 
-    Notif->>Notif: Genera UUID de un solo uso
+    Notif->>Notif: Genera UUID efímero (válido 30 s, reutilizable para reconexión)
     Notif->>Redis: SETEX sse_ticket:{uuid} userId\nTTL: 30 segundos
     Notif-->>Browser: 200 {ticket: <uuid>}
 
@@ -373,7 +373,7 @@ sequenceDiagram
     Redis-->>Notif: userId | NULL (expirado)
 
     alt Ticket válido
-        Notif->>Redis: DEL sse_ticket:{uuid}\n(consumido — no reutilizable)
+        Note over Notif: Ticket NO se elimina — expira por TTL.\nPermite que EventSource se reconecte\ncon la misma URL dentro de los 30 s.
         Notif-->>Browser: 200 text/event-stream\nConexión SSE abierta (long-lived)
         loop Eventos en tiempo real
             Notif-->>Browser: data: {type, title, message, ...}\n\n
