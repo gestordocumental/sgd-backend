@@ -152,14 +152,18 @@ graph LR
     ORG -->|"DELETE /internal/orgs/:orgId/users\nx-internal-token"| USER
     WF -->|"GET /internal/typologies/:id/info\nx-internal-token"| DOC
 
-    %% ─── KAFKA (asíncrono) ───────────────────────────────────────────────────
-    subgraph KF["Apache Kafka"]
+    %% ─── KAFKA (asíncrono) — 24 tópicos ────────────────────────────────────
+    subgraph KF["Apache Kafka — 24 tópicos"]
         K1["auth.password-reset"]
-        K2["user.invited\nuser.org-removed\nuser.super-admin-revoked"]
+        K2["user.invited\nuser.org-removed\nuser.super-admin-revoked\nuser.permissions-changed"]
         K3["typology.file.uploaded"]
         K4["typology.metadata.extracted\ntypology.metadata.extraction.failed"]
-        K5["notification.send\nworkflow.closed\nworkflow.cancelled"]
-        K6["audit.log\nworkflow.*"]
+        K5["notification.send"]
+        KW_END["workflow.closed\nworkflow.cancelled"]
+        KW_LIFECYCLE["workflow.created\nworkflow.resubmitted\nworkflow.returned.to.creator\nworkflow.available.for.final.users"]
+        KW_APPROVAL["workflow.approval.started\nworkflow.approval.rejected\nworkflow.approval.approved\nworkflow.approval.completed"]
+        KW_ADMIN["workflow.admin.cycle.started\nworkflow.admin.cycle.step.completed\nworkflow.admin.cycle.completed"]
+        K6["audit.log"]
     end
 
     AUTH -->|"produce"| K1
@@ -167,6 +171,10 @@ graph LR
     DOC -->|"produce"| K3
     META -->|"produce"| K4
     WF -->|"produce"| K5
+    WF -->|"produce"| KW_END
+    WF -->|"produce"| KW_LIFECYCLE
+    WF -->|"produce"| KW_APPROVAL
+    WF -->|"produce"| KW_ADMIN
     WF -->|"produce"| K6
     AUTH -->|"produce"| K6
     USER -->|"produce"| K6
@@ -177,6 +185,11 @@ graph LR
     K3 -->|"consume"| META
     K4 -->|"consume"| DOC
     K5 -->|"consume"| NOTIF
+    KW_END -->|"consume"| NOTIF
+    KW_END -->|"consume"| AUDIT
+    KW_LIFECYCLE -->|"consume"| AUDIT
+    KW_APPROVAL -->|"consume"| AUDIT
+    KW_ADMIN -->|"consume"| AUDIT
     K6 -->|"consume"| AUDIT
 
     %% ─── BASES DE DATOS ──────────────────────────────────────────────────────
@@ -245,6 +258,8 @@ Las llamadas HTTP entre microservicios usan tokens dedicados por par emisor-rece
 | org-service | user-service | `INTERNAL_TOKEN_ORG_USER` |
 | user-service | org-service | `INTERNAL_TOKEN_USER_ORG` |
 | workflow-service | document-service | `INTERNAL_TOKEN_WORKFLOW_DOC` |
+| workflow-service | user-service | `INTERNAL_TOKEN_WORKFLOW_USER` |
+| document-service | org-service | `INTERNAL_TOKEN_DOC_ORG` |
 | notification-service | user-service | `INTERNAL_TOKEN_NOTIF_USER` |
 | notification-service | org-service | `INTERNAL_TOKEN_NOTIF_ORG` |
 
@@ -416,7 +431,7 @@ sequenceDiagram
 | JWT con TTL de 15 minutos | Ventana de exposición reducida si un token es interceptado |
 | Refresh token en cookie `httpOnly` | Robo de token vía JavaScript (XSS) |
 | Double-Submit Cookie (CSRF token) | Ataques CSRF en la operación de refresh |
-| `SameSite=Strict` en cookies | CSRF en la mayoría de navegadores modernos |
+| `SameSite=None; Secure` en producción / `SameSite=Strict` en desarrollo | CSRF en la mayoría de navegadores modernos (`None` es requerido para cross-origin Vercel → Railway) |
 | Ticket efímero para SSE (30s TTL) | Exposición del JWT en URL/logs al abrir stream SSE |
 | Rate limiting por IP en `/login` | Ataques de fuerza bruta |
 | `timingSafeEqual` en tokens internos | Timing attacks en comparación de secretos |
