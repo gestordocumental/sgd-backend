@@ -1,0 +1,40 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install org-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/org-service-values.yaml
+
+image:
+  repository: org-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
+
+# 4 TypeORM migrations — includes CREATE INDEX CONCURRENTLY (pg_trgm GIN).
+# CONCURRENTLY avoids lock contention but adds a few extra seconds vs. blocking indexes.
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 36   # 180 s — allows for concurrent index build on fresh schema
+  successThreshold: 1
+  timeoutSeconds: 3
+
+# readinessProbe checks: PostgreSQL
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "400m"
+    memory: "384Mi"

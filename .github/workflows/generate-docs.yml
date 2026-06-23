@@ -1,0 +1,89 @@
+name: Generate & Deploy API Docs
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  generate-docs:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Redocly CLI
+        run: npm install -g @redocly/cli
+
+      - name: Obtener JWT para docs
+        id: auth
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_API_URL }}
+          DOCS_EMAIL: ${{ secrets.PRODUCTION_DOCS_EMAIL }}
+          DOCS_PASSWORD: ${{ secrets.PRODUCTION_DOCS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          payload="$(jq -nc --arg email "$DOCS_EMAIL" --arg password "$DOCS_PASSWORD" '{email: $email, password: $password}')"
+
+          response="$(
+            curl --fail --silent --show-error \
+              -X POST "$PRODUCTION_URL/api/auth/login" \
+              -H "Content-Type: application/json" \
+              -d "$payload"
+          )"
+
+          access_token="$(echo "$response" | jq -r '.accessToken')"
+
+          if [ -z "$access_token" ] || [ "$access_token" = "null" ]; then
+            echo "No se pudo obtener accessToken para generar la documentacion." >&2
+            exit 1
+          fi
+
+          echo "access_token=$access_token" >> "$GITHUB_OUTPUT"
+
+      - name: Generate docs from production specs
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_API_URL }}
+          DOCS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p railway/api-docs/public
+
+          declare -A titles=(
+            [auth]="Auth Service"
+            [users]="User Service"
+            [org]="Org Service"
+            [documents]="Document Service"
+            [metadata-extractor]="Metadata Extractor Service"
+          )
+
+          services=("auth" "users" "org" "documents" "metadata-extractor")
+
+          for service in "${services[@]}"; do
+            echo "Generating docs for $service..."
+            redocly build-docs \
+              "$PRODUCTION_URL/api/$service/docs-json" \
+              --output "railway/api-docs/public/$service.html" \
+              --title "SGD - ${titles[$service]}" \
+              --cdn \
+              --header "Authorization: Bearer $DOCS_TOKEN"
+          done
+
+      - name: Commit generated docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add railway/api-docs/public/
+          git diff --staged --quiet || git commit -m "docs: regenerate API docs [skip ci]"
+          git push

@@ -3,19 +3,42 @@
 **/dist/
 **/build/
 **/.npm
+**/.npm-cache/
 **/*.tsbuildinfo
+**/.pnp
+**/.pnp.js
 
 # ── Variables de entorno (NUNCA subir al repo) ────────────────────────────────
 **/.env
 **/.env.local
 **/.env.*.local
+**/.env.development
+**/.env.test
+**/.env.production
 # Permitir el ejemplo de referencia
 !**/.env.example
+
+# ── Credenciales y secretos ───────────────────────────────────────────────────
+**/*.pem
+**/*.key
+**/*.cert
+**/*.p12
+**/*.pfx
+**/.npmrc
+**/.yarnrc
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 **/logs/
 **/*.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+# Carpeta local de configuración y memoria — contiene rutas personales y
+# permisos expandidos que no deben subirse al repositorio.
+.claude/
 
 # ── IDEs ──────────────────────────────────────────────────────────────────────
 .vscode/
@@ -24,11 +47,15 @@ npm-debug.log*
 *.ntvs*
 *.njsproj
 *.sln
+*.sw?
 
 # ── Sistema operativo ─────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
 desktop.ini
+ehthumbs.db
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 # Ignorar overrides locales pero conservar docker-compose.yml base
@@ -46,3 +73,12 @@ docker-compose.override.yml
 # ── Cobertura de tests ────────────────────────────────────────────────────────
 **/coverage/
 **/.nyc_output/
+**/test-results/
+
+# ── Archivos temporales ───────────────────────────────────────────────────────
+**/tmp/
+**/temp/
+**/*.local
+**/*.tmp
+**/*.bak
+*.pdf

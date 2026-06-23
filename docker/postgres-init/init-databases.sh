@@ -12,18 +12,21 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   CREATE DATABASE org_db;
   CREATE DATABASE user_db;
   CREATE DATABASE workflow_db;
+  CREATE DATABASE notification_db;
 
   -- ── Usuarios dedicados por servicio (principio de mínimo privilegio) ────────
-  CREATE USER auth_user     WITH PASSWORD 'auth_pass_local';
-  CREATE USER org_user      WITH PASSWORD 'org_pass_local';
-  CREATE USER user_svc_user WITH PASSWORD 'user_pass_local';
-  CREATE USER workflow_user WITH PASSWORD 'workflow_pass_local';
+  CREATE USER auth_user          WITH PASSWORD 'auth_pass_local';
+  CREATE USER org_user           WITH PASSWORD 'org_pass_local';
+  CREATE USER user_svc_user      WITH PASSWORD 'user_pass_local';
+  CREATE USER workflow_user      WITH PASSWORD 'workflow_pass_local';
+  CREATE USER notification_user  WITH PASSWORD 'notification_pass_local';
 
   -- ── Permisos a nivel de base de datos ────────────────────────────────────────
-  GRANT ALL PRIVILEGES ON DATABASE auth_db     TO auth_user;
-  GRANT ALL PRIVILEGES ON DATABASE org_db      TO org_user;
-  GRANT ALL PRIVILEGES ON DATABASE user_db     TO user_svc_user;
-  GRANT ALL PRIVILEGES ON DATABASE workflow_db TO workflow_user;
+  GRANT ALL PRIVILEGES ON DATABASE auth_db          TO auth_user;
+  GRANT ALL PRIVILEGES ON DATABASE org_db           TO org_user;
+  GRANT ALL PRIVILEGES ON DATABASE user_db          TO user_svc_user;
+  GRANT ALL PRIVILEGES ON DATABASE workflow_db      TO workflow_user;
+  GRANT ALL PRIVILEGES ON DATABASE notification_db  TO notification_user;
 
 EOSQL
 
@@ -40,5 +43,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "user_db" \
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "workflow_db" \
   -c "GRANT ALL ON SCHEMA public TO workflow_user;"
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "notification_db" \
+  -c "GRANT ALL ON SCHEMA public TO notification_user;"
 
 echo ">>> Bases de datos SGD inicializadas correctamente."

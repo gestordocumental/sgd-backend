@@ -1,0 +1,289 @@
+_format_version: "3.0"
+_transform: true
+
+# ── Consumidor SGD ──────────────────────────────────────────────────────────
+# Variables requeridas en Railway (o cualquier plataforma de producción):
+#   KONG_JWT_SECRET        → mismo valor que JWT_SECRET en auth-service
+#   KONG_CORS_ORIGIN_1     → dominio principal del frontend  (ej. https://sgd.helisa.com)
+#   KONG_CORS_ORIGIN_2     → dominio staging del frontend    (ej. https://staging.sgd.helisa.com)
+#   AUTH_SERVICE_URL       → URL interna del auth-service    (ej. http://auth-service.railway.internal:3000)
+#   USER_SERVICE_URL       → URL interna del user-service
+#   ORG_SERVICE_URL        → URL interna del org-service
+#   DOCUMENT_SERVICE_URL   → URL interna del document-service
+#   METADATA_SERVICE_URL   → URL interna del metadata-extractor-service
+#   WORKFLOW_SERVICE_URL   → URL interna del workflow-service
+#   NOTIFICATION_SERVICE_URL → URL interna del notification-service
+#   AUDIT_SERVICE_URL      → URL interna del audit-service
+consumers:
+  - username: sgd-users
+    jwt_secrets:
+      - key: sgd-jwt-key
+        algorithm: HS256
+        secret: "${KONG_JWT_SECRET}"
+
+# ── Plugins globales ────────────────────────────────────────────────────────
+plugins:
+  - name: cors
+    config:
+      # Orígenes explícitos — el estándar CORS prohíbe credentials: true con origins: "*".
+      # Configurar KONG_CORS_ORIGIN_1 y KONG_CORS_ORIGIN_2 en las variables de entorno
+      # de la plataforma de despliegue (Railway, etc.).
+      origins:
+        - "${KONG_CORS_ORIGIN_1}"
+        - "${KONG_CORS_ORIGIN_2}"
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      headers: [Authorization, Content-Type, Accept, X-Company-Id, X-Correlation-Id]
+      exposed_headers: [X-Request-Id, X-Correlation-Id]
+      credentials: true    # necesario para que el navegador envíe la cookie httpOnly del refresh token
+      max_age: 3600
+
+  - name: response-transformer
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "X-XSS-Protection:0"
+          - "Referrer-Policy:strict-origin-when-cross-origin"
+          - "Strict-Transport-Security:max-age=31536000; includeSubDomains"
+          - "Content-Security-Policy:default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+# ── Servicios y Rutas ───────────────────────────────────────────────────────
+services:
+
+  # ── Health check de Kong ─────────────────────────────────────────────────
+  - name: health-service
+    url: http://127.0.0.1:8001
+    routes:
+      - name: health-route
+        paths:
+          - /health
+        methods: [GET]
+        strip_path: false
+    plugins:
+      - name: request-termination
+        config:
+          status_code: 200
+          message: "OK"
+
+  # ── Swagger docs (sin JWT) ───────────────────────────────────────────────
+  - name: auth-docs
+    url: "${AUTH_SERVICE_URL}"
+    routes:
+      - name: auth-docs-route
+        paths:
+          - /api/v1/auth/docs
+        strip_path: false
+
+  - name: user-docs
+    url: "${USER_SERVICE_URL}"
+    routes:
+      - name: user-docs-route
+        paths:
+          - /api/v1/users/docs
+        strip_path: false
+
+  - name: org-docs
+    url: "${ORG_SERVICE_URL}"
+    routes:
+      - name: org-docs-route
+        paths:
+          - /api/v1/org/docs
+        strip_path: false
+
+  - name: document-docs
+    url: "${DOCUMENT_SERVICE_URL}"
+    routes:
+      - name: document-docs-route
+        paths:
+          - /api/v1/documents/docs
+        strip_path: false
+
+  - name: metadata-extractor-docs
+    url: "${METADATA_SERVICE_URL}"
+    routes:
+      - name: metadata-extractor-docs-route
+        paths:
+          - /api/v1/metadata-extractor/docs
+        strip_path: false
+
+  # ── auth-service: rutas PÚBLICAS (sin JWT) ──────────────────────────────
+  - name: auth-public
+    url: "${AUTH_SERVICE_URL}"
+    routes:
+      - name: auth-login
+        paths:
+          - /api/v1/auth/login
+          - /api/v1/auth/refresh
+          - /api/v1/auth/exit-company
+          - /api/v1/auth/forgot-password
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+          fault_tolerant: true
+
+  # ── auth-service: reset-password (sin JWT, con rate-limit) ──────────────
+  - name: auth-reset-password
+    url: "${AUTH_SERVICE_URL}"
+    routes:
+      - name: auth-reset-password-route
+        paths:
+          - /api/v1/auth/reset-password
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+          fault_tolerant: true
+
+  # ── auth-service: provision (token interno) ───────────────────────────────
+  - name: auth-provision
+    url: "${AUTH_SERVICE_URL}"
+    routes:
+      - name: auth-provision-route
+        paths:
+          - /api/v1/auth/credentials/provision
+        methods: [POST]
+        strip_path: false
+
+  # ── auth-service: rutas PROTEGIDAS (con JWT) ─────────────────────────────
+  - name: auth-protected
+    url: "${AUTH_SERVICE_URL}"
+    routes:
+      - name: auth-me
+        paths:
+          - /api/v1/auth
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── org-service ───────────────────────────────────────────────────────────
+  - name: org-service
+    url: "${ORG_SERVICE_URL}"
+    routes:
+      - name: org-routes
+        paths:
+          - /api/v1/org
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── user-service: avatares estáticos (sin JWT) ────────────────────────────
+  - name: user-avatars
+    url: "${USER_SERVICE_URL}"
+    routes:
+      - name: user-avatars-route
+        paths:
+          - /uploads/avatars
+        methods: [GET]
+        strip_path: false
+
+  # ── user-service: rutas PÚBLICAS (sin JWT) ───────────────────────────────
+  - name: user-service-public
+    url: "${USER_SERVICE_URL}"
+    routes:
+      - name: complete-registration
+        paths:
+          - /api/v1/users/complete-registration
+        methods: [POST]
+        strip_path: false
+
+  # ── user-service (con JWT) ────────────────────────────────────────────────
+  - name: user-service
+    url: "${USER_SERVICE_URL}"
+    routes:
+      - name: user-routes
+        paths:
+          - /api/v1/users
+          - /api/v1/roles
+          - ~/api/v1/permissions$
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── document-service (con JWT) ────────────────────────────────────────────
+  - name: document-service
+    url: "${DOCUMENT_SERVICE_URL}"
+    routes:
+      - name: document-routes
+        paths:
+          - /api/v1/documents
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── workflow-service (con JWT) ────────────────────────────────────────────
+  - name: workflow-service
+    url: "${WORKFLOW_SERVICE_URL}"
+    routes:
+      - name: workflow-routes
+        paths:
+          - /api/v1/workflows
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── notification-service: ticket efímero para SSE (JWT en header) ───────────
+  - name: notification-sse-ticket
+    url: "${NOTIFICATION_SERVICE_URL}"
+    routes:
+      - name: notification-sse-ticket-route
+        paths:
+          - /api/v1/notifications/stream/ticket
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── notification-service: SSE stream (autenticado por ticket efímero) ───────
+  - name: notification-sse
+    url: "${NOTIFICATION_SERVICE_URL}"
+    routes:
+      - name: notification-sse-route
+        paths:
+          - /api/v1/notifications/stream
+        methods: [GET]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 30
+          policy: local
+          fault_tolerant: true
+
+  # ── notification-service: resto de rutas (JWT en header) ──────────────────
+  - name: notification-service
+    url: "${NOTIFICATION_SERVICE_URL}"
+    routes:
+      - name: notification-routes
+        paths:
+          - /api/v1/notifications
+        strip_path: false
+    plugins:
+      - name: jwt
+
+  # ── audit-service: Swagger docs (sin JWT) ─────────────────────────────────
+  - name: audit-docs
+    url: "${AUDIT_SERVICE_URL}"
+    routes:
+      - name: audit-docs-route
+        paths:
+          - /api/v1/audit/docs
+        strip_path: false
+
+  # ── audit-service (con JWT) ───────────────────────────────────────────────
+  - name: audit-service
+    url: "${AUDIT_SERVICE_URL}"
+    routes:
+      - name: audit-routes
+        paths:
+          - /api/v1/audit
+        strip_path: false
+    plugins:
+      - name: jwt

@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
   Index,
 } from "typeorm";
 
@@ -12,27 +13,30 @@ export enum CredentialStatus {
   DISABLED = "disabled", // Blocked by admin/security
 }
 
+// Partial unique index: enforces email uniqueness only among non-deleted rows,
+// allowing future soft-deletion of credentials while permitting email reuse.
+@Index("IDX_credentials_email_active", ["email"], { unique: true, where: '"deleted_at" IS NULL' })
 @Entity("credentials")
-@Index(["companyId", "email"], { unique: true }) // unique email per company (multi-tenant)
 export class Credential {
   @PrimaryGeneratedColumn("uuid")
-  id: string;
-
-  @Index()
-  @Column({ name: "company_id", type: "uuid" })
-  companyId: string;
+  id!: string;
 
   @Column()
-  email: string;
+  email!: string;
 
-  // Logical relationship with the User Service
+  // Cross-service reference to user-service's User.id.
+  // No DB FK by design: auth-service and user-service use separate databases (microservice boundary).
+  // Integrity is maintained at the application layer:
+  //   - Only user-service may write this field via POST /credentials/provision (x-internal-token).
+  //   - No other code path creates a Credential record, so no other source of userId exists.
+  //   - ProvisionCredentialDto validates the value as a UUID before it reaches the service.
   @Index({ unique: true })
   @Column({ name: "user_id", type: "uuid" })
-  userId: string;
+  userId!: string;
 
   // It is filled in when the user completes the invitation.
-  @Column({ name: "password_hash" })
-  passwordHash: string;
+  @Column({ name: "password_hash", type: "varchar", nullable: true })
+  passwordHash!: string | null;
 
   // Credential status according to the invitation cycle
   @Column({
@@ -40,18 +44,17 @@ export class Credential {
     enum: CredentialStatus,
     default: CredentialStatus.ACTIVE,
   })
-  status: CredentialStatus;
-
-  // Refresh current token (optional) for rotation/revocation
-  @Column({ name: "refresh_token_hash", nullable: true })
-  refreshTokenHash: string | null;
+  status!: CredentialStatus;
 
   @Column({ name: "locked_until", type: "timestamptz", nullable: true })
-  lockedUntil: Date | null;
+  lockedUntil!: Date | null;
 
   @CreateDateColumn({ name: "created_at", type: "timestamptz" })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: "updated_at", type: "timestamptz" })
-  updatedAt: Date;
+  updatedAt!: Date;
+
+  @DeleteDateColumn({ name: "deleted_at", type: "timestamptz", nullable: true })
+  deletedAt!: Date | null;
 }

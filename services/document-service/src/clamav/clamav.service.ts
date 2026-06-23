@@ -1,0 +1,113 @@
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as net from 'net';
+import { AppLogger } from '@sgd/common';
+
+export interface ScanResult {
+  clean: boolean;
+  threat?: string;
+}
+
+const CHUNK_SIZE = 4096;
+
+@Injectable()
+export class ClamavService {
+  private readonly host: string;
+  private readonly port: number;
+  private readonly timeoutMs: number;
+  private readonly required: boolean;
+
+  constructor(
+    private readonly config: ConfigService,
+    private readonly logger: AppLogger,
+  ) {
+    this.host      = config.get<string>('CLAMAV_HOST', 'localhost');
+    const rawPort    = Number(config.get('CLAMAV_PORT', 3310));
+    const rawTimeout = Number(config.get('CLAMAV_TIMEOUT_MS', 15000));
+    if (!Number.isFinite(rawPort) || rawPort <= 0) {
+      throw new Error('CLAMAV_PORT must be a positive number');
+    }
+    if (!Number.isFinite(rawTimeout) || rawTimeout <= 0) {
+      throw new Error('CLAMAV_TIMEOUT_MS must be a positive number');
+    }
+    this.port      = rawPort;
+    this.timeoutMs = rawTimeout;
+    const requiredRaw = String(config.get('CLAMAV_REQUIRED', 'false')).trim().toLowerCase();
+    this.required = ['true', '1', 'yes', 'on'].includes(requiredRaw);
+  }
+
+  /**
+   * Streams a buffer to ClamAV via the INSTREAM protocol.
+   * - If ClamAV is unreachable and CLAMAV_REQUIRED=false, logs a warning and passes through.
+   * - If ClamAV is unreachable and CLAMAV_REQUIRED=true, throws InternalServerErrorException.
+   */
+  async scan(buffer: Buffer): Promise<ScanResult> {
+    try {
+      return await this.streamScan(buffer);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (this.required) {
+        this.logger.error(`ClamAV unavailable — upload blocked (CLAMAV_REQUIRED=true): ${msg}`, undefined, 'ClamavService');
+        throw new InternalServerErrorException('Malware scanning service is unavailable. Upload blocked.');
+      }
+      this.logger.warn(`ClamAV unavailable — proceeding without scan (CLAMAV_REQUIRED=false): ${msg}`, 'ClamavService');
+      return { clean: true };
+    }
+  }
+
+  private streamScan(buffer: Buffer): Promise<ScanResult> {
+    return new Promise((resolve, reject) => {
+      const socket = new net.Socket();
+      const chunks: Buffer[] = [];
+
+      socket.setTimeout(this.timeoutMs);
+
+      socket.connect(this.port, this.host, () => {
+        socket.write('zINSTREAM\0');
+
+        for (let offset = 0; offset < buffer.length; offset += CHUNK_SIZE) {
+          const slice = buffer.subarray(offset, offset + CHUNK_SIZE);
+          const lenBuf = Buffer.allocUnsafe(4);
+          lenBuf.writeUInt32BE(slice.length, 0);
+          socket.write(lenBuf);
+          socket.write(slice);
+        }
+
+        // Zero-length chunk signals end of stream to clamd
+        socket.write(Buffer.alloc(4));
+      });
+
+      socket.on('data', (d) => chunks.push(d));
+
+      socket.on('end', () => {
+        socket.destroy();
+        const response = Buffer.concat(chunks).toString().replace(/\0/g, '').trim();
+
+        if (/:\s*OK$/i.test(response)) {
+          resolve({ clean: true });
+          return;
+        }
+
+        const found = response.match(/:\s*(.+)\s+FOUND$/i);
+        if (found) {
+          resolve({ clean: false, threat: found[1] });
+          return;
+        }
+
+        // Covers "stream: ... ERROR" and any other unexpected response.
+        // Rejected here so the outer scan() applies the fail-open/fail-closed policy.
+        reject(new Error(`Unexpected ClamAV response: ${response || '<empty>'}`));
+      });
+
+      socket.on('timeout', () => {
+        socket.destroy();
+        reject(new Error(`ClamAV timed out after ${this.timeoutMs}ms`));
+      });
+
+      socket.on('error', (err) => {
+        socket.destroy();
+        reject(err);
+      });
+    });
+  }
+}

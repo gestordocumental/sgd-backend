@@ -65,14 +65,85 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # PASO 5 — Desplegar microservicios en gestor-documental
 # ─────────────────────────────────────────────────────────────────────────────
+# Cada servicio usa el chart genérico helm/charts/sgd-service con sus valores
+# propios.  El chart configura startupProbe / livenessProbe / readinessProbe
+# sobre los endpoints /health/startup, /health/live y /health/ready expuestos
+# por @nestjs/terminus en todos los servicios.
 #
-#   kubectl apply -f k8s/auth-service/
-#   kubectl apply -f k8s/org-service/
-#   kubectl apply -f k8s/user-service/
-#   kubectl apply -f k8s/workflow-service/
-#   kubectl apply -f k8s/document-service/
-#   kubectl apply -f k8s/notification-service/
-#   kubectl apply -f k8s/audit-service/
+# PRE-REQUISITO: crear los Secret y ConfigMap de cada servicio antes de
+# instalar los charts. El deployment template los referencia como
+# {release-name}-secret y {release-name}-config:
+#   kubectl apply -f k8s/secrets/ -n gestor-documental
+#   kubectl apply -f k8s/configmaps/ -n gestor-documental
+#
+# DESPLIEGUE AUTOMATIZADO — el script helm/deploy-services.sh valida los
+# pre-requisitos y despliega en orden de dependencias con --wait:
+#   chmod +x helm/deploy-services.sh
+#   ./helm/deploy-services.sh                            # namespace por defecto
+#   ./helm/deploy-services.sh --namespace mi-namespace   # namespace personalizado
+#   ./helm/deploy-services.sh --dry-run                  # solo muestra comandos
+#
+# ORDEN DE DESPLIEGUE MANUAL — instalar por capas usando --wait para garantizar
+# que cada capa está ready antes de continuar con la siguiente.
+#
+# Dependencias entre servicios:
+#   auth-service    ←→ user-service  (circular: se llaman mutuamente)
+#   org-service      →  user-service
+#   document-service →  user-service, org-service
+#   workflow-service →  user-service, org-service, document-service
+#   notification-service → user-service
+#   audit-service    →  kafka (infra, no service)
+#   metadata-extractor-service → sin dependencias de servicio
+#
+# La dependencia circular auth↔user se resuelve arrancando auth primero;
+# ambos toleran que el otro no esté disponible al inicio gracias al
+# circuit-breaker (opossum) y a las readinessProbes que excluyen el pod
+# del load-balancing hasta que sus dependencias de infra estén listas.
+#
+#   # ── Capa 1: auth-service (base de autenticación) ──────────────────────────
+#   helm install auth-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/auth-service-values.yaml \
+#     --wait --timeout 5m
+#
+#   # ── Capa 2: user-service (depende de auth-service) ────────────────────────
+#   helm install user-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/user-service-values.yaml \
+#     --wait --timeout 5m
+#
+#   # ── Capa 3: org-service (depende de user-service) ─────────────────────────
+#   helm install org-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/org-service-values.yaml \
+#     --wait --timeout 5m
+#
+#   # ── Capa 4: servicios de dominio (dependen de capas anteriores) ───────────
+#   helm install document-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/document-service-values.yaml \
+#     --wait --timeout 5m
+#
+#   helm install workflow-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/workflow-service-values.yaml \
+#     --wait --timeout 5m
+#
+#   helm install notification-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/notification-service-values.yaml \
+#     --wait --timeout 5m
+#
+#   helm install audit-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/audit-service-values.yaml \
+#     --wait --timeout 5m
+#
+#   helm install metadata-extractor-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/metadata-extractor-service-values.yaml \
+#     --wait --timeout 5m
+#
 #   kubectl apply -f k8s/api-gateway/
 #
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,7 +184,17 @@
 #
 #   helm uninstall postgresql mongodb redis kafka minio elasticsearch -n sgd-infra
 #   helm uninstall monitoring -n sgd-monitoring
-#   kubectl delete -f k8s/api-gateway/ -f k8s/auth-service/ ... (resto de servicios)
+#
+#   # Desinstalar microservicios individualmente para no abortar si algún release
+#   # no existe (helm uninstall con múltiples names falla en el primero ausente).
+#   for release in \
+#     auth-service user-service org-service document-service \
+#     workflow-service notification-service audit-service metadata-extractor-service; do
+#     helm uninstall "$release" -n gestor-documental 2>/dev/null \
+#       || echo "Release $release not found, skipping"
+#   done
+#
+#   kubectl delete -f k8s/api-gateway/
 
 # StorageClass de Kind (local-path provisioner)
 # Todos los charts usan "standard" que es el default en Kind.

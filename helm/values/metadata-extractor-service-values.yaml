@@ -1,0 +1,42 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install metadata-extractor-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/metadata-extractor-service-values.yaml
+
+image:
+  repository: metadata-extractor-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
+
+# readinessProbe: no external dependencies — always returns 200.
+# startupProbe failureThreshold reduced (no migrations, fast startup).
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 3
+  failureThreshold: 10   # 30 s max — no migration overhead
+  successThreshold: 1
+  timeoutSeconds: 3
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 3   # no DB ping — response is immediate
+
+# Document parsing libraries (e.g. pdf-parse, mammoth) write to /tmp — keep
+# readOnlyRootFilesystem: false (inherits the base default, do NOT override to true here).
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"     # document parsing can be memory-intensive

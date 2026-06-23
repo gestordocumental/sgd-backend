@@ -1,0 +1,35 @@
+# Chart: helm/charts/sgd-service
+# Instalación:
+#   helm install user-service helm/charts/sgd-service \
+#     --namespace gestor-documental \
+#     --values helm/values/user-service-values.yaml
+
+image:
+  repository: user-service
+  tag: ""           # override at deploy time: --set image.tag=sha-$(git rev-parse --short HEAD)
+  pullPolicy: IfNotPresent
+
+# readinessProbe checks: PostgreSQL
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+  timeoutSeconds: 5
+
+# Baseline conservador — validar con datos reales antes de ajustar.
+# Este servicio es facade sobre 3 sub-servicios + Redis (permisos en caché).
+# Señales para subir límites tras el primer despliegue en producción:
+#   - CPU throttling sostenido (container_cpu_cfs_throttled_seconds_total)
+#   - OOMKilled o memoria cerca del límite (container_memory_working_set_bytes)
+#   - Latencia P99 elevada en /users/* coincidente con alta carga de Redis
+# Dashboard de referencia: Grafana → Kubernetes / Compute Resources / Pod
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"

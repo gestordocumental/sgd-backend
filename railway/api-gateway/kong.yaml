@@ -1,0 +1,337 @@
+_format_version: "3.0"
+
+# ── Consumidor SGD ──────────────────────────────────────────────────────────
+# KONG_JWT_SECRET se inyecta como variable de entorno en Railway.
+# Debe coincidir con JWT_SECRET de auth-service.
+consumers:
+  - username: sgd-users
+    jwt_secrets:
+      - key: sgd-jwt-key
+        algorithm: HS256
+        secret: "${KONG_JWT_SECRET}"
+
+# ── Plugins globales ────────────────────────────────────────────────────────
+plugins:
+  # Capa 1 — por IP: protección contra DDoS y scrapers no autenticados.
+  - name: rate-limiting
+    id: a1b2c3d4-0001-0000-0000-000000000001
+    config:
+      minute: 10000
+      limit_by: ip
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # Capa 2 — por token JWT (header Authorization): protege contra abuso de un
+  # usuario autenticado sin importar cuántas IPs use.
+  # Cada access token único tiene su propio bucket de ${USER_RATE_LIMIT} req/min.
+  # Rutas públicas (sin Authorization) comparten un bucket vacío, pero ya están
+  # cubiertas por sus propios límites de servicio o por la capa IP.
+  - name: rate-limiting
+    id: a1b2c3d4-0002-0000-0000-000000000002
+    config:
+      minute: ${USER_RATE_LIMIT}
+      limit_by: header
+      header_name: Authorization
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  - name: cors
+    id: a1b2c3d4-0003-0000-0000-000000000003
+    config:
+      origins:
+        - "${FRONTEND_URL}" # URL del frontend en Railway o dominio propio
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      headers: [Authorization, Content-Type, Accept, X-Company-Id, X-Correlation-Id]
+      exposed_headers: [X-Request-Id, X-Correlation-Id]
+      credentials: true
+      max_age: 3600
+
+  - name: response-transformer
+    id: a1b2c3d4-0004-0000-0000-000000000004
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "X-XSS-Protection:0"
+          - "Referrer-Policy:strict-origin-when-cross-origin"
+          - "Strict-Transport-Security:max-age=31536000; includeSubDomains"
+          - "Content-Security-Policy:default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+# ── Servicios y Rutas ───────────────────────────────────────────────────────
+# En Railway la comunicación interna usa:
+#   http://<nombre-del-servicio>.railway.internal:PUERTO
+# El PORT de cada microservicio es 3000 (definido en su Dockerfile/env var).
+
+services:
+  # ── Health check para Railway ───────────────────────────────────────────
+  # Railway hace GET /health para verificar que Kong está vivo.
+  # request-termination responde 200 sin llegar a ningún upstream.
+  - name: health-service
+    url: http://127.0.0.1:8001
+    routes:
+      - name: health-route
+        paths:
+          - /health
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            id: a1b2c3d4-0005-0000-0000-000000000005
+            config:
+              minute: 1000000
+              policy: local
+              fault_tolerant: true
+    plugins:
+      - name: request-termination
+        id: a1b2c3d4-0006-0000-0000-000000000006
+        config:
+          status_code: 200
+          message: "OK"
+
+  # ── Swagger docs (JWT requerido en producción) ─────────────────────────
+  - name: auth-docs
+    url: http://auth-service.railway.internal:3000
+    routes:
+      - name: auth-docs-route
+        paths:
+          - /api/v1/auth/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0007-0000-0000-000000000007
+
+  - name: user-docs
+    url: http://user-service.railway.internal:3000
+    routes:
+      - name: user-docs-route
+        paths:
+          - /api/v1/users/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0008-0000-0000-000000000008
+
+  - name: org-docs
+    url: http://org-service.railway.internal:3000
+    routes:
+      - name: org-docs-route
+        paths:
+          - /api/v1/org/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0009-0000-0000-000000000009
+
+  - name: document-docs
+    url: http://document-service.railway.internal:3000
+    routes:
+      - name: document-docs-route
+        paths:
+          - /api/v1/documents/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0010-0000-0000-000000000010
+
+  - name: metadata-extractor-docs
+    url: http://metadata-extractor-service.railway.internal:3000
+    routes:
+      - name: metadata-extractor-docs-route
+        paths:
+          - /api/v1/metadata-extractor/docs
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0011-0000-0000-000000000011
+
+  # ── auth-service: login y forgot-password (brute-force sensitive) ────────
+  # Límite bajo en producción; sobreescribir AUTH_SENSITIVE_RATE_LIMIT en dev/test
+  # para pruebas de carga (ej: 1000). En prod dejar en 10.
+  - name: auth-sensitive
+    url: http://auth-service.railway.internal:3000
+    routes:
+      - name: auth-sensitive-route
+        paths:
+          - /api/v1/auth/login
+          - /api/v1/auth/forgot-password
+          - /api/v1/auth/reset-password
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        id: a1b2c3d4-0012-0000-0000-000000000012
+        config:
+          minute: ${AUTH_SENSITIVE_RATE_LIMIT}
+          policy: local
+          fault_tolerant: true
+
+  # ── auth-service: refresh y exit-company (no brute-force sensitive) ──────
+  # Requieren token válido previo — pueden tolerar límite más alto.
+  - name: auth-session
+    url: http://auth-service.railway.internal:3000
+    routes:
+      - name: auth-session-route
+        paths:
+          - /api/v1/auth/refresh
+          - /api/v1/auth/exit-company
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        id: a1b2c3d4-0013-0000-0000-000000000013
+        config:
+          minute: ${AUTH_SESSION_RATE_LIMIT}
+          policy: local
+          fault_tolerant: true
+
+  # ── auth-service: provision (token interno, sin JWT público) ──────────
+  - name: auth-provision
+    url: http://auth-service.railway.internal:3000
+    routes:
+      - name: auth-provision-route
+        paths:
+          - /api/v1/auth/credentials/provision
+        methods: [POST]
+        strip_path: false
+
+  # ── auth-service: rutas PROTEGIDAS (con JWT) ───────────────────────────
+  - name: auth-protected
+    url: http://auth-service.railway.internal:3000
+    routes:
+      - name: auth-me
+        paths:
+          - /api/v1/auth
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0014-0000-0000-000000000014
+
+  # ── org-service ────────────────────────────────────────────────────────
+  - name: org-service
+    url: http://org-service.railway.internal:3000
+    routes:
+      - name: org-routes
+        paths:
+          - /api/v1/org
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0015-0000-0000-000000000015
+
+  # ── user-service: rutas PÚBLICAS (sin JWT) ─────────────────────────────
+  - name: user-service-public
+    url: http://user-service.railway.internal:3000
+    routes:
+      - name: complete-registration
+        paths:
+          - /api/v1/users/complete-registration
+        methods: [POST]
+        strip_path: false
+    # Sin plugin jwt — ruta pública
+
+  # ── user-service ───────────────────────────────────────────────────────
+  - name: user-service
+    url: http://user-service.railway.internal:3000
+    routes:
+      - name: user-routes
+        paths:
+          - /api/v1/users
+          - /api/v1/roles
+          # Exact match: exposes GET /api/v1/permissions (list) but NOT /api/v1/permissions/check,
+          # which is internal-only (x-internal-token, service-to-service, never via Kong).
+          - ~/api/v1/permissions$
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0016-0000-0000-000000000016
+
+  # ── workflow-service ───────────────────────────────────────────────────
+  - name: workflow-service
+    url: http://workflow-service.railway.internal:3000
+    routes:
+      - name: workflow-routes
+        paths:
+          - /api/v1/workflows
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0017-0000-0000-000000000017
+
+  # ── document-service ───────────────────────────────────────────────────
+  - name: document-service
+    url: http://document-service.railway.internal:3000
+    routes:
+      - name: document-routes
+        paths:
+          - /api/v1/documents
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0018-0000-0000-000000000018
+
+  # ── notification-service: ticket efímero para SSE (JWT en header) ───────
+  - name: notification-sse-ticket
+    url: http://notification-service.railway.internal:3000
+    routes:
+      - name: notification-sse-ticket-route
+        paths:
+          - /api/v1/notifications/stream/ticket
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0019-0000-0000-000000000019
+
+  # ── notification-service: SSE stream (autenticado por ticket efímero) ───
+  - name: notification-sse
+    url: http://notification-service.railway.internal:3000
+    read_timeout: 86400000    # 24h — SSE es una conexión larga; el default (60s) la corta
+    write_timeout: 86400000   # 24h — también necesario para long-lived connections
+    connect_timeout: 60000
+    routes:
+      - name: notification-sse-route
+        paths:
+          - /api/v1/notifications/stream
+        methods: [GET]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        id: a1b2c3d4-0020-0000-0000-000000000020
+        config:
+          minute: 30
+          policy: local
+          fault_tolerant: true
+      - name: response-transformer
+        id: a1b2c3d4-0023-0000-0000-000000000023
+        config:
+          add:
+            headers:
+              - "X-Accel-Buffering:no"   # desactiva buffering de nginx para el stream SSE
+              - "Cache-Control:no-cache" # evita que proxies intermedios cacheen el stream
+
+  # ── notification-service: resto de rutas (JWT en header) ───────────────
+  - name: notification-service
+    url: http://notification-service.railway.internal:3000
+    routes:
+      - name: notification-routes
+        paths:
+          - /api/v1/notifications
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0021-0000-0000-000000000021
+
+  # ── audit-service ──────────────────────────────────────────────────────
+  - name: audit-service
+    url: http://audit-service.railway.internal:3000
+    routes:
+      - name: audit-routes
+        paths:
+          - /api/v1/audit
+        strip_path: false
+    plugins:
+      - name: jwt
+        id: a1b2c3d4-0022-0000-0000-000000000022
