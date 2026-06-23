@@ -25,14 +25,14 @@ El SGD Helisa es una plataforma web multi-tenant de gestión documental que perm
 |---|---|---|
 | Frontend | React + Vite + TypeScript | React 18 |
 | API Gateway | Kong (modo DB-less, declarativo) | 3.x |
-| Backend | NestJS + TypeScript | 10.x |
+| Backend | NestJS + TypeScript | 11.x |
 | ORM relacional | TypeORM | 0.3.x |
-| ODM documental | Mongoose | 7.x |
+| ODM documental | Mongoose | 8.x |
 | Base de datos relacional | PostgreSQL | 15 |
 | Base de datos documental | MongoDB | 7 |
 | Caché / sesiones | Redis | 7 |
 | Motor de búsqueda | Elasticsearch | 8.11 |
-| Mensajería | Apache Kafka (KRaft) | 3.x |
+| Mensajería | Apache Kafka (KRaft) | latest |
 | Almacenamiento de archivos | Cloudflare R2 (S3-compatible) | — |
 | Antivirus | ClamAV | Latest |
 | Email transaccional | Resend | — |
@@ -81,7 +81,7 @@ El SGD Helisa es una plataforma web multi-tenant de gestión documental que perm
 
 **Estados del workflow:**
 
-```
+```text
 DRAFT → PENDING_APPROVAL → PENDING_REVIEW_CYCLE → AVAILABLE_FOR_FINAL_USERS → CLOSED ✅
                          ↘ REJECTED ❌            ↕ ADMIN_CYCLE_IN_PROGRESS ↕
 ```
@@ -127,7 +127,7 @@ DRAFT → PENDING_APPROVAL → PENDING_REVIEW_CYCLE → AVAILABLE_FOR_FINAL_USER
 
 El sistema se divide en dos repositorios Git:
 
-```
+```text
 document-management-system/          ← BACKEND (este repo)
 ├── services/
 │   ├── auth-service/
