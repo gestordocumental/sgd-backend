@@ -309,6 +309,15 @@ services:
       - name: jwt
         id: a1b2c3d4-0021-0000-0000-000000000021
 
+  # ── audit-service: Swagger docs (sin JWT — solo staging) ─────────────────
+  - name: audit-docs
+    url: http://audit-service.railway.internal:3000
+    routes:
+      - name: audit-docs-route
+        paths:
+          - /api/v1/audit/docs
+        strip_path: false
+
   # ── audit-service ──────────────────────────────────────────────────────
   - name: audit-service
     url: http://audit-service.railway.internal:3000
