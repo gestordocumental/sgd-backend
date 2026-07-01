@@ -66,7 +66,7 @@ services:
           status_code: 200
           message: "OK"
 
-  # ── Swagger docs (sin JWT) ───────────────────────────────────────────────
+  # ── Swagger docs (con JWT — solo producción) ────────────────────────────
   - name: auth-docs
     url: "${AUTH_SERVICE_URL}"
     routes:
@@ -74,6 +74,8 @@ services:
         paths:
           - /api/v1/auth/docs
         strip_path: false
+    plugins:
+      - name: jwt
 
   - name: user-docs
     url: "${USER_SERVICE_URL}"
@@ -82,6 +84,8 @@ services:
         paths:
           - /api/v1/users/docs
         strip_path: false
+    plugins:
+      - name: jwt
 
   - name: org-docs
     url: "${ORG_SERVICE_URL}"
@@ -90,6 +94,8 @@ services:
         paths:
           - /api/v1/org/docs
         strip_path: false
+    plugins:
+      - name: jwt
 
   - name: document-docs
     url: "${DOCUMENT_SERVICE_URL}"
@@ -98,6 +104,8 @@ services:
         paths:
           - /api/v1/documents/docs
         strip_path: false
+    plugins:
+      - name: jwt
 
   - name: metadata-extractor-docs
     url: "${METADATA_SERVICE_URL}"
@@ -106,6 +114,8 @@ services:
         paths:
           - /api/v1/metadata-extractor/docs
         strip_path: false
+    plugins:
+      - name: jwt
 
   # ── auth-service: rutas PÚBLICAS (sin JWT) ──────────────────────────────
   - name: auth-public
@@ -268,7 +278,7 @@ services:
     plugins:
       - name: jwt
 
-  # ── audit-service: Swagger docs (sin JWT) ─────────────────────────────────
+  # ── audit-service: Swagger docs (con JWT — solo producción) ──────────────
   - name: audit-docs
     url: "${AUDIT_SERVICE_URL}"
     routes:
@@ -276,6 +286,8 @@ services:
         paths:
           - /api/v1/audit/docs
         strip_path: false
+    plugins:
+      - name: jwt
 
   # ── audit-service (con JWT) ───────────────────────────────────────────────
   - name: audit-service

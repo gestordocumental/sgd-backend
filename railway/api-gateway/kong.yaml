@@ -91,7 +91,7 @@ services:
           status_code: 200
           message: "OK"
 
-  # ── Swagger docs (JWT requerido en producción) ─────────────────────────
+  # ── Swagger docs (sin JWT — solo staging) ──────────────────────────────
   - name: auth-docs
     url: http://auth-service.railway.internal:3000
     routes:
@@ -99,9 +99,6 @@ services:
         paths:
           - /api/v1/auth/docs
         strip_path: false
-    plugins:
-      - name: jwt
-        id: a1b2c3d4-0007-0000-0000-000000000007
 
   - name: user-docs
     url: http://user-service.railway.internal:3000
@@ -110,9 +107,6 @@ services:
         paths:
           - /api/v1/users/docs
         strip_path: false
-    plugins:
-      - name: jwt
-        id: a1b2c3d4-0008-0000-0000-000000000008
 
   - name: org-docs
     url: http://org-service.railway.internal:3000
@@ -121,9 +115,6 @@ services:
         paths:
           - /api/v1/org/docs
         strip_path: false
-    plugins:
-      - name: jwt
-        id: a1b2c3d4-0009-0000-0000-000000000009
 
   - name: document-docs
     url: http://document-service.railway.internal:3000
@@ -132,9 +123,6 @@ services:
         paths:
           - /api/v1/documents/docs
         strip_path: false
-    plugins:
-      - name: jwt
-        id: a1b2c3d4-0010-0000-0000-000000000010
 
   - name: metadata-extractor-docs
     url: http://metadata-extractor-service.railway.internal:3000
@@ -143,9 +131,6 @@ services:
         paths:
           - /api/v1/metadata-extractor/docs
         strip_path: false
-    plugins:
-      - name: jwt
-        id: a1b2c3d4-0011-0000-0000-000000000011
 
   # ── auth-service: login y forgot-password (brute-force sensitive) ────────
   # Límite bajo en producción; sobreescribir AUTH_SENSITIVE_RATE_LIMIT en dev/test
@@ -323,6 +308,15 @@ services:
     plugins:
       - name: jwt
         id: a1b2c3d4-0021-0000-0000-000000000021
+
+  # ── audit-service: Swagger docs (sin JWT — solo staging) ─────────────────
+  - name: audit-docs
+    url: http://audit-service.railway.internal:3000
+    routes:
+      - name: audit-docs-route
+        paths:
+          - /api/v1/audit/docs
+        strip_path: false
 
   # ── audit-service ──────────────────────────────────────────────────────
   - name: audit-service
