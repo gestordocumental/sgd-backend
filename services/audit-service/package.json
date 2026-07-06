@@ -17,7 +17,7 @@
     "@nestjs/core": "^11.1.21",
     "@nestjs/elasticsearch": "^11.1.0",
     "@nestjs/platform-express": "^11.1.21",
-    "@nestjs/swagger": "^11.4.3",
+    "@nestjs/swagger": "^11.4.5",
     "@nestjs/terminus": "^11.0.0",
     "@sentry/node": "^10.58.0",
     "@sgd/common": "*",
