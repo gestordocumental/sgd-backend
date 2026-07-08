@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
   Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -205,6 +206,13 @@ export class UserOrgService {
   }
 
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
+    if (actorId && actorId === userId) {
+      throw new BadRequestException({
+        message: 'You cannot remove yourself from an organization',
+        errorCode: 'USER_CANNOT_REMOVE_SELF_FROM_ORG',
+        params: { userId },
+      });
+    }
     const targetUser = await this.findUser(userId);
     const result = await this.userOrgRoleRepository.update(
       { userId, orgId },

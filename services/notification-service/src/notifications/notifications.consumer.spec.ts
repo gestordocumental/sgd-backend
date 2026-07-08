@@ -110,6 +110,7 @@ describe('NotificationsConsumer', () => {
         TOPICS.USER_INVITED,
         TOPICS.USER_ORG_REMOVED,
         TOPICS.USER_SUPER_ADMIN_REVOKED,
+        TOPICS.USER_DISABLED,
         TOPICS.PASSWORD_RESET,
       ],
       fromBeginning: false,
@@ -327,6 +328,29 @@ describe('NotificationsConsumer', () => {
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Invalid user.super-admin-revoked payload'),
+      'NotificationsConsumer',
+    );
+    expect(sseService.emit).not.toHaveBeenCalled();
+  });
+
+  // ── handleMessage — user.disabled ──────────────────────────────────────────
+
+  it('emits account-disabled SSE event for valid user.disabled payload', async () => {
+    const payload = { userId: 'user-77' };
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_DISABLED, JSON.stringify(payload)));
+
+    expect(sseService.emit).toHaveBeenCalledWith('user-77', {}, 'account-disabled');
+    expect(notificationsService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips on invalid user.disabled payload (missing userId)', async () => {
+    const bad = {}; // missing userId
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_DISABLED, JSON.stringify(bad)));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid user.disabled payload'),
       'NotificationsConsumer',
     );
     expect(sseService.emit).not.toHaveBeenCalled();

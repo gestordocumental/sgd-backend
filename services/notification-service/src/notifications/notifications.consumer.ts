@@ -67,6 +67,15 @@ function isValidUserSuperAdminRevokedPayload(raw: unknown): raw is UserSuperAdmi
   return typeof (raw as Record<string, unknown>)['userId'] === 'string';
 }
 
+interface UserDisabledPayload {
+  userId: string;
+}
+
+function isValidUserDisabledPayload(raw: unknown): raw is UserDisabledPayload {
+  if (!raw || typeof raw !== 'object') return false;
+  return typeof (raw as Record<string, unknown>)['userId'] === 'string';
+}
+
 function isValidNotificationPayload(raw: unknown): raw is NotificationPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;
@@ -130,7 +139,7 @@ export class NotificationsConsumer
 
     await this.consumer.connect();
     await this.consumer.subscribe({
-      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED, TOPICS.USER_ORG_REMOVED, TOPICS.USER_SUPER_ADMIN_REVOKED, TOPICS.PASSWORD_RESET],
+      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED, TOPICS.USER_ORG_REMOVED, TOPICS.USER_SUPER_ADMIN_REVOKED, TOPICS.USER_DISABLED, TOPICS.PASSWORD_RESET],
       fromBeginning: false,
     });
 
@@ -152,7 +161,7 @@ export class NotificationsConsumer
     });
 
     this.logger.log(
-      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}, ${TOPICS.USER_ORG_REMOVED}, ${TOPICS.USER_SUPER_ADMIN_REVOKED}, ${TOPICS.PASSWORD_RESET}]`,
+      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}, ${TOPICS.USER_ORG_REMOVED}, ${TOPICS.USER_SUPER_ADMIN_REVOKED}, ${TOPICS.USER_DISABLED}, ${TOPICS.PASSWORD_RESET}]`,
       'NotificationsConsumer',
     );
   }
@@ -239,6 +248,25 @@ export class NotificationsConsumer
       this.sseService.emit(raw.userId, {}, 'super-admin-revoked');
       this.logger.log(
         `Super admin revocation SSE sent to user ${raw.userId}`,
+        'NotificationsConsumer',
+      );
+      return;
+    }
+
+    if (topic === TOPICS.USER_DISABLED) {
+      if (!isValidUserDisabledPayload(raw)) {
+        this.logger.warn(
+          `[kafka] Invalid user.disabled payload — skipping`,
+          'NotificationsConsumer',
+        );
+        return;
+      }
+      // Push SSE event to log the user out of any open tab immediately —
+      // disableCredentials()/revokeAllTokens() alone don't invalidate an
+      // already-issued, not-yet-expired access token sitting in the browser.
+      this.sseService.emit(raw.userId, {}, 'account-disabled');
+      this.logger.log(
+        `Account-disabled SSE sent to user ${raw.userId}`,
         'NotificationsConsumer',
       );
       return;

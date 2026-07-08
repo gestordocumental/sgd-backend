@@ -248,6 +248,13 @@ export class UserProfileService {
   }
 
   async globalRemove(id: string, actorId?: string): Promise<void> {
+    if (actorId && actorId === id) {
+      throw new BadRequestException({
+        message: 'You cannot delete your own account',
+        errorCode: 'USER_CANNOT_DELETE_SELF',
+        params: { userId: id },
+      });
+    }
     const user = await this.findOne(id);
     await this.authClientService.disableCredentials(user.id);
     try {
@@ -288,6 +295,13 @@ export class UserProfileService {
     id: string,
     caller: { actorId?: string; companyId?: string; isSuperAdmin?: boolean },
   ): Promise<User> {
+    if (caller.actorId && caller.actorId === id) {
+      throw new BadRequestException({
+        message: 'You cannot disable your own account',
+        errorCode: 'USER_CANNOT_DISABLE_SELF',
+        params: { userId: id },
+      });
+    }
     if (!caller.isSuperAdmin) {
       if (!caller.companyId) {
         throw new ForbiddenException('Organization context required to disable users');
@@ -314,6 +328,10 @@ export class UserProfileService {
         resourceId:   id,
         resourceName: userDisplayName(user),
       });
+      // Push an immediate session-kill SSE event so an already-open tab is
+      // logged out right away, instead of waiting for the access token to
+      // expire or a page refresh to trigger a failed /auth/refresh.
+      this.kafkaProducer.emitSafe(TOPICS.USER_DISABLED, { userId: id });
       return saved;
     } catch (err) {
       await this.authClientService.enableCredentials(id).catch(() => {});
@@ -358,6 +376,13 @@ export class UserProfileService {
   }
 
   async setSuperAdmin(id: string, enabled: boolean, actorId?: string): Promise<User> {
+    if (actorId && actorId === id) {
+      throw new BadRequestException({
+        message: 'You cannot change your own super admin status',
+        errorCode: 'USER_CANNOT_MODIFY_OWN_SUPER_ADMIN',
+        params: { userId: id },
+      });
+    }
     const user = await this.findOne(id);
     const previousState = user.isSuperAdmin;
     user.isSuperAdmin = enabled;
