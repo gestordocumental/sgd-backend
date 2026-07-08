@@ -11,6 +11,11 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Major version bumps require manual validation
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ── Workspace root (eslint, typescript, etc.) ──────────────────────────────
   - package-ecosystem: "npm"

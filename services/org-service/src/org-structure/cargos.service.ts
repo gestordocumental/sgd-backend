@@ -113,7 +113,7 @@ export class CargosService {
     await this.areasService.findOne(orgId, departamentoId, areaId);
     const cargo = await this.repo.findOne({ where: { id, orgId, departamentoId, areaId } });
     if (!cargo) {
-      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND' });
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
     }
     return cargo;
   }
@@ -123,7 +123,7 @@ export class CargosService {
       where: { id, orgId, departamentoId, areaId: IsNull() },
     });
     if (!cargo) {
-      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND' });
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
     }
     return cargo;
   }
@@ -226,10 +226,10 @@ export class CargosService {
     await this.areasService.findOne(orgId, departamentoId, areaId);
     const cargo = await this.repo.findOne({ where: { id, orgId, departamentoId, areaId }, withDeleted: true });
     if (!cargo) {
-      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND' });
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
     }
     if (!cargo.deletedAt) {
-      throw new ConflictException({ message: `Cargo ${id} is not deleted`, errorCode: 'CARGO_NOT_DELETED' });
+      throw new ConflictException({ message: `Cargo ${id} is not deleted`, errorCode: 'CARGO_NOT_DELETED', params: { id } });
     }
     const nameConflict = await this.repo.findOne({ where: { areaId, name: cargo.name } });
     if (nameConflict) {
@@ -250,10 +250,10 @@ export class CargosService {
       withDeleted: true,
     });
     if (!cargo) {
-      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND' });
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
     }
     if (!cargo.deletedAt) {
-      throw new ConflictException({ message: `Cargo ${id} is not deleted`, errorCode: 'CARGO_NOT_DELETED' });
+      throw new ConflictException({ message: `Cargo ${id} is not deleted`, errorCode: 'CARGO_NOT_DELETED', params: { id } });
     }
     const nameConflict = await this.repo.findOne({
       where: { departamentoId, name: cargo.name, areaId: IsNull() },

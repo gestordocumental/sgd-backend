@@ -68,6 +68,7 @@ export class DepartamentosService {
       throw new NotFoundException({
         message: `Departamento ${id} not found`,
         errorCode: 'DEPARTMENT_NOT_FOUND',
+        params: { id },
       });
     }
     return departamento;
@@ -121,12 +122,14 @@ export class DepartamentosService {
       throw new NotFoundException({
         message: `Departamento ${id} not found`,
         errorCode: 'DEPARTMENT_NOT_FOUND',
+        params: { id },
       });
     }
     if (!departamento.deletedAt) {
       throw new ConflictException({
         message: `Departamento ${id} is not deleted`,
         errorCode: 'DEPARTMENT_NOT_DELETED',
+        params: { id },
       });
     }
     const nameConflict = await this.repo.findOne({ where: { orgId, name: departamento.name } });

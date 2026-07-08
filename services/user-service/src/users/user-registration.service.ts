@@ -132,6 +132,7 @@ export class UserRegistrationService {
           throw new NotFoundException({
             message: `Role ${dto.roleId} not found`,
             errorCode: 'ROLE_NOT_FOUND',
+            params: { roleId: dto.roleId },
           });
         }
         roleId = role.id;
@@ -174,7 +175,7 @@ export class UserRegistrationService {
   ): Promise<{ user: User; invitationToken: string }> {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) {
-      throw new NotFoundException({ message: `User ${userId} not found`, errorCode: 'USER_NOT_FOUND' });
+      throw new NotFoundException({ message: `User ${userId} not found`, errorCode: 'USER_NOT_FOUND', params: { userId } });
     }
 
     if (user.registrationStatus !== RegistrationStatus.PENDING_CREDENTIALS) {
@@ -202,7 +203,7 @@ export class UserRegistrationService {
   async provision(id: string, dto: ProvisionUserDto): Promise<{ ok: boolean }> {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
-      throw new NotFoundException({ message: `User ${id} not found`, errorCode: 'USER_NOT_FOUND' });
+      throw new NotFoundException({ message: `User ${id} not found`, errorCode: 'USER_NOT_FOUND', params: { userId: id } });
     }
 
     await this.authClientService.provisionCredentials({
@@ -234,7 +235,7 @@ export class UserRegistrationService {
 
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) {
-      throw new NotFoundException({ message: `User ${userId} not found`, errorCode: 'USER_NOT_FOUND' });
+      throw new NotFoundException({ message: `User ${userId} not found`, errorCode: 'USER_NOT_FOUND', params: { userId } });
     }
 
     try {
@@ -288,7 +289,7 @@ export class UserRegistrationService {
 
     const completedUser = await this.usersRepository.findOne({ where: { id: user.id } });
     if (!completedUser) {
-      throw new NotFoundException({ message: `User ${user.id} not found`, errorCode: 'USER_NOT_FOUND' });
+      throw new NotFoundException({ message: `User ${user.id} not found`, errorCode: 'USER_NOT_FOUND', params: { userId: user.id } });
     }
 
     return UserResponseDto.from(completedUser);
