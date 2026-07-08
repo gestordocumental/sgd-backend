@@ -235,7 +235,7 @@ describe('UsersService', () => {
       try {
         await service.create(dto);
       } catch (err: any) {
-        expect(err.response).toMatchObject({ userId: deletedUser.id });
+        expect(err.response).toMatchObject({ params: { userId: deletedUser.id } });
       }
     });
 
@@ -253,7 +253,7 @@ describe('UsersService', () => {
       try {
         await service.create(dto);
       } catch (err: any) {
-        expect(err.response).toMatchObject({ userId: existingUser.id });
+        expect(err.response).toMatchObject({ params: { userId: existingUser.id } });
       }
     });
 
