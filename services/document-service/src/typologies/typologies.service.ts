@@ -169,7 +169,7 @@ export class TypologiesService {
     }
     const doc = await this.model.findOne({ _id: id, orgId, deletedAt: null }).exec();
     if (!doc) {
-      throw new NotFoundException({ message: `Typology ${id} not found`, errorCode: 'TYPOLOGY_NOT_FOUND' });
+      throw new NotFoundException({ message: `Typology ${id} not found`, errorCode: 'TYPOLOGY_NOT_FOUND', params: { id } });
     }
     return doc;
   }
@@ -308,7 +308,7 @@ export class TypologiesService {
     }
     const doc = await this.model.findOne({ _id: id, orgId, deletedAt: null }).exec();
     if (!doc) {
-      throw new NotFoundException({ message: `Typology ${id} not found`, errorCode: 'TYPOLOGY_NOT_FOUND' });
+      throw new NotFoundException({ message: `Typology ${id} not found`, errorCode: 'TYPOLOGY_NOT_FOUND', params: { id } });
     }
     return doc;
   }

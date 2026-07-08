@@ -77,7 +77,7 @@ export class AreasService {
     await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId } });
     if (!area) {
-      throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND' });
+      throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND', params: { id } });
     }
     return area;
   }
@@ -128,10 +128,10 @@ export class AreasService {
     await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId }, withDeleted: true });
     if (!area) {
-      throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND' });
+      throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND', params: { id } });
     }
     if (!area.deletedAt) {
-      throw new ConflictException({ message: `Area ${id} is not deleted`, errorCode: 'AREA_NOT_DELETED' });
+      throw new ConflictException({ message: `Area ${id} is not deleted`, errorCode: 'AREA_NOT_DELETED', params: { id } });
     }
     const nameConflict = await this.repo.findOne({ where: { departamentoId, name: area.name } });
     if (nameConflict) {
