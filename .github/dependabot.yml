@@ -13,20 +13,22 @@ updates:
         patterns: ["*"]
 
   # ── Workspace root (eslint, typescript, etc.) ──────────────────────────────
+  # groups/ignore anclados aquí (&npm-groups / &npm-ignore) y reutilizados por
+  # alias en el resto de secciones npm para que la política no se desincronice.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies"]
-    groups:
+    groups: &npm-groups
       production-dependencies:
         dependency-type: "production"
         update-types: ["minor", "patch"]
       development-dependencies:
         dependency-type: "development"
         update-types: ["minor", "patch"]
-    ignore:
+    ignore: &npm-ignore
       # Major version bumps require manual validation
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
@@ -38,16 +40,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "common"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── auth-service ────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -56,16 +50,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "auth-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── user-service ────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -74,16 +60,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "user-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── org-service ─────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -92,16 +70,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "org-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── document-service ────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -110,16 +80,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "document-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── workflow-service ─────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -128,16 +90,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "workflow-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── notification-service ────────────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -146,16 +100,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "notification-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── audit-service ────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -164,16 +110,8 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "audit-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore
 
   # ── metadata-extractor-service ───────────────────────────────────────────────
   - package-ecosystem: "npm"
@@ -182,13 +120,5 @@ updates:
       interval: "weekly"
       day: "monday"
     labels: ["dependencies", "metadata-extractor-service"]
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      development-dependencies:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    groups: *npm-groups
+    ignore: *npm-ignore

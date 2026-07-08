@@ -95,7 +95,7 @@ export class UserRegistrationService {
       throw new ConflictException({
         message: 'User with this email was previously deleted. Use the restore endpoint to reactivate them.',
         errorCode: 'USER_PREVIOUSLY_DELETED',
-        userId: existing.id,
+        params: { userId: existing.id },
       });
     }
 
@@ -109,7 +109,7 @@ export class UserRegistrationService {
             throw new ConflictException({
               message: 'User with this email already exists in another organization',
               errorCode: 'USER_ALREADY_IN_ANOTHER_ORG',
-              userId: existing.id,
+              params: { userId: existing.id },
             });
           }
         }
@@ -119,7 +119,7 @@ export class UserRegistrationService {
       throw new ConflictException({
         message: 'User with this email already exists',
         errorCode: 'USER_ALREADY_EXISTS',
-        userId: existing.id,
+        params: { userId: existing.id },
       });
     }
 
@@ -247,8 +247,13 @@ export class UserRegistrationService {
       if (error instanceof HttpException) {
         const status = error.getStatus();
         if (status >= 400 && status < 500) {
+          const body = error.getResponse();
+          const upstreamErrorCode =
+            typeof body === 'object' && body !== null && 'errorCode' in body
+              ? (body as { errorCode?: string }).errorCode
+              : undefined;
           throw new HttpException(
-            { message: 'Invalid registration data', errorCode: 'REGISTRATION_DATA_INVALID' },
+            { message: 'Invalid registration data', errorCode: upstreamErrorCode ?? 'REGISTRATION_DATA_INVALID' },
             status,
           );
         }
