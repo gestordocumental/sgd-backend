@@ -94,7 +94,8 @@ export class UserRegistrationService {
     if (existing?.deletedAt) {
       throw new ConflictException({
         message: 'User with this email was previously deleted. Use the restore endpoint to reactivate them.',
-        userId: existing.id,
+        errorCode: 'USER_PREVIOUSLY_DELETED',
+        params: { userId: existing.id },
       });
     }
 
@@ -107,7 +108,8 @@ export class UserRegistrationService {
           if (!membership) {
             throw new ConflictException({
               message: 'User with this email already exists in another organization',
-              userId: existing.id,
+              errorCode: 'USER_ALREADY_IN_ANOTHER_ORG',
+              params: { userId: existing.id },
             });
           }
         }
@@ -116,7 +118,8 @@ export class UserRegistrationService {
       }
       throw new ConflictException({
         message: 'User with this email already exists',
-        userId: existing.id,
+        errorCode: 'USER_ALREADY_EXISTS',
+        params: { userId: existing.id },
       });
     }
 
@@ -125,7 +128,12 @@ export class UserRegistrationService {
     if (dto.orgId) {
       if (dto.roleId) {
         const role = await this.roleRepository.findOne({ where: { id: dto.roleId } });
-        if (!role) throw new NotFoundException(`Role ${dto.roleId} not found`);
+        if (!role) {
+          throw new NotFoundException({
+            message: `Role ${dto.roleId} not found`,
+            errorCode: 'ROLE_NOT_FOUND',
+          });
+        }
         roleId = role.id;
       } else {
         const adminRole = await this.roleRepository.findOne({
@@ -165,10 +173,15 @@ export class UserRegistrationService {
     callerOrgId?: string,
   ): Promise<{ user: User; invitationToken: string }> {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException(`User ${userId} not found`);
+    if (!user) {
+      throw new NotFoundException({ message: `User ${userId} not found`, errorCode: 'USER_NOT_FOUND' });
+    }
 
     if (user.registrationStatus !== RegistrationStatus.PENDING_CREDENTIALS) {
-      throw new ConflictException('User has already completed registration');
+      throw new ConflictException({
+        message: 'User has already completed registration',
+        errorCode: 'USER_REGISTRATION_ALREADY_COMPLETED',
+      });
     }
 
     if (callerOrgId) {
@@ -176,7 +189,10 @@ export class UserRegistrationService {
         where: { userId: user.id, orgId: callerOrgId, removedAt: IsNull() },
       });
       if (!membership) {
-        throw new ConflictException('You can only resend invitations for users in your organization');
+        throw new ConflictException({
+          message: 'You can only resend invitations for users in your organization',
+          errorCode: 'USER_NOT_IN_CALLER_ORG',
+        });
       }
     }
 
@@ -185,7 +201,9 @@ export class UserRegistrationService {
 
   async provision(id: string, dto: ProvisionUserDto): Promise<{ ok: boolean }> {
     const user = await this.usersRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException(`User ${id} not found`);
+    if (!user) {
+      throw new NotFoundException({ message: `User ${id} not found`, errorCode: 'USER_NOT_FOUND' });
+    }
 
     await this.authClientService.provisionCredentials({
       userId: user.id,
@@ -208,11 +226,16 @@ export class UserRegistrationService {
       userId = await this.redis.get(plainKey);
     }
     if (!userId) {
-      throw new NotFoundException('Invitation token invalid or expired');
+      throw new NotFoundException({
+        message: 'Invitation token invalid or expired',
+        errorCode: 'INVITATION_TOKEN_INVALID',
+      });
     }
 
     const user = await this.usersRepository.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException(`User ${userId} not found`);
+    if (!user) {
+      throw new NotFoundException({ message: `User ${userId} not found`, errorCode: 'USER_NOT_FOUND' });
+    }
 
     try {
       await this.authClientService.provisionCredentials({
@@ -224,11 +247,25 @@ export class UserRegistrationService {
       if (error instanceof HttpException) {
         const status = error.getStatus();
         if (status >= 400 && status < 500) {
-          throw new HttpException('Invalid registration data', status);
+          const body = error.getResponse();
+          const upstreamErrorCode =
+            typeof body === 'object' && body !== null && 'errorCode' in body
+              ? (body as { errorCode?: string }).errorCode
+              : undefined;
+          throw new HttpException(
+            { message: 'Invalid registration data', errorCode: upstreamErrorCode ?? 'REGISTRATION_DATA_INVALID' },
+            status,
+          );
         }
-        throw new InternalServerErrorException('Error creating access credentials');
+        throw new InternalServerErrorException({
+          message: 'Error creating access credentials',
+          errorCode: 'REGISTRATION_FAILED',
+        });
       }
-      throw new InternalServerErrorException('Error creating access credentials');
+      throw new InternalServerErrorException({
+        message: 'Error creating access credentials',
+        errorCode: 'REGISTRATION_FAILED',
+      });
     }
 
     // Profile fields + activation in a single atomic write.
@@ -250,7 +287,9 @@ export class UserRegistrationService {
     ]);
 
     const completedUser = await this.usersRepository.findOne({ where: { id: user.id } });
-    if (!completedUser) throw new NotFoundException(`User ${user.id} not found`);
+    if (!completedUser) {
+      throw new NotFoundException({ message: `User ${user.id} not found`, errorCode: 'USER_NOT_FOUND' });
+    }
 
     return UserResponseDto.from(completedUser);
   }

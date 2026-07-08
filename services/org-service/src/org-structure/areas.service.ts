@@ -44,7 +44,11 @@ export class AreasService {
 
     const existing = await this.repo.findOne({ where: { departamentoId, name: dto.name } });
     if (existing) {
-      throw new ConflictException(`Area "${dto.name}" already exists in this departamento`);
+      throw new ConflictException({
+        message: `Area "${dto.name}" already exists in this departamento`,
+        errorCode: 'AREA_ALREADY_EXISTS',
+        params: { name: dto.name },
+      });
     }
 
     const area = this.repo.create({
@@ -72,7 +76,9 @@ export class AreasService {
   async findOne(orgId: string, departamentoId: string, id: string): Promise<Area> {
     await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId } });
-    if (!area) throw new NotFoundException(`Area ${id} not found`);
+    if (!area) {
+      throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND' });
+    }
     return area;
   }
 
@@ -82,7 +88,11 @@ export class AreasService {
     if (dto.name && dto.name !== area.name) {
       const existing = await this.repo.findOne({ where: { departamentoId, name: dto.name } });
       if (existing) {
-        throw new ConflictException(`Area "${dto.name}" already exists in this departamento`);
+        throw new ConflictException({
+          message: `Area "${dto.name}" already exists in this departamento`,
+          errorCode: 'AREA_ALREADY_EXISTS',
+          params: { name: dto.name },
+        });
       }
     }
 
@@ -117,10 +127,20 @@ export class AreasService {
   async restore(orgId: string, departamentoId: string, id: string, actorId?: string): Promise<Area> {
     await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId }, withDeleted: true });
-    if (!area) throw new NotFoundException(`Area ${id} not found`);
-    if (!area.deletedAt) throw new ConflictException(`Area ${id} is not deleted`);
+    if (!area) {
+      throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND' });
+    }
+    if (!area.deletedAt) {
+      throw new ConflictException({ message: `Area ${id} is not deleted`, errorCode: 'AREA_NOT_DELETED' });
+    }
     const nameConflict = await this.repo.findOne({ where: { departamentoId, name: area.name } });
-    if (nameConflict) throw new ConflictException(`Area "${area.name}" already exists in this departamento`);
+    if (nameConflict) {
+      throw new ConflictException({
+        message: `Area "${area.name}" already exists in this departamento`,
+        errorCode: 'AREA_ALREADY_EXISTS',
+        params: { name: area.name },
+      });
+    }
     await this.repo.restore(id);
     if (actorId) {
       this.emitAuditLog({ actorId, orgId, action: 'AREA_RESTORED', resourceId: id, resourceName: area.name, metadata: { departamentoId } });

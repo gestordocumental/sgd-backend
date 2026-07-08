@@ -98,9 +98,11 @@ export class TypologiesService {
         typologyStatus: TypologyStatus.ACTIVE,
       }).exec();
       if (existing) {
-        throw new ConflictException(
-          `An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
-        );
+        throw new ConflictException({
+          message: `An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+          errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
+          params: { codigo: dto.codigo },
+        });
       }
     }
 
@@ -141,7 +143,11 @@ export class TypologiesService {
       return saved;
     } catch (err: any) {
       if (err.code === 11000) {
-        throw new ConflictException(`An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`);
+        throw new ConflictException({
+          message: `An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+          errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
+          params: { codigo: dto.codigo },
+        });
       }
       throw err;
     }
@@ -158,9 +164,13 @@ export class TypologiesService {
   }
 
   async findOne(orgId: string, id: string): Promise<TypologyDocument> {
-    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('Invalid typology ID');
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException({ message: 'Invalid typology ID', errorCode: 'TYPOLOGY_INVALID_ID' });
+    }
     const doc = await this.model.findOne({ _id: id, orgId, deletedAt: null }).exec();
-    if (!doc) throw new NotFoundException(`Typology ${id} not found`);
+    if (!doc) {
+      throw new NotFoundException({ message: `Typology ${id} not found`, errorCode: 'TYPOLOGY_NOT_FOUND' });
+    }
     return doc;
   }
 
@@ -177,9 +187,11 @@ export class TypologiesService {
     if (dto.version !== undefined && dto.version !== null) {
       const oldVersion = doc.datosDeclarados.version;
       if (oldVersion && dto.version !== oldVersion && !isExactlyOneIncrement(dto.version, oldVersion)) {
-        throw new BadRequestException(
-          `The new version (${dto.version}) must be equal to or exactly one increment above the current version (${oldVersion}).`,
-        );
+        throw new BadRequestException({
+          message: `The new version (${dto.version}) must be equal to or exactly one increment above the current version (${oldVersion}).`,
+          errorCode: 'TYPOLOGY_VERSION_INVALID',
+          params: { newVersion: dto.version, oldVersion },
+        });
       }
     }
 
@@ -214,7 +226,11 @@ export class TypologiesService {
       return saved;
     } catch (err: any) {
       if (err.code === 11000) {
-        throw new ConflictException(`An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`);
+        throw new ConflictException({
+          message: `An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+          errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
+          params: { codigo: dto.codigo },
+        });
       }
       throw err;
     }
@@ -287,9 +303,13 @@ export class TypologiesService {
 
   /** Finds a typology by ID scoped to an org — used by internal service calls */
   async findByIdPublic(orgId: string, id: string): Promise<TypologyDocument> {
-    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('Invalid typology ID');
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException({ message: 'Invalid typology ID', errorCode: 'TYPOLOGY_INVALID_ID' });
+    }
     const doc = await this.model.findOne({ _id: id, orgId, deletedAt: null }).exec();
-    if (!doc) throw new NotFoundException(`Typology ${id} not found`);
+    if (!doc) {
+      throw new NotFoundException({ message: `Typology ${id} not found`, errorCode: 'TYPOLOGY_NOT_FOUND' });
+    }
     return doc;
   }
 
@@ -299,7 +319,10 @@ export class TypologiesService {
 
     const status = doc.documento.extractionStatus;
     if (status !== ExtractionStatus.DISCREPANCY && status !== ExtractionStatus.PENDING_CONFIRMATION) {
-      throw new BadRequestException(`No pending discrepancy or confirmation for this typology.`);
+      throw new BadRequestException({
+        message: 'No pending discrepancy or confirmation for this typology.',
+        errorCode: 'TYPOLOGY_NO_PENDING_ACTION',
+      });
     }
 
     if (dto.action === ResolveAction.KEEP_DECLARED) {
@@ -336,9 +359,11 @@ export class TypologiesService {
       return saved;
     } catch (err: any) {
       if (err?.code === 11000) {
-        throw new ConflictException(
-          `An active typology with code '${doc.datosDeclarados.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
-        );
+        throw new ConflictException({
+          message: `An active typology with code '${doc.datosDeclarados.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+          errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
+          params: { codigo: doc.datosDeclarados.codigo },
+        });
       }
       throw err;
     }
