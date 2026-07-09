@@ -56,14 +56,24 @@ export class CargosService {
     if (areaId) {
       await this.areasService.findOne(orgId, departamentoId, areaId);
       const existing = await this.repo.findOne({ where: { areaId, name: dto.name } });
-      if (existing) throw new ConflictException(`Cargo "${dto.name}" already exists in this area`);
+      if (existing) {
+        throw new ConflictException({
+          message: `Cargo "${dto.name}" already exists in this area`,
+          errorCode: 'CARGO_ALREADY_EXISTS_IN_AREA',
+          params: { name: dto.name },
+        });
+      }
     } else {
       await this.departamentosService.findOne(orgId, departamentoId);
       const existing = await this.repo.findOne({
         where: { departamentoId, name: dto.name, areaId: IsNull() },
       });
       if (existing) {
-        throw new ConflictException(`Cargo "${dto.name}" already exists in this department`);
+        throw new ConflictException({
+          message: `Cargo "${dto.name}" already exists in this department`,
+          errorCode: 'CARGO_ALREADY_EXISTS_IN_DEPARTMENT',
+          params: { name: dto.name },
+        });
       }
     }
 
@@ -102,7 +112,9 @@ export class CargosService {
   async findOne(orgId: string, departamentoId: string, areaId: string, id: string): Promise<Cargo> {
     await this.areasService.findOne(orgId, departamentoId, areaId);
     const cargo = await this.repo.findOne({ where: { id, orgId, departamentoId, areaId } });
-    if (!cargo) throw new NotFoundException(`Cargo ${id} not found`);
+    if (!cargo) {
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
+    }
     return cargo;
   }
 
@@ -110,7 +122,9 @@ export class CargosService {
     const cargo = await this.repo.findOne({
       where: { id, orgId, departamentoId, areaId: IsNull() },
     });
-    if (!cargo) throw new NotFoundException(`Cargo ${id} not found`);
+    if (!cargo) {
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
+    }
     return cargo;
   }
 
@@ -125,7 +139,13 @@ export class CargosService {
     const cargo = await this.findOne(orgId, departamentoId, areaId, id);
     if (dto.name && dto.name !== cargo.name) {
       const existing = await this.repo.findOne({ where: { areaId, name: dto.name } });
-      if (existing) throw new ConflictException(`Cargo "${dto.name}" already exists in this area`);
+      if (existing) {
+        throw new ConflictException({
+          message: `Cargo "${dto.name}" already exists in this area`,
+          errorCode: 'CARGO_ALREADY_EXISTS_IN_AREA',
+          params: { name: dto.name },
+        });
+      }
     }
     const before: Record<string, unknown> = {}
     for (const key of Object.keys(dto)) before[key] = (cargo as unknown as Record<string, unknown>)[key]
@@ -161,7 +181,11 @@ export class CargosService {
         where: { departamentoId, name: dto.name, areaId: IsNull() },
       });
       if (existing) {
-        throw new ConflictException(`Cargo "${dto.name}" already exists in this department`);
+        throw new ConflictException({
+          message: `Cargo "${dto.name}" already exists in this department`,
+          errorCode: 'CARGO_ALREADY_EXISTS_IN_DEPARTMENT',
+          params: { name: dto.name },
+        });
       }
     }
 
@@ -201,10 +225,20 @@ export class CargosService {
   async restore(orgId: string, departamentoId: string, areaId: string, id: string, actorId?: string): Promise<Cargo> {
     await this.areasService.findOne(orgId, departamentoId, areaId);
     const cargo = await this.repo.findOne({ where: { id, orgId, departamentoId, areaId }, withDeleted: true });
-    if (!cargo) throw new NotFoundException(`Cargo ${id} not found`);
-    if (!cargo.deletedAt) throw new ConflictException(`Cargo ${id} is not deleted`);
+    if (!cargo) {
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
+    }
+    if (!cargo.deletedAt) {
+      throw new ConflictException({ message: `Cargo ${id} is not deleted`, errorCode: 'CARGO_NOT_DELETED', params: { id } });
+    }
     const nameConflict = await this.repo.findOne({ where: { areaId, name: cargo.name } });
-    if (nameConflict) throw new ConflictException(`Cargo "${cargo.name}" already exists in this area`);
+    if (nameConflict) {
+      throw new ConflictException({
+        message: `Cargo "${cargo.name}" already exists in this area`,
+        errorCode: 'CARGO_ALREADY_EXISTS_IN_AREA',
+        params: { name: cargo.name },
+      });
+    }
     await this.repo.restore(id);
     this.emitAuditLog({ actorId, orgId, action: 'CARGO_RESTORED', resourceId: id, resourceName: cargo.name, metadata: { areaId, departamentoId } });
     return this.findOne(orgId, departamentoId, areaId, id);
@@ -215,13 +249,21 @@ export class CargosService {
       where: { id, orgId, departamentoId, areaId: IsNull() },
       withDeleted: true,
     });
-    if (!cargo) throw new NotFoundException(`Cargo ${id} not found`);
-    if (!cargo.deletedAt) throw new ConflictException(`Cargo ${id} is not deleted`);
+    if (!cargo) {
+      throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
+    }
+    if (!cargo.deletedAt) {
+      throw new ConflictException({ message: `Cargo ${id} is not deleted`, errorCode: 'CARGO_NOT_DELETED', params: { id } });
+    }
     const nameConflict = await this.repo.findOne({
       where: { departamentoId, name: cargo.name, areaId: IsNull() },
     });
     if (nameConflict) {
-      throw new ConflictException(`Cargo "${cargo.name}" already exists in this department`);
+      throw new ConflictException({
+        message: `Cargo "${cargo.name}" already exists in this department`,
+        errorCode: 'CARGO_ALREADY_EXISTS_IN_DEPARTMENT',
+        params: { name: cargo.name },
+      });
     }
     await this.repo.restore(id);
     this.emitAuditLog({ actorId, orgId, action: 'CARGO_RESTORED', resourceId: id, resourceName: cargo.name, metadata: { departamentoId } });

@@ -96,9 +96,14 @@ export class AuthClientService {
         throw new GatewayTimeoutException('auth-service did not respond in time');
       }
 
-      const axiosError = error as { response?: { status?: number; data?: { message?: string } }; message?: string };
-      const status  = axiosError?.response?.status;
-      const message = axiosError?.response?.data?.message ?? axiosError?.message ?? "Unknown error";
+      const axiosError = error as {
+        response?: { status?: number; data?: { message?: string; errorCode?: string } };
+        message?: string;
+      };
+      const status    = axiosError?.response?.status;
+      const data      = axiosError?.response?.data;
+      const message   = data?.message ?? axiosError?.message ?? "Unknown error";
+      const errorCode = data?.errorCode;
 
       this.logger.http({
         type: "internal-response", target: "auth-service",
@@ -106,7 +111,9 @@ export class AuthClientService {
         message: `← [auth-service] POST /api/v1/auth/credentials/provision ${status ?? 500}: ${message}`,
       });
 
-      if (status && status >= 400 && status < 500) throw new HttpException(message, status);
+      if (status && status >= 400 && status < 500) {
+        throw new HttpException({ message, errorCode }, status);
+      }
       throw new BadGatewayException(`Could not create credentials in auth-service`);
     }
   }

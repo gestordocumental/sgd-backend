@@ -14,7 +14,7 @@ import { AuthClientService } from '../auth-client/auth-client.service';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { KafkaProducerService, TOPICS, getClientIp } from '@sgd/common';
 import { OrgClientService } from '../common/org-client/org-client.service';
-import { userDisplayName, encodeCursor, decodeCursor } from './user.helpers';
+import { userDisplayName, encodeCursor, decodeCursor, assertNotSelfAction } from './user.helpers';
 import Redis from 'ioredis';
 
 @Injectable()
@@ -248,6 +248,10 @@ export class UserProfileService {
   }
 
   async globalRemove(id: string, actorId?: string): Promise<void> {
+    assertNotSelfAction(actorId, id, {
+      message: 'You cannot delete your own account',
+      errorCode: 'USER_CANNOT_DELETE_SELF',
+    });
     const user = await this.findOne(id);
     await this.authClientService.disableCredentials(user.id);
     try {
@@ -288,6 +292,10 @@ export class UserProfileService {
     id: string,
     caller: { actorId?: string; companyId?: string; isSuperAdmin?: boolean },
   ): Promise<User> {
+    assertNotSelfAction(caller.actorId, id, {
+      message: 'You cannot disable your own account',
+      errorCode: 'USER_CANNOT_DISABLE_SELF',
+    });
     if (!caller.isSuperAdmin) {
       if (!caller.companyId) {
         throw new ForbiddenException('Organization context required to disable users');
@@ -314,6 +322,10 @@ export class UserProfileService {
         resourceId:   id,
         resourceName: userDisplayName(user),
       });
+      // Push an immediate session-kill SSE event so an already-open tab is
+      // logged out right away, instead of waiting for the access token to
+      // expire or a page refresh to trigger a failed /auth/refresh.
+      this.kafkaProducer.emitSafe(TOPICS.USER_DISABLED, { userId: id });
       return saved;
     } catch (err) {
       await this.authClientService.enableCredentials(id).catch(() => {});
@@ -358,7 +370,14 @@ export class UserProfileService {
   }
 
   async setSuperAdmin(id: string, enabled: boolean, actorId?: string): Promise<User> {
+    assertNotSelfAction(actorId, id, {
+      message: 'You cannot change your own super admin status',
+      errorCode: 'USER_CANNOT_MODIFY_OWN_SUPER_ADMIN',
+    });
     const user = await this.findOne(id);
+    if (user.registrationStatus !== RegistrationStatus.ACTIVE) {
+      throw new ConflictException('Only registered users can have their super admin status changed');
+    }
     const previousState = user.isSuperAdmin;
     user.isSuperAdmin = enabled;
     const saved = await this.usersRepository.save(user);

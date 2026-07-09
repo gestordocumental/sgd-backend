@@ -12,7 +12,7 @@ import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role, RoleScope, SystemRoleName } from '../roles/entities/role.entity';
 import { AuthClientService } from '../auth-client/auth-client.service';
 import { OrgClientService } from '../common/org-client/org-client.service';
-import { KafkaProducerService } from '@sgd/common';
+import { KafkaProducerService, TOPICS } from '@sgd/common';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -235,7 +235,7 @@ describe('UsersService', () => {
       try {
         await service.create(dto);
       } catch (err: any) {
-        expect(err.response).toMatchObject({ userId: deletedUser.id });
+        expect(err.response).toMatchObject({ params: { userId: deletedUser.id } });
       }
     });
 
@@ -253,7 +253,7 @@ describe('UsersService', () => {
       try {
         await service.create(dto);
       } catch (err: any) {
-        expect(err.response).toMatchObject({ userId: existingUser.id });
+        expect(err.response).toMatchObject({ params: { userId: existingUser.id } });
       }
     });
 
@@ -626,6 +626,13 @@ describe('UsersService', () => {
       await expect(service.globalRemove(user.id)).rejects.toThrow('DB error');
       expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
     });
+
+    it('throws BadRequestException when the actor targets their own account', async () => {
+      await expect(service.globalRemove('user-uuid-1', 'user-uuid-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
   });
 
   // ─── restore ──────────────────────────────────────────────────────────────
@@ -676,6 +683,23 @@ describe('UsersService', () => {
       expect(result.isActive).toBe(false);
     });
 
+    it('emits USER_DISABLED so an already-open tab is logged out immediately', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
+      const saved = { ...user, isActive: false };
+
+      uorRepo.findOne.mockResolvedValue(makeUor());
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.disableCredentials.mockResolvedValue(undefined);
+      authClient.revokeAllTokens.mockResolvedValue(undefined);
+      usersRepo.save.mockResolvedValue(saved as any);
+
+      await service.disable(user.id, { companyId: 'org-uuid-1' });
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(TOPICS.USER_DISABLED, {
+        userId: user.id,
+      });
+    });
+
     it('compensates by re-enabling credentials when DB save fails', async () => {
       const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
 
@@ -688,6 +712,10 @@ describe('UsersService', () => {
 
       await expect(service.disable(user.id, { companyId: 'org-uuid-1' })).rejects.toThrow('DB save failed');
       expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalledWith(
+        TOPICS.USER_DISABLED,
+        expect.anything(),
+      );
     });
 
     it('throws ConflictException when user is not in ACTIVE status', async () => {
@@ -707,6 +735,14 @@ describe('UsersService', () => {
 
     it('throws ForbiddenException when non-superadmin caller has no companyId', async () => {
       await expect(service.disable('user-uuid-1', {})).rejects.toThrow(ForbiddenException);
+      expect(uorRepo.findOne).not.toHaveBeenCalled();
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when the actor targets their own account', async () => {
+      await expect(
+        service.disable('user-uuid-1', { actorId: 'user-uuid-1', isSuperAdmin: true }),
+      ).rejects.toThrow(BadRequestException);
       expect(uorRepo.findOne).not.toHaveBeenCalled();
       expect(usersRepo.findOne).not.toHaveBeenCalled();
     });
@@ -832,7 +868,7 @@ describe('UsersService', () => {
 
   describe('setSuperAdmin', () => {
     it('sets isSuperAdmin to true and persists', async () => {
-      const user = makeUser({ isSuperAdmin: false });
+      const user = makeUser({ isSuperAdmin: false, registrationStatus: RegistrationStatus.ACTIVE });
       const updated = { ...user, isSuperAdmin: true };
 
       usersRepo.findOne.mockResolvedValue(user);
@@ -846,7 +882,7 @@ describe('UsersService', () => {
     });
 
     it('sets isSuperAdmin to false and persists', async () => {
-      const user = makeUser({ isSuperAdmin: true });
+      const user = makeUser({ isSuperAdmin: true, registrationStatus: RegistrationStatus.ACTIVE });
       const updated = { ...user, isSuperAdmin: false };
 
       usersRepo.findOne.mockResolvedValue(user);
@@ -862,6 +898,21 @@ describe('UsersService', () => {
       usersRepo.findOne.mockResolvedValue(null);
 
       await expect(service.setSuperAdmin('bad-id', true)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when the actor targets their own account', async () => {
+      await expect(
+        service.setSuperAdmin('user-uuid-1', false, 'user-uuid-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when the user is still completing registration', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.PENDING_CREDENTIALS });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(service.setSuperAdmin(user.id, false)).rejects.toThrow(ConflictException);
+      expect(usersRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -1010,6 +1061,13 @@ describe('UsersService', () => {
       await expect(service.removeFromOrg('bad-id', 'org-uuid-1')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('throws BadRequestException when the actor targets their own membership', async () => {
+      await expect(
+        service.removeFromOrg('user-uuid-1', 'org-uuid-1', 'user-uuid-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
     });
   });
 

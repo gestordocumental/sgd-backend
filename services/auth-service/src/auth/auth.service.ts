@@ -113,12 +113,16 @@ export class AuthService {
 
     if (existing) {
       if (existing.userId !== dto.userId) {
-        throw new ConflictException(
-          "Email already registered for another account",
-        );
+        throw new ConflictException({
+          message: "Email already registered for another account",
+          errorCode: "EMAIL_ALREADY_REGISTERED",
+        });
       }
       if (existing.status === CredentialStatus.DISABLED) {
-        throw new ForbiddenException("Credentials disabled");
+        throw new ForbiddenException({
+          message: "Credentials disabled",
+          errorCode: "CREDENTIALS_DISABLED",
+        });
       }
 
       if (!existing.passwordHash) {
@@ -163,7 +167,10 @@ export class AuthService {
     // Check lockout after bcrypt so timing is equalized regardless of lock state.
     if (credential?.status === CredentialStatus.ACTIVE &&
         credential.lockedUntil && credential.lockedUntil > new Date()) {
-      throw new ForbiddenException('Account temporarily locked. Try again later.');
+      throw new ForbiddenException({
+        message: 'Account temporarily locked. Try again later.',
+        errorCode: 'ACCOUNT_LOCKED',
+      });
     }
 
     if (!credential || credential.status !== CredentialStatus.ACTIVE || !valid) {
@@ -172,7 +179,10 @@ export class AuthService {
       if (credential?.status === CredentialStatus.ACTIVE && !valid) {
         await this.recordFailedAttempt(credential);
       }
-      throw new UnauthorizedException("Invalid credentials");
+      throw new UnauthorizedException({
+        message: "Invalid credentials",
+        errorCode: "INVALID_CREDENTIALS",
+      });
     }
 
     // Credentials are valid — reset the failure counter and any previous lockout.
@@ -187,7 +197,10 @@ export class AuthService {
       ]);
     } catch (err) {
       if (err instanceof NotFoundException) {
-        throw new UnauthorizedException("Invalid credentials");
+        throw new UnauthorizedException({
+          message: "Invalid credentials",
+          errorCode: "INVALID_CREDENTIALS",
+        });
       }
       throw err;
     }
@@ -195,7 +208,10 @@ export class AuthService {
     // Block login for non-super-admin users with no active company memberships.
     // This covers the case where a user's only company was deleted.
     if (!userInfo.isSuperAdmin && companies.length === 0) {
-      throw new UnauthorizedException("Invalid credentials");
+      throw new UnauthorizedException({
+        message: "Invalid credentials",
+        errorCode: "INVALID_CREDENTIALS",
+      });
     }
 
     return this.generateTokenPair(credential, {
@@ -215,7 +231,10 @@ export class AuthService {
         secret: this.jwtKeyService.resolveRefreshSecret(kid),
       });
     } catch {
-      throw new UnauthorizedException("Invalid or expired refresh token");
+      throw new UnauthorizedException({
+        message: "Invalid or expired refresh token",
+        errorCode: "REFRESH_TOKEN_INVALID",
+      });
     }
 
     // Consume the token atomically: GETDEL returns the value and deletes the key
@@ -224,13 +243,21 @@ export class AuthService {
     const consumed = await this.redis.getdel(
       `refresh:${payload.sub}:${payload.jti}`,
     );
-    if (!consumed) throw new UnauthorizedException("Refresh token revoked");
+    if (!consumed) {
+      throw new UnauthorizedException({
+        message: "Refresh token revoked",
+        errorCode: "REFRESH_TOKEN_REVOKED",
+      });
+    }
 
     const credential = await this.credentialRepo.findOne({
       where: { userId: payload.sub },
     });
     if (!credential || credential.status !== CredentialStatus.ACTIVE) {
-      throw new UnauthorizedException("User not found or inactive");
+      throw new UnauthorizedException({
+        message: "User not found or inactive",
+        errorCode: "USER_NOT_FOUND_OR_INACTIVE",
+      });
     }
 
     // Recalculate scope from user-service instead of trusting the old token.
@@ -246,18 +273,27 @@ export class AuthService {
       ]);
     } catch (err) {
       if (err instanceof NotFoundException) {
-        throw new UnauthorizedException("Invalid credentials");
+        throw new UnauthorizedException({
+          message: "Invalid credentials",
+          errorCode: "INVALID_CREDENTIALS",
+        });
       }
       throw err;
     }
 
     // Block non-super-admin users with no active company memberships.
     if (!userInfo.isSuperAdmin && companies.length === 0) {
-      throw new UnauthorizedException("Scope revoked");
+      throw new UnauthorizedException({
+        message: "Scope revoked",
+        errorCode: "SCOPE_REVOKED",
+      });
     }
 
     if (payload.companyId && !companies.includes(payload.companyId)) {
-      throw new UnauthorizedException("Scope revoked");
+      throw new UnauthorizedException({
+        message: "Scope revoked",
+        errorCode: "SCOPE_REVOKED",
+      });
     }
 
     let permissions: string[] | undefined;
@@ -358,7 +394,10 @@ export class AuthService {
    */
   verifyAccessToken(auth: string): Record<string, any> {
     if (!auth?.startsWith("Bearer "))
-      throw new UnauthorizedException("Missing token");
+      throw new UnauthorizedException({
+        message: "Missing token",
+        errorCode: "TOKEN_MISSING",
+      });
     const token = auth.split(" ")[1];
     try {
       const kid = this.getTokenKid(token);
@@ -366,7 +405,10 @@ export class AuthService {
         secret: this.jwtKeyService.resolveAccessSecret(kid),
       });
     } catch {
-      throw new UnauthorizedException("Invalid or expired token");
+      throw new UnauthorizedException({
+        message: "Invalid or expired token",
+        errorCode: "TOKEN_INVALID",
+      });
     }
   }
 
@@ -424,25 +466,42 @@ export class AuthService {
         secret: this.jwtKeyService.resolveRefreshSecret(kid),
       });
     } catch {
-      throw new UnauthorizedException("Invalid or expired company refresh token");
+      throw new UnauthorizedException({
+        message: "Invalid or expired company refresh token",
+        errorCode: "COMPANY_REFRESH_TOKEN_INVALID",
+      });
     }
 
     const consumed = await this.redis.getdel(`refresh:${payload.sub}:${payload.jti}`);
-    if (!consumed) throw new UnauthorizedException("Company session revoked");
+    if (!consumed) {
+      throw new UnauthorizedException({
+        message: "Company session revoked",
+        errorCode: "COMPANY_SESSION_REVOKED",
+      });
+    }
 
     const storedJti = await this.redis.getdel(`sa-global-rt:${payload.sub}`);
     if (!storedJti) {
-      throw new UnauthorizedException("Global session expired — please log in again");
+      throw new UnauthorizedException({
+        message: "Global session expired — please log in again",
+        errorCode: "GLOBAL_SESSION_EXPIRED",
+      });
     }
 
     const globalTokenExists = await this.redis.getdel(`refresh:${payload.sub}:${storedJti}`);
     if (!globalTokenExists) {
-      throw new UnauthorizedException("Global session expired — please log in again");
+      throw new UnauthorizedException({
+        message: "Global session expired — please log in again",
+        errorCode: "GLOBAL_SESSION_EXPIRED",
+      });
     }
 
     const credential = await this.credentialRepo.findOne({ where: { userId: payload.sub } });
     if (!credential || credential.status !== CredentialStatus.ACTIVE) {
-      throw new UnauthorizedException("User not found or inactive");
+      throw new UnauthorizedException({
+        message: "User not found or inactive",
+        errorCode: "USER_NOT_FOUND_OR_INACTIVE",
+      });
     }
 
     let userInfo: { isSuperAdmin: boolean };
@@ -450,7 +509,10 @@ export class AuthService {
       userInfo = await this.getCachedUserInfo(payload.sub);
     } catch (err) {
       if (err instanceof NotFoundException) {
-        throw new UnauthorizedException("Invalid credentials");
+        throw new UnauthorizedException({
+          message: "Invalid credentials",
+          errorCode: "INVALID_CREDENTIALS",
+        });
       }
       throw err;
     }
@@ -458,7 +520,10 @@ export class AuthService {
     if (!userInfo.isSuperAdmin) {
       const companies = await this.getCachedUserCompanies(payload.sub);
       if (companies.length === 0) {
-        throw new UnauthorizedException("Scope revoked");
+        throw new UnauthorizedException({
+          message: "Scope revoked",
+          errorCode: "SCOPE_REVOKED",
+        });
       }
     }
 
@@ -474,16 +539,21 @@ export class AuthService {
     const companies = await this.userClientService.getUserCompanies(userId);
 
     if (!companies.includes(companyId)) {
-      throw new NotFoundException(
-        `User does not belong to company ${companyId}`,
-      );
+      throw new NotFoundException({
+        message: `User does not belong to company ${companyId}`,
+        errorCode: "USER_NOT_IN_COMPANY",
+        params: { companyId },
+      });
     }
 
     const credential = await this.credentialRepo.findOne({
       where: { userId },
     });
     if (!credential || credential.status !== CredentialStatus.ACTIVE) {
-      throw new UnauthorizedException("User not found or inactive");
+      throw new UnauthorizedException({
+        message: "User not found or inactive",
+        errorCode: "USER_NOT_FOUND_OR_INACTIVE",
+      });
     }
 
     // isSuperAdmin is intentionally omitted from company-scoped tokens so the user
@@ -540,12 +610,18 @@ export class AuthService {
     const userId = await this.redis.getdel(redisKey);
 
     if (!userId) {
-      throw new BadRequestException('Invalid or expired password reset token');
+      throw new BadRequestException({
+        message: 'Invalid or expired password reset token',
+        errorCode: 'RESET_TOKEN_INVALID',
+      });
     }
 
     const credential = await this.credentialRepo.findOne({ where: { userId } });
     if (!credential || credential.status !== CredentialStatus.ACTIVE) {
-      throw new BadRequestException('Invalid or expired password reset token');
+      throw new BadRequestException({
+        message: 'Invalid or expired password reset token',
+        errorCode: 'RESET_TOKEN_INVALID',
+      });
     }
 
     credential.passwordHash = await bcrypt.hash(newPassword, this.bcryptRounds);
