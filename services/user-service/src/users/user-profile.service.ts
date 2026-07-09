@@ -248,7 +248,10 @@ export class UserProfileService {
   }
 
   async globalRemove(id: string, actorId?: string): Promise<void> {
-    assertNotSelfAction(actorId, id, 'You cannot delete your own account', 'USER_CANNOT_DELETE_SELF');
+    assertNotSelfAction(actorId, id, {
+      message: 'You cannot delete your own account',
+      errorCode: 'USER_CANNOT_DELETE_SELF',
+    });
     const user = await this.findOne(id);
     await this.authClientService.disableCredentials(user.id);
     try {
@@ -289,12 +292,10 @@ export class UserProfileService {
     id: string,
     caller: { actorId?: string; companyId?: string; isSuperAdmin?: boolean },
   ): Promise<User> {
-    assertNotSelfAction(
-      caller.actorId,
-      id,
-      'You cannot disable your own account',
-      'USER_CANNOT_DISABLE_SELF',
-    );
+    assertNotSelfAction(caller.actorId, id, {
+      message: 'You cannot disable your own account',
+      errorCode: 'USER_CANNOT_DISABLE_SELF',
+    });
     if (!caller.isSuperAdmin) {
       if (!caller.companyId) {
         throw new ForbiddenException('Organization context required to disable users');
@@ -369,12 +370,10 @@ export class UserProfileService {
   }
 
   async setSuperAdmin(id: string, enabled: boolean, actorId?: string): Promise<User> {
-    assertNotSelfAction(
-      actorId,
-      id,
-      'You cannot change your own super admin status',
-      'USER_CANNOT_MODIFY_OWN_SUPER_ADMIN',
-    );
+    assertNotSelfAction(actorId, id, {
+      message: 'You cannot change your own super admin status',
+      errorCode: 'USER_CANNOT_MODIFY_OWN_SUPER_ADMIN',
+    });
     const user = await this.findOne(id);
     const previousState = user.isSuperAdmin;
     user.isSuperAdmin = enabled;

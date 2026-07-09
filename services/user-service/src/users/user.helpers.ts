@@ -10,8 +10,7 @@ export const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
 export function assertNotSelfAction(
   actorId: string | undefined,
   targetId: string,
-  message: string,
-  errorCode: string,
+  { message, errorCode }: { message: string; errorCode: string },
 ): void {
   if (actorId && actorId === targetId) {
     throw new BadRequestException({ message, errorCode, params: { userId: targetId } });
