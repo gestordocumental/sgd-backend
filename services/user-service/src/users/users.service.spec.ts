@@ -868,7 +868,7 @@ describe('UsersService', () => {
 
   describe('setSuperAdmin', () => {
     it('sets isSuperAdmin to true and persists', async () => {
-      const user = makeUser({ isSuperAdmin: false });
+      const user = makeUser({ isSuperAdmin: false, registrationStatus: RegistrationStatus.ACTIVE });
       const updated = { ...user, isSuperAdmin: true };
 
       usersRepo.findOne.mockResolvedValue(user);
@@ -882,7 +882,7 @@ describe('UsersService', () => {
     });
 
     it('sets isSuperAdmin to false and persists', async () => {
-      const user = makeUser({ isSuperAdmin: true });
+      const user = makeUser({ isSuperAdmin: true, registrationStatus: RegistrationStatus.ACTIVE });
       const updated = { ...user, isSuperAdmin: false };
 
       usersRepo.findOne.mockResolvedValue(user);
@@ -905,6 +905,14 @@ describe('UsersService', () => {
         service.setSuperAdmin('user-uuid-1', false, 'user-uuid-1'),
       ).rejects.toThrow(BadRequestException);
       expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when the user is still completing registration', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.PENDING_CREDENTIALS });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(service.setSuperAdmin(user.id, false)).rejects.toThrow(ConflictException);
+      expect(usersRepo.save).not.toHaveBeenCalled();
     });
   });
 

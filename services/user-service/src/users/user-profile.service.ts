@@ -375,6 +375,9 @@ export class UserProfileService {
       errorCode: 'USER_CANNOT_MODIFY_OWN_SUPER_ADMIN',
     });
     const user = await this.findOne(id);
+    if (user.registrationStatus !== RegistrationStatus.ACTIVE) {
+      throw new ConflictException('Only registered users can have their super admin status changed');
+    }
     const previousState = user.isSuperAdmin;
     user.isSuperAdmin = enabled;
     const saved = await this.usersRepository.save(user);
