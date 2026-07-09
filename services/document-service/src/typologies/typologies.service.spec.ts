@@ -443,10 +443,10 @@ describe('TypologiesService', () => {
   // ── resolveDiscrepancy ────────────────────────────────────────────────────
 
   describe('resolveDiscrepancy()', () => {
-    it('KEEP_DECLARED — does not change datosDeclarados', async () => {
+    it('KEEP_DECLARED — does not change datosDeclarados when it already matches the extraction', async () => {
       const doc = makeDoc({
         documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
-        metadataExtraida: { nombre: 'Other', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+        metadataExtraida: { nombre: 'Policy', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
       });
       const { Model } = makeModel(doc);
 
@@ -455,6 +455,37 @@ describe('TypologiesService', () => {
 
       expect(doc.datosDeclarados.nombre).toBe('Policy');
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
+    });
+
+    it('KEEP_DECLARED — throws when the declared data still mismatches the extracted content', async () => {
+      const doc = makeDoc({
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Other', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(
+        service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED }),
+      ).rejects.toThrow(BadRequestException);
+      // Left untouched — still DISCREPANCY, not silently CONFIRMED.
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.DISCREPANCY);
+    });
+
+    it('MANUAL_OVERRIDE — throws when the provided values still mismatch the extracted content', async () => {
+      const doc = makeDoc({
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Extracted Name', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(
+        service.resolveDiscrepancy('org-1', doc.id, {
+          action: ResolveAction.MANUAL_OVERRIDE,
+          nombre: 'A Different Name',
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('ADOPT_EXTRACTED — copies extracted values to datosDeclarados', async () => {
