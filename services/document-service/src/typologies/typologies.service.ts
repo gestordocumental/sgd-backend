@@ -339,6 +339,27 @@ export class TypologiesService {
       if (dto.version !== undefined) doc.datosDeclarados.version = dto.version;
     }
 
+    // KEEP_DECLARED/MANUAL_OVERRIDE must still match the document's real extracted
+    // content. Otherwise the typology is left CONFIRMED with declared data that
+    // will never match this same document's extraction the next time it's checked
+    // (e.g. when attaching it to a workflow), producing a confusing downstream error.
+    if (dto.action !== ResolveAction.ADOPT_EXTRACTED) {
+      const extracted = doc.metadataExtraida;
+      const declared = doc.datosDeclarados;
+      const mismatchedFields: string[] = [];
+      if (extracted.nombre  && extracted.nombre  !== declared.nombre)  mismatchedFields.push('nombre');
+      if (extracted.codigo  && extracted.codigo  !== declared.codigo)  mismatchedFields.push('codigo');
+      if (extracted.version && extracted.version !== declared.version) mismatchedFields.push('version');
+
+      if (mismatchedFields.length > 0) {
+        throw new BadRequestException({
+          message: "The declared data doesn't match the content of the uploaded document. Adopt the extracted data, or upload a document whose content matches the declared data.",
+          errorCode: 'TYPOLOGY_DECLARED_STILL_MISMATCHED',
+          params: { fields: mismatchedFields },
+        });
+      }
+    }
+
     doc.documento.extractionStatus = ExtractionStatus.CONFIRMED;
 
     const hasDeclaredData = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
