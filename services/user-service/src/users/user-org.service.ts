@@ -12,7 +12,7 @@ import { AssignOrgDto } from './dto/assign-org.dto';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role } from '../roles/entities/role.entity';
 import { KafkaProducerService, TOPICS, getClientIp } from '@sgd/common';
-import { userDisplayName, encodeCursor, decodeCursor } from './user.helpers';
+import { userDisplayName, encodeCursor, decodeCursor, assertNotSelfAction } from './user.helpers';
 
 @Injectable()
 export class UserOrgService {
@@ -205,6 +205,10 @@ export class UserOrgService {
   }
 
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
+    assertNotSelfAction(actorId, userId, {
+      message: 'You cannot remove yourself from an organization',
+      errorCode: 'USER_CANNOT_REMOVE_SELF_FROM_ORG',
+    });
     const targetUser = await this.findUser(userId);
     const result = await this.userOrgRoleRepository.update(
       { userId, orgId },
