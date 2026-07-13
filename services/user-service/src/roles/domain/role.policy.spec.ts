@@ -44,6 +44,18 @@ describe('RolePolicy', () => {
       const role = makeRole({ isSystem: true });
       expect(() => RolePolicy.canModify(role, ORG_ID)).toThrow('System roles cannot be modified');
     });
+
+    it('includes the SYSTEM_ROLE_NOT_MODIFIABLE errorCode when blocking a system role modification', () => {
+      const role = makeRole({ isSystem: true });
+      try {
+        RolePolicy.canModify(role, ORG_ID);
+        fail('expected RolePolicy.canModify to throw');
+      } catch (err) {
+        expect((err as ForbiddenException).getResponse()).toMatchObject({
+          errorCode: 'SYSTEM_ROLE_NOT_MODIFIABLE',
+        });
+      }
+    });
   });
 
   // ─── canDelete ────────────────────────────────────────────────────────────
@@ -67,6 +79,18 @@ describe('RolePolicy', () => {
     it('includes a descriptive message when blocking a system role deletion', () => {
       const role = makeRole({ isSystem: true });
       expect(() => RolePolicy.canDelete(role, ORG_ID)).toThrow('System roles cannot be deleted');
+    });
+
+    it('includes the SYSTEM_ROLE_NOT_DELETABLE errorCode when blocking a system role deletion', () => {
+      const role = makeRole({ isSystem: true });
+      try {
+        RolePolicy.canDelete(role, ORG_ID);
+        fail('expected RolePolicy.canDelete to throw');
+      } catch (err) {
+        expect((err as ForbiddenException).getResponse()).toMatchObject({
+          errorCode: 'SYSTEM_ROLE_NOT_DELETABLE',
+        });
+      }
     });
   });
 
@@ -93,6 +117,18 @@ describe('RolePolicy', () => {
       expect(() => RolePolicy.canManagePermissions(role, ORG_ID)).toThrow(
         'System role permissions cannot be modified',
       );
+    });
+
+    it('includes the SYSTEM_ROLE_NOT_MODIFIABLE errorCode when blocking system role permission management', () => {
+      const role = makeRole({ isSystem: true });
+      try {
+        RolePolicy.canManagePermissions(role, ORG_ID);
+        fail('expected RolePolicy.canManagePermissions to throw');
+      } catch (err) {
+        expect((err as ForbiddenException).getResponse()).toMatchObject({
+          errorCode: 'SYSTEM_ROLE_NOT_MODIFIABLE',
+        });
+      }
     });
   });
 });

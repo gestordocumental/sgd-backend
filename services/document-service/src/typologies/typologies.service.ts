@@ -2,7 +2,7 @@ import {
   Injectable, NotFoundException, ConflictException, BadRequestException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { FilterQuery, Model, Types } from 'mongoose';
 import {
   Typology, TypologyDocument, TypologyStatus, ExtractionStatus, DataSource, CreationSource,
 } from './schemas/typology.schema';
@@ -153,10 +153,11 @@ export class TypologiesService {
     }
   }
 
-  findAll(orgId: string, page = 1, limit = 20): Promise<TypologyDocument[]> {
+  findAll(orgId: string, page = 1, limit = 20, status?: TypologyStatus): Promise<TypologyDocument[]> {
     const skip = (page - 1) * limit;
+    const filter: FilterQuery<TypologyDocument> = status ? { orgId, typologyStatus: status } : { orgId };
     return this.model
-      .find({ orgId, typologyStatus: TypologyStatus.ACTIVE })
+      .find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -328,9 +329,14 @@ export class TypologiesService {
     if (dto.action === ResolveAction.KEEP_DECLARED) {
       // No change to datosDeclarados
     } else if (dto.action === ResolveAction.ADOPT_EXTRACTED) {
-      doc.datosDeclarados.nombre  = doc.metadataExtraida.nombre;
-      doc.datosDeclarados.codigo  = doc.metadataExtraida.codigo;
-      doc.datosDeclarados.version = doc.metadataExtraida.version;
+      // A null extracted field means the extractor simply couldn't find that piece of
+      // data in the document — it's not a signal to blank out an already-declared value.
+      // Falling back to the existing declared value avoids silently downgrading a
+      // complete (ACTIVE) typology to INCOMPLETE — which would make it vanish from the
+      // default "active" view — just because e.g. no version string was found.
+      doc.datosDeclarados.nombre  = doc.metadataExtraida.nombre  ?? doc.datosDeclarados.nombre;
+      doc.datosDeclarados.codigo  = doc.metadataExtraida.codigo  ?? doc.datosDeclarados.codigo;
+      doc.datosDeclarados.version = doc.metadataExtraida.version ?? doc.datosDeclarados.version;
       doc.datosDeclarados.fuente  = DataSource.CONFIRMED_FROM_EXTRACTION;
     } else {
       // MANUAL_OVERRIDE

@@ -438,7 +438,9 @@ export class UserProfileService {
         `COUNT(DISTINCT CASE WHEN u.is_active = true AND u.deleted_at IS NULL THEN u.id END)`,
         'active',
       )
-      .where('uor.role_id IS NOT NULL')
+      // A null role_id just means the member currently has no role assigned —
+      // they're still part of the org. Only removed_at marks them as no longer associated.
+      .where('uor.removed_at IS NULL')
       .andWhere('u.is_super_admin = false')
       .groupBy('uor.org_id')
       .getRawMany<{ orgId: string; total: string; active: string }>();

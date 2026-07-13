@@ -149,7 +149,7 @@ describe('TypologiesService', () => {
   // ── findAll ───────────────────────────────────────────────────────────────
 
   describe('findAll()', () => {
-    it('queries only ACTIVE typologies with correct pagination', async () => {
+    it('queries typologies of all statuses with correct pagination when no status filter is given', async () => {
       const docs = [makeDoc(), makeDoc()];
       const execMock = jest.fn().mockResolvedValue(docs);
       const chain = { sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: execMock };
@@ -159,10 +159,23 @@ describe('TypologiesService', () => {
       const service = makeService(Model);
       const result = await service.findAll('org-1', 2, 10);
 
-      expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1', typologyStatus: TypologyStatus.ACTIVE });
+      expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1' });
       expect(chain.skip).toHaveBeenCalledWith(10); // page=2, limit=10 → skip=10
       expect(chain.limit).toHaveBeenCalledWith(10);
       expect(result).toEqual(docs);
+    });
+
+    it('filters by the given status when one is provided', async () => {
+      const docs = [makeDoc()];
+      const execMock = jest.fn().mockResolvedValue(docs);
+      const chain = { sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: execMock };
+      const { Model } = makeModel();
+      Model.find = jest.fn().mockReturnValue(chain);
+
+      const service = makeService(Model);
+      await service.findAll('org-1', 1, 20, TypologyStatus.ACTIVE);
+
+      expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1', typologyStatus: TypologyStatus.ACTIVE });
     });
   });
 
@@ -501,6 +514,24 @@ describe('TypologiesService', () => {
       expect(doc.datosDeclarados.nombre).toBe('Extracted');
       expect(doc.datosDeclarados.codigo).toBe('EXT-001');
       expect(doc.datosDeclarados.fuente).toBe(DataSource.CONFIRMED_FROM_EXTRACTION);
+    });
+
+    it('ADOPT_EXTRACTED — keeps the existing declared value when the extractor found no value for a field, staying ACTIVE instead of silently becoming INCOMPLETE', async () => {
+      const doc = makeDoc({
+        typologyStatus: TypologyStatus.ACTIVE,
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
+        // Extractor found a different nombre but couldn't find a version in the document.
+        metadataExtraida: { nombre: 'Extracted Name', codigo: 'POL-001', version: null, extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.ADOPT_EXTRACTED });
+
+      expect(doc.datosDeclarados.nombre).toBe('Extracted Name');
+      expect(doc.datosDeclarados.version).toBe('01'); // preserved, not nulled out
+      expect(doc.typologyStatus).toBe(TypologyStatus.ACTIVE); // still complete — doesn't vanish from the active list
     });
 
     it('MANUAL_OVERRIDE — uses provided values', async () => {

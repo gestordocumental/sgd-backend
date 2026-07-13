@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { PERMISSION_KEY } from '@sgd/common';
 import { TypologiesController } from './typologies.controller';
 import {
   CreationSource,
@@ -50,6 +51,10 @@ function makeDeps(docOrNull: TypologyDocument | null = null) {
     update:              jest.fn().mockResolvedValue(doc),
     remove:              jest.fn().mockResolvedValue(undefined),
     resolveDiscrepancy:  jest.fn().mockResolvedValue(doc),
+    getStats:            jest.fn().mockResolvedValue({
+      totalTypologies: 10, activeTypologies: 7, uploadedDocuments: 5,
+      storageTotalBytes: 10485760, extractionStatusCounts: {},
+    }),
   };
   const orgClient = {
     resolveStructureById: jest.fn().mockResolvedValue({
@@ -108,14 +113,34 @@ describe('TypologiesController', () => {
     });
   });
 
+  describe('getStats()', () => {
+    it('delegates to service.getStats', async () => {
+      const { service, orgClient, extractorClient } = makeDeps();
+      const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
+
+      const result = await ctrl.getStats('org-1');
+
+      expect(service.getStats).toHaveBeenCalledWith('org-1');
+      expect(result).toEqual({
+        totalTypologies: 10, activeTypologies: 7, uploadedDocuments: 5,
+        storageTotalBytes: 10485760, extractionStatusCounts: {},
+      });
+    });
+
+    it('requires ORG_STRUCTURE:READ — regression guard for the missing-permission bug', () => {
+      const required = Reflect.getMetadata(PERMISSION_KEY, TypologiesController.prototype.getStats);
+      expect(required).toEqual({ module: 'ORG_STRUCTURE', action: 'READ' });
+    });
+  });
+
   describe('findAll()', () => {
-    it('returns array of TypologyResponseDto', async () => {
+    it('returns array of TypologyResponseDto and queries all statuses when none is given', async () => {
       const { service, orgClient, extractorClient } = makeDeps();
       const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
 
       const result = await ctrl.findAll('org-1', 1, 20);
 
-      expect(service.findAll).toHaveBeenCalledWith('org-1', 1, 20);
+      expect(service.findAll).toHaveBeenCalledWith('org-1', 1, 20, undefined);
       expect(result).toHaveLength(1);
       expect(result[0]).toBeInstanceOf(TypologyResponseDto);
     });
@@ -126,7 +151,24 @@ describe('TypologiesController', () => {
 
       await ctrl.findAll('org-1', 1, 500);
 
-      expect(service.findAll).toHaveBeenCalledWith('org-1', 1, 100);
+      expect(service.findAll).toHaveBeenCalledWith('org-1', 1, 100, undefined);
+    });
+
+    it('passes a valid status filter through to the service', async () => {
+      const { service, orgClient, extractorClient } = makeDeps();
+      const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
+
+      await ctrl.findAll('org-1', 1, 20, TypologyStatus.ARCHIVED);
+
+      expect(service.findAll).toHaveBeenCalledWith('org-1', 1, 20, TypologyStatus.ARCHIVED);
+    });
+
+    it('throws BadRequestException for an invalid status value', async () => {
+      const { service, orgClient, extractorClient } = makeDeps();
+      const ctrl = new TypologiesController(service as any, orgClient as any, extractorClient as any);
+
+      await expect(ctrl.findAll('org-1', 1, 20, 'NOT_A_STATUS')).rejects.toThrow(BadRequestException);
+      expect(service.findAll).not.toHaveBeenCalled();
     });
   });
 
