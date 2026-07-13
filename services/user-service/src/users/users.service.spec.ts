@@ -1708,14 +1708,19 @@ describe('UsersService', () => {
         where:      jest.fn().mockReturnThis(),
         andWhere:   jest.fn().mockReturnThis(),
         groupBy:    jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([]),
+        // 2 org members total, only 1 currently holds a role — the roleless
+        // member must still be counted since they were never removed from the org.
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '2', active: '1' },
+        ]),
       };
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
 
-      await service.getCountsByOrg();
+      const result = await service.getCountsByOrg();
 
       expect(qb.where).toHaveBeenCalledWith('uor.removed_at IS NULL');
       expect(qb.where).not.toHaveBeenCalledWith('uor.role_id IS NOT NULL');
+      expect(result).toEqual([{ orgId: 'org-1', total: 2, active: 1, inactive: 1 }]);
     });
   });
 
