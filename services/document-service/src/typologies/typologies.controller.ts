@@ -33,13 +33,13 @@ import {
 } from '@nestjs/swagger';
 import { ExtractorClientService, PreviewExtractResult } from '../common/extractor-client/extractor-client.service';
 import { OrgClientService } from '../common/org-client/org-client.service';
-import { JwtGuard, OrgMember } from '@sgd/common';
+import { JwtGuard, OrgMember, PermissionsGuard, RequirePermission } from '@sgd/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { ResolveDiscrepancyDto } from './dto/resolve-discrepancy.dto';
 import { TypologyResponseDto } from './dto/typology-response.dto';
 import { UpdateTypologyDto } from './dto/update-typology.dto';
-import { CreationSource } from './schemas/typology.schema';
+import { CreationSource, TypologyStatus } from './schemas/typology.schema';
 import { TypologiesService } from './typologies.service';
 import { multerOptions } from '../document-upload/document-upload.constants';
 
@@ -47,7 +47,7 @@ import { multerOptions } from '../document-upload/document-upload.constants';
 @ApiBearerAuth('JWT')
 @ApiParam({ name: 'orgId', format: 'uuid' })
 @Controller('api/v1/documents/:orgId/typologies')
-@UseGuards(JwtGuard)
+@UseGuards(JwtGuard, PermissionsGuard)
 @OrgMember()
 export class TypologiesController {
   constructor(
@@ -87,6 +87,7 @@ export class TypologiesController {
   @ApiOperation({ summary: 'Storage and typology statistics for an organization' })
   @ApiOkResponse({ schema: { example: { totalTypologies: 10, activeTypologies: 7, uploadedDocuments: 5, storageTotalBytes: 10485760, extractionStatusCounts: {} } } })
   @Get('stats')
+  @RequirePermission('ORG_STRUCTURE', 'READ')
   getStats(@Param('orgId') orgId: string) {
     return this.service.getStats(orgId);
   }
@@ -125,14 +126,25 @@ export class TypologiesController {
   @ApiOperation({ summary: 'List typologies for an organization' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiQuery({ name: 'status', required: false, enum: TypologyStatus, description: 'Omit to return typologies of all statuses' })
   @ApiOkResponse({ description: 'Typologies found', type: TypologyResponseDto, isArray: true })
+  @ApiBadRequestResponse({ description: 'Invalid status value' })
   @Get()
   async findAll(
     @Param('orgId') orgId: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('status') status?: string,
   ): Promise<TypologyResponseDto[]> {
-    const typologies = await this.service.findAll(orgId, Math.max(page, 1), Math.min(Math.max(limit, 1), 100));
+    if (status && !Object.values(TypologyStatus).includes(status as TypologyStatus)) {
+      throw new BadRequestException(`status must be one of: ${Object.values(TypologyStatus).join(', ')}`);
+    }
+    const typologies = await this.service.findAll(
+      orgId,
+      Math.max(page, 1),
+      Math.min(Math.max(limit, 1), 100),
+      status as TypologyStatus | undefined,
+    );
     return typologies.map(TypologyResponseDto.fromDocument);
   }
 

@@ -1696,6 +1696,32 @@ describe('UsersService', () => {
         { orgId: 'org-1', total: 10, active: 8, inactive: 2 },
       ]);
     });
+
+    it('counts org members regardless of whether they currently hold a role', async () => {
+      // Regression: the total must include members whose role was revoked but who
+      // were never removed from the org (removed_at IS NULL) — filtering on
+      // role_id IS NOT NULL undercounts the org's real membership.
+      const qb = {
+        innerJoin:  jest.fn().mockReturnThis(),
+        select:     jest.fn().mockReturnThis(),
+        addSelect:  jest.fn().mockReturnThis(),
+        where:      jest.fn().mockReturnThis(),
+        andWhere:   jest.fn().mockReturnThis(),
+        groupBy:    jest.fn().mockReturnThis(),
+        // 2 org members total, only 1 currently holds a role — the roleless
+        // member must still be counted since they were never removed from the org.
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '2', active: '1' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(qb.where).toHaveBeenCalledWith('uor.removed_at IS NULL');
+      expect(qb.where).not.toHaveBeenCalledWith('uor.role_id IS NOT NULL');
+      expect(result).toEqual([{ orgId: 'org-1', total: 2, active: 1, inactive: 1 }]);
+    });
   });
 
   // ─── findByPosition ───────────────────────────────────────────────────────
