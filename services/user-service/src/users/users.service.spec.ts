@@ -1782,8 +1782,31 @@ describe('UsersService', () => {
       const result = await service.getCountsByOrg();
 
       expect(qb.where).not.toHaveBeenCalledWith('uor.removed_at IS NULL');
-      expect(qb.where).toHaveBeenCalledWith('u.is_super_admin = false');
       expect(result).toEqual([{ orgId: 'org-1', total: 8, active: 6, inactive: 0, deleted: 2 }]);
+    });
+
+    it('does not exclude users flagged as global super admin from the org headcount', async () => {
+      // Regression: this chart must reflect real org membership as-is. A user's
+      // global isSuperAdmin flag is an unrelated platform-wide privilege — it
+      // must not make them invisible in the org they're actually assigned to.
+      const qb = {
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '4', active: '4', inactive: '0', deleted: '0' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(qb.where).not.toHaveBeenCalled();
+      expect(result).toEqual([{ orgId: 'org-1', total: 4, active: 4, inactive: 0, deleted: 0 }]);
     });
 
     it('includes globally soft-deleted users in the query instead of letting TypeORM silently drop them from the join', async () => {
