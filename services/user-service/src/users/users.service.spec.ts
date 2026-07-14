@@ -1805,7 +1805,24 @@ describe('UsersService', () => {
 
       const result = await service.getCountsByOrg();
 
-      expect(qb.where).not.toHaveBeenCalled();
+      // getRawMany() is a canned mock, so it can't prove the real SQL includes
+      // super admins — instead inspect every string the query builder actually
+      // received (join condition, select/addSelect CASE WHEN expressions,
+      // where/andWhere) so an exclusion smuggled into any of them, not just a
+      // top-level .where(), would also be caught.
+      const allArgs = [
+        ...qb.innerJoin.mock.calls,
+        ...qb.select.mock.calls,
+        ...qb.addSelect.mock.calls,
+        ...qb.where.mock.calls,
+        ...qb.andWhere.mock.calls,
+      ].flat();
+      const stringArgs = allArgs.filter((arg): arg is string => typeof arg === 'string');
+      expect(stringArgs.length).toBeGreaterThan(0); // sanity check the builder was actually used
+      for (const arg of stringArgs) {
+        expect(arg.toLowerCase()).not.toContain('super_admin');
+        expect(arg.toLowerCase()).not.toContain('superadmin');
+      }
       expect(result).toEqual([{ orgId: 'org-1', total: 4, active: 4, inactive: 0, deleted: 0 }]);
     });
 
