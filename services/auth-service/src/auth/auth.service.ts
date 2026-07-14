@@ -19,6 +19,7 @@ import { Credential, CredentialStatus } from "./entities/credential.entity";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
+import { OrgClientService } from "../org-client/org-client.service";
 import { JwtKeyService } from "./jwt-key.service";
 import { AppLogger, KafkaProducerService, TOPICS, getCorrelationId } from "@sgd/common";
 import { parseDurationToSeconds } from "./utils/parse-duration";
@@ -82,6 +83,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @Inject("REDIS_CLIENT") private readonly redis: Redis,
     private readonly userClientService: UserClientService,
+    private readonly orgClientService: OrgClientService,
     private readonly jwtKeyService: JwtKeyService,
     private readonly kafkaProducer: KafkaProducerService,
     private readonly logger: AppLogger,
@@ -542,6 +544,20 @@ export class AuthService {
       throw new NotFoundException({
         message: `User does not belong to company ${companyId}`,
         errorCode: "USER_NOT_IN_COMPANY",
+        params: { companyId },
+      });
+    }
+
+    // Reject entering the context of a deactivated company — membership alone
+    // isn't enough. Without this, a super admin (or any multi-company user)
+    // could still select and act inside a company that was deliberately
+    // deactivated, since deactivation only flips a flag in org-service and
+    // doesn't revoke the user's org membership record in user-service.
+    const { status: companyStatus } = await this.orgClientService.getOrgStatus(companyId);
+    if (companyStatus !== "active") {
+      throw new ForbiddenException({
+        message: `Company ${companyId} is not active`,
+        errorCode: "COMPANY_NOT_ACTIVE",
         params: { companyId },
       });
     }

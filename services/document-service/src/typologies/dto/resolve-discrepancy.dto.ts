@@ -1,4 +1,5 @@
 import { IsEnum, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum ResolveAction {
@@ -20,6 +21,7 @@ export class ResolveDiscrepancyDto {
   @IsOptional()
   @IsString()
   @MaxLength(255)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   nombre?: string;
 
   @ApiPropertyOptional({ description: 'Required when action is MANUAL_OVERRIDE', maxLength: 100 })
@@ -27,6 +29,7 @@ export class ResolveDiscrepancyDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   codigo?: string;
 
   @ApiPropertyOptional({ description: 'Required when action is MANUAL_OVERRIDE', maxLength: 50 })
@@ -34,5 +37,6 @@ export class ResolveDiscrepancyDto {
   @IsOptional()
   @IsString()
   @MaxLength(50)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   version?: string;
 }
