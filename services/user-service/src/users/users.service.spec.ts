@@ -859,6 +859,16 @@ describe('UsersService', () => {
 
       expect(await service.getActiveUserIds('org-uuid-1')).toEqual([]);
     });
+
+    it('caps the query so a single deactivation can never fan out an unbounded Kafka burst', async () => {
+      uorRepo.find.mockResolvedValue([]);
+
+      await service.getActiveUserIds('org-uuid-1');
+
+      expect(uorRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 10_000 }),
+      );
+    });
   });
 
   // ─── provision ────────────────────────────────────────────────────────────
@@ -1704,12 +1714,13 @@ describe('UsersService', () => {
   describe('getCountsByOrg', () => {
     it('returns counts grouped by org with values parsed as numbers', async () => {
       const qb = {
-        innerJoin:  jest.fn().mockReturnThis(),
-        select:     jest.fn().mockReturnThis(),
-        addSelect:  jest.fn().mockReturnThis(),
-        where:      jest.fn().mockReturnThis(),
-        andWhere:   jest.fn().mockReturnThis(),
-        groupBy:    jest.fn().mockReturnThis(),
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
           { orgId: 'org-1', total: '10', active: '7', inactive: '1', deleted: '2' },
         ]),
@@ -1728,12 +1739,13 @@ describe('UsersService', () => {
       // were never removed from the org — filtering on role_id IS NOT NULL
       // undercounts the org's real membership.
       const qb = {
-        innerJoin:  jest.fn().mockReturnThis(),
-        select:     jest.fn().mockReturnThis(),
-        addSelect:  jest.fn().mockReturnThis(),
-        where:      jest.fn().mockReturnThis(),
-        andWhere:   jest.fn().mockReturnThis(),
-        groupBy:    jest.fn().mockReturnThis(),
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
         // 2 org members total, only 1 currently holds a role — the roleless
         // member must still be counted as active (not removed, not deleted).
         getRawMany: jest.fn().mockResolvedValue([
@@ -1754,12 +1766,13 @@ describe('UsersService', () => {
       // were missing from "total" — the org's user list (which shows them badged
       // "Eliminado") had more rows than this card's total.
       const qb = {
-        innerJoin:  jest.fn().mockReturnThis(),
-        select:     jest.fn().mockReturnThis(),
-        addSelect:  jest.fn().mockReturnThis(),
-        where:      jest.fn().mockReturnThis(),
-        andWhere:   jest.fn().mockReturnThis(),
-        groupBy:    jest.fn().mockReturnThis(),
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
           { orgId: 'org-1', total: '8', active: '6', inactive: '0', deleted: '2' },
         ]),
@@ -1771,6 +1784,31 @@ describe('UsersService', () => {
       expect(qb.where).not.toHaveBeenCalledWith('uor.removed_at IS NULL');
       expect(qb.where).toHaveBeenCalledWith('u.is_super_admin = false');
       expect(result).toEqual([{ orgId: 'org-1', total: 8, active: 6, inactive: 0, deleted: 2 }]);
+    });
+
+    it('includes globally soft-deleted users in the query instead of letting TypeORM silently drop them from the join', async () => {
+      // Regression: `deletedAt` is a @DeleteDateColumn, so TypeORM adds an
+      // implicit "u.deleted_at IS NULL" to the innerJoin condition unless
+      // .withDeleted() is called — without it, globally-deleted users never
+      // reach the CASE WHEN expressions and vanish from "total"/"deleted" too.
+      const qb = {
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
+        getRawMany:  jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '3', active: '2', inactive: '0', deleted: '1' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(qb.withDeleted).toHaveBeenCalled();
+      expect(result).toEqual([{ orgId: 'org-1', total: 3, active: 2, inactive: 0, deleted: 1 }]);
     });
   });
 

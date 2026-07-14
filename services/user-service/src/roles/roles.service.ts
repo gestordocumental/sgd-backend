@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
@@ -18,6 +19,8 @@ import { RolePolicy } from './domain/role.policy';
 
 @Injectable()
 export class RolesService {
+  private readonly logger = new Logger(RolesService.name);
+
   constructor(
     @InjectRepository(Role)
     private readonly rolesRepository: Repository<Role>,
@@ -36,19 +39,29 @@ export class RolesService {
    * notification-service can push a live SSE update — without this, a user
    * with an active session keeps their old permission set (from the Redis
    * cache and/or their JWT) until the cache TTL expires or they log back in.
+   * Best-effort: the role's permissions have already been saved by the time
+   * this runs, so a failure here (e.g. a transient DB error on the lookup)
+   * must not make assignPermissions()/removePermission() reject.
    */
   private async notifyPermissionsChanged(roleId: string, orgId: string): Promise<void> {
-    const affected = await this.userOrgRoleRepository.find({
-      where: { roleId, orgId, removedAt: IsNull() },
-      select: { userId: true },
-    });
-    const userIds = [...new Set(affected.map((r) => r.userId))];
+    try {
+      const affected = await this.userOrgRoleRepository.find({
+        where: { roleId, orgId, removedAt: IsNull() },
+        select: { userId: true },
+      });
+      const userIds = [...new Set(affected.map((r) => r.userId))];
 
-    await Promise.all(
-      userIds.map((userId) => this.redis.del(`perms:${userId}:${orgId}`).catch(() => {})),
-    );
-    for (const userId of userIds) {
-      this.kafkaProducer.emitSafe(TOPICS.USER_PERMISSIONS_CHANGED, { userId, orgId });
+      await Promise.all(
+        userIds.map((userId) => this.redis.del(`perms:${userId}:${orgId}`).catch(() => {})),
+      );
+      for (const userId of userIds) {
+        this.kafkaProducer.emitSafe(TOPICS.USER_PERMISSIONS_CHANGED, { userId, orgId });
+      }
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify users of permission changes for role ${roleId}`,
+        (err as Error).stack,
+      );
     }
   }
 

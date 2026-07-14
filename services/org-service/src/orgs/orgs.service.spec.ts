@@ -10,6 +10,16 @@ import { UserClientService } from '../common/user-client/user-client.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
+/**
+ * update() fires notifyOrgDeactivated fire-and-forget (not awaited), so its
+ * internal chain (getActiveUserIds → emitSafe) may still be pending right
+ * after service.update() resolves. Flushing a macrotask lets any queued
+ * microtasks (however many links deep) settle before assertions run.
+ */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /** Returns a chainable QueryBuilder mock whose getMany resolves to rows. */
 function makeQbMock(rows: Org[]) {
   const qb: Record<string, jest.Mock> = {};
@@ -287,6 +297,7 @@ describe('OrgsService', () => {
     userClient.getActiveUserIds.mockResolvedValue(['user-1', 'user-2']);
 
     await service.update(org.id, { status: OrgStatus.INACTIVE });
+    await flushMicrotasks(); // let the fire-and-forget notification chain settle
 
     expect(userClient.getActiveUserIds).toHaveBeenCalledWith(org.id);
     expect(kafkaProducer.emitSafe).toHaveBeenCalledWith('user.org-deactivated', {

@@ -434,6 +434,10 @@ export class UserProfileService {
     const rows = await this.userOrgRoleRepository
       .createQueryBuilder('uor')
       .innerJoin('uor.user', 'u')
+      // Without this, TypeORM silently adds "u.deleted_at IS NULL" to the join
+      // condition (deletedAt is a @DeleteDateColumn) — globally-deleted users
+      // would never reach the CASE WHEN below and would vanish from "total" too.
+      .withDeleted()
       .select('uor.org_id', 'orgId')
       // total counts everyone ever associated with the org — including members
       // removed from it or globally deleted — so it matches what the org's user

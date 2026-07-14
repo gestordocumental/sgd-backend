@@ -16,6 +16,9 @@ import { userDisplayName, encodeCursor, decodeCursor, assertNotSelfAction } from
 
 @Injectable()
 export class UserOrgService {
+  // Safety cap for getActiveUserIds()'s Kafka fan-out — see its docblock below.
+  private static readonly MAX_ACTIVE_USER_IDS = 10_000;
+
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
@@ -64,12 +67,18 @@ export class UserOrgService {
 
   /**
    * Returns the IDs of users currently (non-removed) assigned to orgId.
-   * Used by org-service to proactively revoke sessions when an org is deactivated.
+   * Used by org-service to proactively revoke sessions when an org is deactivated
+   * (one Kafka event per user, fire-and-forget). Capped at MAX_ACTIVE_USER_IDS so a
+   * single deactivation can never fan out an unbounded burst of publishes — an org
+   * past this size isn't expected in practice, and any user left out simply
+   * self-corrects on their next JWT refresh, the same bounded window this feature
+   * narrows for everyone else.
    */
   async getActiveUserIds(orgId: string): Promise<string[]> {
     const rows = await this.userOrgRoleRepository.find({
       where: { orgId, removedAt: IsNull() },
       select: { userId: true },
+      take: UserOrgService.MAX_ACTIVE_USER_IDS,
     });
     return [...new Set(rows.map((r) => r.userId))];
   }

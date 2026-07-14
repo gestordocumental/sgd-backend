@@ -174,8 +174,11 @@ export class OrgsService {
     // without this, an access token issued before deactivation keeps working
     // (companyId + permissions are baked into the JWT) until it naturally
     // expires and the user hits /auth/refresh, which re-checks org status.
+    // Fire-and-forget: notifyOrgDeactivated already isolates its own errors,
+    // so awaiting it here would only add user-service's round-trip latency to
+    // this PATCH response for no benefit.
     if (before.status === OrgStatus.ACTIVE && updated.status === OrgStatus.INACTIVE) {
-      await this.notifyOrgDeactivated(updated.id);
+      void this.notifyOrgDeactivated(updated.id);
     }
 
     return updated;
