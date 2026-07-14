@@ -247,7 +247,7 @@ export class NotificationsConsumer
     if (topic === TOPICS.USER_ORG_REMOVED) {
       // Push SSE event to revoke the user's active browser session immediately.
       // The frontend listens for 'session-revoked' and clears the auth state.
-      this.handleOrgSessionSignal(raw, 'user.org-removed', 'session-revoked', 'Session revocation');
+      this.handleOrgSessionSignal(raw, topic, 'session-revoked', 'Session revocation');
       return;
     }
 
@@ -255,7 +255,7 @@ export class NotificationsConsumer
       // Same session-revoked SSE as user.org-removed — the frontend reacts by
       // exiting/switching away from that company context regardless of whether
       // the user lost membership or the company was deactivated.
-      this.handleOrgSessionSignal(raw, 'user.org-deactivated', 'session-revoked', 'Session revocation');
+      this.handleOrgSessionSignal(raw, topic, 'session-revoked', 'Session revocation');
       return;
     }
 
@@ -263,7 +263,7 @@ export class NotificationsConsumer
       // Tells the frontend to silently mint a fresh access token (so the JWT's
       // baked-in permissions claim is current) and refetch permission-gated
       // data — unlike session-revoked, the user's session stays open.
-      this.handleOrgSessionSignal(raw, 'user.permissions-changed', 'permissions-changed', 'Permissions-changed');
+      this.handleOrgSessionSignal(raw, topic, 'permissions-changed', 'Permissions-changed');
       return;
     }
 
