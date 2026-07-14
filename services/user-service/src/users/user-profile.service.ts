@@ -455,7 +455,9 @@ export class UserProfileService {
         `COUNT(DISTINCT CASE WHEN uor.removed_at IS NOT NULL OR u.deleted_at IS NOT NULL THEN u.id END)`,
         'deleted',
       )
-      .where('u.is_super_admin = false')
+      // Counts every user associated with the org regardless of their global
+      // isSuperAdmin flag — this chart must reflect real org membership as-is,
+      // not second-guess it based on an unrelated global privilege flag.
       .groupBy('uor.org_id')
       .getRawMany<{ orgId: string; total: string; active: string; inactive: string; deleted: string }>();
 

@@ -1782,8 +1782,48 @@ describe('UsersService', () => {
       const result = await service.getCountsByOrg();
 
       expect(qb.where).not.toHaveBeenCalledWith('uor.removed_at IS NULL');
-      expect(qb.where).toHaveBeenCalledWith('u.is_super_admin = false');
       expect(result).toEqual([{ orgId: 'org-1', total: 8, active: 6, inactive: 0, deleted: 2 }]);
+    });
+
+    it('does not exclude users flagged as global super admin from the org headcount', async () => {
+      // Regression: this chart must reflect real org membership as-is. A user's
+      // global isSuperAdmin flag is an unrelated platform-wide privilege — it
+      // must not make them invisible in the org they're actually assigned to.
+      const qb = {
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '4', active: '4', inactive: '0', deleted: '0' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      // getRawMany() is a canned mock, so it can't prove the real SQL includes
+      // super admins — instead inspect every string the query builder actually
+      // received (join condition, select/addSelect CASE WHEN expressions,
+      // where/andWhere) so an exclusion smuggled into any of them, not just a
+      // top-level .where(), would also be caught.
+      const allArgs = [
+        ...qb.innerJoin.mock.calls,
+        ...qb.select.mock.calls,
+        ...qb.addSelect.mock.calls,
+        ...qb.where.mock.calls,
+        ...qb.andWhere.mock.calls,
+      ].flat();
+      const stringArgs = allArgs.filter((arg): arg is string => typeof arg === 'string');
+      expect(stringArgs.length).toBeGreaterThan(0); // sanity check the builder was actually used
+      for (const arg of stringArgs) {
+        expect(arg.toLowerCase()).not.toContain('super_admin');
+        expect(arg.toLowerCase()).not.toContain('superadmin');
+      }
+      expect(result).toEqual([{ orgId: 'org-1', total: 4, active: 4, inactive: 0, deleted: 0 }]);
     });
 
     it('includes globally soft-deleted users in the query instead of letting TypeORM silently drop them from the join', async () => {
