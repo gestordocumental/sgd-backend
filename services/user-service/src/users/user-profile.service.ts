@@ -428,28 +428,39 @@ export class UserProfileService {
     return users.map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email }));
   }
 
-  async getCountsByOrg(): Promise<{ orgId: string; total: number; active: number; inactive: number }[]> {
+  async getCountsByOrg(): Promise<
+    { orgId: string; total: number; active: number; inactive: number; deleted: number }[]
+  > {
     const rows = await this.userOrgRoleRepository
       .createQueryBuilder('uor')
       .innerJoin('uor.user', 'u')
       .select('uor.org_id', 'orgId')
+      // total counts everyone ever associated with the org — including members
+      // removed from it or globally deleted — so it matches what the org's user
+      // list (which shows removed/deleted rows badged accordingly) actually has.
       .addSelect('COUNT(DISTINCT u.id)', 'total')
       .addSelect(
-        `COUNT(DISTINCT CASE WHEN u.is_active = true AND u.deleted_at IS NULL THEN u.id END)`,
+        `COUNT(DISTINCT CASE WHEN uor.removed_at IS NULL AND u.deleted_at IS NULL AND u.is_active = true THEN u.id END)`,
         'active',
       )
-      // A null role_id just means the member currently has no role assigned —
-      // they're still part of the org. Only removed_at marks them as no longer associated.
-      .where('uor.removed_at IS NULL')
-      .andWhere('u.is_super_admin = false')
+      .addSelect(
+        `COUNT(DISTINCT CASE WHEN uor.removed_at IS NULL AND u.deleted_at IS NULL AND u.is_active = false THEN u.id END)`,
+        'inactive',
+      )
+      .addSelect(
+        `COUNT(DISTINCT CASE WHEN uor.removed_at IS NOT NULL OR u.deleted_at IS NOT NULL THEN u.id END)`,
+        'deleted',
+      )
+      .where('u.is_super_admin = false')
       .groupBy('uor.org_id')
-      .getRawMany<{ orgId: string; total: string; active: string }>();
+      .getRawMany<{ orgId: string; total: string; active: string; inactive: string; deleted: string }>();
 
     return rows.map((r) => ({
       orgId:    r.orgId,
-      total:    parseInt(r.total,  10),
-      active:   parseInt(r.active, 10),
-      inactive: parseInt(r.total,  10) - parseInt(r.active, 10),
+      total:    parseInt(r.total,    10),
+      active:   parseInt(r.active,   10),
+      inactive: parseInt(r.inactive, 10),
+      deleted:  parseInt(r.deleted,  10),
     }));
   }
 }

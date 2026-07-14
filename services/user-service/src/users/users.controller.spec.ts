@@ -93,6 +93,7 @@ describe('UsersController', () => {
             completeRegistration: jest.fn(),
             resendInvitation: jest.fn(),
             removeAllFromOrg: jest.fn(),
+            getActiveUserIds: jest.fn(),
             getEffectivePermissions: jest.fn(),
           },
         },
@@ -528,7 +529,7 @@ describe('UsersController', () => {
 
   describe('countsByOrg', () => {
     it('delegates to service.getCountsByOrg', async () => {
-      const counts = [{ orgId: 'org-1', total: 10, active: 8, inactive: 2 }];
+      const counts = [{ orgId: 'org-1', total: 10, active: 7, inactive: 1, deleted: 2 }];
       usersService.getCountsByOrg.mockResolvedValue(counts);
 
       const result = await controller.countsByOrg(undefined as any);
@@ -606,6 +607,25 @@ describe('UsersController', () => {
 
     it('throws UnauthorizedException when internal token is invalid', async () => {
       await expect(controller.removeAllFromOrg('wrong-token', 'org-uuid-1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  // ─── GET /internal/orgs/:orgId/user-ids ──────────────────────────────────
+
+  describe('getActiveUserIds', () => {
+    it('delegates to service.getActiveUserIds when internal token is valid', async () => {
+      usersService.getActiveUserIds.mockResolvedValue(['user-1', 'user-2']);
+
+      const result = await controller.getActiveUserIds(INTERNAL_TOKEN, 'org-uuid-1');
+
+      expect(usersService.getActiveUserIds).toHaveBeenCalledWith('org-uuid-1');
+      expect(result).toEqual({ userIds: ['user-1', 'user-2'] });
+    });
+
+    it('throws UnauthorizedException when internal token is invalid', async () => {
+      await expect(controller.getActiveUserIds('wrong-token', 'org-uuid-1')).rejects.toThrow(
         UnauthorizedException,
       );
     });

@@ -48,6 +48,7 @@ El ticket de un solo uso evita que el JWT quede expuesto en logs de servidores y
 | `notification.send` | Consume | Notificación genérica desde cualquier servicio |
 | `user.invited` | Consume | Envía email de invitación con token de registro |
 | `user.org-removed` | Consume | Notifica al usuario que fue removido de una org |
+| `user.org-deactivated` | Consume | Notifica al usuario que la org fue desactivada (misma señal session-revoked) |
 | `user.super-admin-revoked` | Consume | Notifica al usuario la revocación de privilegios |
 | `auth.password-reset` | Consume | Envía email con link de recuperación de contraseña |
 

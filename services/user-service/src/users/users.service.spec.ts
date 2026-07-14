@@ -835,6 +835,32 @@ describe('UsersService', () => {
     });
   });
 
+  // ─── getActiveUserIds ─────────────────────────────────────────────────────
+
+  describe('getActiveUserIds', () => {
+    it('returns deduplicated userIds for non-removed memberships of the org', async () => {
+      const rows = [
+        makeUor({ userId: 'user-1' }),
+        makeUor({ userId: 'user-2' }),
+        makeUor({ userId: 'user-1' }), // duplicate (e.g. multiple roles)
+      ];
+      uorRepo.find.mockResolvedValue(rows as any);
+
+      const result = await service.getActiveUserIds('org-uuid-1');
+
+      expect(result).toEqual(['user-1', 'user-2']);
+      expect(uorRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { orgId: 'org-uuid-1', removedAt: expect.anything() } }),
+      );
+    });
+
+    it('returns empty array when the org has no members', async () => {
+      uorRepo.find.mockResolvedValue([]);
+
+      expect(await service.getActiveUserIds('org-uuid-1')).toEqual([]);
+    });
+  });
+
   // ─── provision ────────────────────────────────────────────────────────────
 
   describe('provision', () => {
@@ -1685,7 +1711,7 @@ describe('UsersService', () => {
         andWhere:   jest.fn().mockReturnThis(),
         groupBy:    jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
-          { orgId: 'org-1', total: '10', active: '8' },
+          { orgId: 'org-1', total: '10', active: '7', inactive: '1', deleted: '2' },
         ]),
       };
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
@@ -1693,14 +1719,14 @@ describe('UsersService', () => {
       const result = await service.getCountsByOrg();
 
       expect(result).toEqual([
-        { orgId: 'org-1', total: 10, active: 8, inactive: 2 },
+        { orgId: 'org-1', total: 10, active: 7, inactive: 1, deleted: 2 },
       ]);
     });
 
     it('counts org members regardless of whether they currently hold a role', async () => {
       // Regression: the total must include members whose role was revoked but who
-      // were never removed from the org (removed_at IS NULL) — filtering on
-      // role_id IS NOT NULL undercounts the org's real membership.
+      // were never removed from the org — filtering on role_id IS NOT NULL
+      // undercounts the org's real membership.
       const qb = {
         innerJoin:  jest.fn().mockReturnThis(),
         select:     jest.fn().mockReturnThis(),
@@ -1709,18 +1735,42 @@ describe('UsersService', () => {
         andWhere:   jest.fn().mockReturnThis(),
         groupBy:    jest.fn().mockReturnThis(),
         // 2 org members total, only 1 currently holds a role — the roleless
-        // member must still be counted since they were never removed from the org.
+        // member must still be counted as active (not removed, not deleted).
         getRawMany: jest.fn().mockResolvedValue([
-          { orgId: 'org-1', total: '2', active: '1' },
+          { orgId: 'org-1', total: '2', active: '2', inactive: '0', deleted: '0' },
         ]),
       };
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
 
       const result = await service.getCountsByOrg();
 
-      expect(qb.where).toHaveBeenCalledWith('uor.removed_at IS NULL');
       expect(qb.where).not.toHaveBeenCalledWith('uor.role_id IS NOT NULL');
-      expect(result).toEqual([{ orgId: 'org-1', total: 2, active: 1, inactive: 1 }]);
+      expect(result).toEqual([{ orgId: 'org-1', total: 2, active: 2, inactive: 0, deleted: 0 }]);
+    });
+
+    it('counts members removed from the org or globally deleted in the "deleted" bucket, not excluded from total', async () => {
+      // Regression: getCountsByOrg previously filtered out uor.removed_at rows
+      // entirely (uor.removed_at IS NULL in .where()), so removed/deleted members
+      // were missing from "total" — the org's user list (which shows them badged
+      // "Eliminado") had more rows than this card's total.
+      const qb = {
+        innerJoin:  jest.fn().mockReturnThis(),
+        select:     jest.fn().mockReturnThis(),
+        addSelect:  jest.fn().mockReturnThis(),
+        where:      jest.fn().mockReturnThis(),
+        andWhere:   jest.fn().mockReturnThis(),
+        groupBy:    jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '8', active: '6', inactive: '0', deleted: '2' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(qb.where).not.toHaveBeenCalledWith('uor.removed_at IS NULL');
+      expect(qb.where).toHaveBeenCalledWith('u.is_super_admin = false');
+      expect(result).toEqual([{ orgId: 'org-1', total: 8, active: 6, inactive: 0, deleted: 2 }]);
     });
   });
 

@@ -62,6 +62,18 @@ export class UserOrgService {
     return user;
   }
 
+  /**
+   * Returns the IDs of users currently (non-removed) assigned to orgId.
+   * Used by org-service to proactively revoke sessions when an org is deactivated.
+   */
+  async getActiveUserIds(orgId: string): Promise<string[]> {
+    const rows = await this.userOrgRoleRepository.find({
+      where: { orgId, removedAt: IsNull() },
+      select: { userId: true },
+    });
+    return [...new Set(rows.map((r) => r.userId))];
+  }
+
   async getCompanies(userId: string): Promise<string[]> {
     const rows = await this.userOrgRoleRepository.find({
       where: { userId, roleId: Not(IsNull()) },

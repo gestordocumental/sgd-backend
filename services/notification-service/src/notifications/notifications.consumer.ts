@@ -139,7 +139,7 @@ export class NotificationsConsumer
 
     await this.consumer.connect();
     await this.consumer.subscribe({
-      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED, TOPICS.USER_ORG_REMOVED, TOPICS.USER_SUPER_ADMIN_REVOKED, TOPICS.USER_DISABLED, TOPICS.PASSWORD_RESET],
+      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED, TOPICS.USER_ORG_REMOVED, TOPICS.USER_ORG_DEACTIVATED, TOPICS.USER_PERMISSIONS_CHANGED, TOPICS.USER_SUPER_ADMIN_REVOKED, TOPICS.USER_DISABLED, TOPICS.PASSWORD_RESET],
       fromBeginning: false,
     });
 
@@ -161,7 +161,7 @@ export class NotificationsConsumer
     });
 
     this.logger.log(
-      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}, ${TOPICS.USER_ORG_REMOVED}, ${TOPICS.USER_SUPER_ADMIN_REVOKED}, ${TOPICS.USER_DISABLED}, ${TOPICS.PASSWORD_RESET}]`,
+      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}, ${TOPICS.USER_ORG_REMOVED}, ${TOPICS.USER_ORG_DEACTIVATED}, ${TOPICS.USER_PERMISSIONS_CHANGED}, ${TOPICS.USER_SUPER_ADMIN_REVOKED}, ${TOPICS.USER_DISABLED}, ${TOPICS.PASSWORD_RESET}]`,
       'NotificationsConsumer',
     );
   }
@@ -232,6 +232,44 @@ export class NotificationsConsumer
       this.sseService.emit(raw.userId, { orgId: raw.orgId }, 'session-revoked');
       this.logger.log(
         `Session revocation SSE sent to user ${raw.userId} for org ${raw.orgId}`,
+        'NotificationsConsumer',
+      );
+      return;
+    }
+
+    if (topic === TOPICS.USER_ORG_DEACTIVATED) {
+      if (!isValidUserOrgRemovedPayload(raw)) {
+        this.logger.warn(
+          `[kafka] Invalid user.org-deactivated payload — skipping`,
+          'NotificationsConsumer',
+        );
+        return;
+      }
+      // Same session-revoked SSE as user.org-removed — the frontend reacts by
+      // exiting/switching away from that company context regardless of whether
+      // the user lost membership or the company was deactivated.
+      this.sseService.emit(raw.userId, { orgId: raw.orgId }, 'session-revoked');
+      this.logger.log(
+        `Session revocation SSE sent to user ${raw.userId} for deactivated org ${raw.orgId}`,
+        'NotificationsConsumer',
+      );
+      return;
+    }
+
+    if (topic === TOPICS.USER_PERMISSIONS_CHANGED) {
+      if (!isValidUserOrgRemovedPayload(raw)) {
+        this.logger.warn(
+          `[kafka] Invalid user.permissions-changed payload — skipping`,
+          'NotificationsConsumer',
+        );
+        return;
+      }
+      // Tells the frontend to silently mint a fresh access token (so the JWT's
+      // baked-in permissions claim is current) and refetch permission-gated
+      // data — unlike session-revoked, the user's session stays open.
+      this.sseService.emit(raw.userId, { orgId: raw.orgId }, 'permissions-changed');
+      this.logger.log(
+        `Permissions-changed SSE sent to user ${raw.userId} for org ${raw.orgId}`,
         'NotificationsConsumer',
       );
       return;

@@ -2,9 +2,12 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
+import type { Redis } from 'ioredis';
+import { KafkaProducerService, TOPICS } from '@sgd/common';
 import { Role, RoleScope } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
 import { UserOrgRole } from './entities/user-org-role.entity';
@@ -22,7 +25,32 @@ export class RolesService {
     private readonly permissionsRepository: Repository<Permission>,
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepository: Repository<UserOrgRole>,
+    @Inject('REDIS_CLIENT')
+    private readonly redis: Redis,
+    private readonly kafkaProducer: KafkaProducerService,
   ) {}
+
+  /**
+   * Invalidates the cached effective-permissions for every user currently
+   * holding this role, and emits USER_PERMISSIONS_CHANGED per user so the
+   * notification-service can push a live SSE update — without this, a user
+   * with an active session keeps their old permission set (from the Redis
+   * cache and/or their JWT) until the cache TTL expires or they log back in.
+   */
+  private async notifyPermissionsChanged(roleId: string, orgId: string): Promise<void> {
+    const affected = await this.userOrgRoleRepository.find({
+      where: { roleId, orgId, removedAt: IsNull() },
+      select: { userId: true },
+    });
+    const userIds = [...new Set(affected.map((r) => r.userId))];
+
+    await Promise.all(
+      userIds.map((userId) => this.redis.del(`perms:${userId}:${orgId}`).catch(() => {})),
+    );
+    for (const userId of userIds) {
+      this.kafkaProducer.emitSafe(TOPICS.USER_PERMISSIONS_CHANGED, { userId, orgId });
+    }
+  }
 
   // Returns system roles + custom roles for the given org
   findAll(orgId: string): Promise<Role[]> {
@@ -103,7 +131,9 @@ export class RolesService {
     const permissions = await this.resolvePermissions(dto.permissionIds);
 
     role.permissions = permissions;
-    return this.rolesRepository.save(role);
+    const saved = await this.rolesRepository.save(role);
+    await this.notifyPermissionsChanged(id, orgId);
+    return saved;
   }
 
   private async resolvePermissions(permissionIds: string[]): Promise<Permission[]> {
@@ -122,6 +152,8 @@ export class RolesService {
     RolePolicy.canManagePermissions(role, orgId);
 
     role.permissions = role.permissions.filter((p) => p.id !== permissionId);
-    return this.rolesRepository.save(role);
+    const saved = await this.rolesRepository.save(role);
+    await this.notifyPermissionsChanged(roleId, orgId);
+    return saved;
   }
 }
