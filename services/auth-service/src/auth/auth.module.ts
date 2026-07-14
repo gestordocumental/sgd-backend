@@ -6,6 +6,7 @@ import { AuthService } from "./auth.service";
 import { JwtKeyService } from "./jwt-key.service";
 import { Credential } from "./entities/credential.entity";
 import { UserClientModule } from "../user-client/user-client.module";
+import { OrgClientModule } from "../org-client/org-client.module";
 import { CredentialSeeder } from "./credential.seeder";
 import { AppLogger, KafkaModule, InternalGuard } from "@sgd/common";
 
@@ -15,6 +16,7 @@ import { AppLogger, KafkaModule, InternalGuard } from "@sgd/common";
     // Dynamic config: the service passes secret/expiresIn in each .sign()
     JwtModule.register({}),
     UserClientModule,
+    OrgClientModule,
     KafkaModule,
   ],
   controllers: [AuthController],

@@ -312,6 +312,34 @@ describe('DocumentUploadService', () => {
       expect(kafka.emit).toHaveBeenCalled();
     });
 
+    it('trims nombre/version from raw multipart fields before persisting the new version', async () => {
+      const oldDoc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
+      });
+      const newDoc = makeDoc({ id: makeId() });
+
+      let capturedArgs: any;
+      const FullModel: any = function (args: any) {
+        capturedArgs = args;
+        return newDoc;
+      };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
+      const logger  = { log: jest.fn(), warn: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await service.createNewVersion('org-1', oldDoc.id, makeFile(), {
+        nombre: '  New Name  ',
+        version: '  02  ',
+      });
+
+      expect(capturedArgs.datosDeclarados.nombre).toBe('New Name');
+      expect(capturedArgs.datosDeclarados.version).toBe('02');
+    });
+
     it('throws BadRequestException for version that is not exactly one increment', async () => {
       const oldDoc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'C', version: '01', fuente: DataSource.MANUAL } });
       const FullModel: any = function () { return makeDoc(); };

@@ -57,19 +57,53 @@ function makeModel(docOrNull: TypologyDocument | null = null) {
   Model.findOne  = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(docOrNull) });
   Model.find     = jest.fn().mockReturnValue({ sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue([]) });
   Model.updateOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }) });
+  Model.syncIndexes = jest.fn().mockResolvedValue([]);
   return { Model, instance };
 }
 
-let mockKafkaProducer: { send: jest.Mock };
+let mockKafkaProducer: { emitSafe: jest.Mock };
+let mockLogger: { log: jest.Mock; error: jest.Mock; warn: jest.Mock; debug: jest.Mock };
 
 // ── TypologiesService ──────────────────────────────────────────────────────
 
 describe('TypologiesService', () => {
   beforeEach(() => {
-    mockKafkaProducer = { send: jest.fn().mockResolvedValue(undefined) };
+    mockKafkaProducer = { emitSafe: jest.fn() };
+    mockLogger = { log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
   });
 
-  const makeService = (Model: any): TypologiesService => new TypologiesService(Model, mockKafkaProducer as any);
+  const makeService = (Model: any): TypologiesService =>
+    new TypologiesService(Model, mockKafkaProducer as any, mockLogger as any);
+
+  // ── onModuleInit ─────────────────────────────────────────────────────────
+
+  describe('onModuleInit()', () => {
+    it('syncs indexes silently on success', async () => {
+      const { Model } = makeModel();
+      const service = makeService(Model);
+
+      await service.onModuleInit();
+
+      expect(Model.syncIndexes).toHaveBeenCalled();
+      expect(mockLogger.error).not.toHaveBeenCalled();
+    });
+
+    it('logs an error instead of throwing when index sync fails (e.g. pre-existing duplicate ACTIVE codigos)', async () => {
+      const { Model } = makeModel();
+      const syncError = new Error('E11000 duplicate key error');
+      Model.syncIndexes = jest.fn().mockRejectedValue(syncError);
+      const service = makeService(Model);
+
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('unique-active-codigo constraint'),
+        expect.any(String),
+        'TypologiesService',
+      );
+    });
+  });
+
   // ── create ───────────────────────────────────────────────────────────────
 
   describe('create()', () => {
@@ -399,6 +433,25 @@ describe('TypologiesService', () => {
 
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
       expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
+    });
+
+    it('trims extracted nombre/codigo/version — a stray space must not look like a discrepancy or a different code', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
+      });
+      const { Model } = makeModel(doc);
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
+
+      const service = makeService(Model);
+      await service.applyExtractedMetadata('org-1', doc.id, {
+        nombre: '  Policy  ', codigo: '  POL-001  ', version: '  01  ',
+      });
+
+      expect(doc.metadataExtraida.nombre).toBe('Policy');
+      expect(doc.metadataExtraida.codigo).toBe('POL-001');
+      expect(doc.metadataExtraida.version).toBe('01');
+      expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
     });
 
     it('scenario B — sets PENDING_CONFIRMATION when no declared data', async () => {
