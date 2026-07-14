@@ -61,14 +61,14 @@ function makeModel(docOrNull: TypologyDocument | null = null) {
   return { Model, instance };
 }
 
-let mockKafkaProducer: { send: jest.Mock };
+let mockKafkaProducer: { emitSafe: jest.Mock };
 let mockLogger: { log: jest.Mock; error: jest.Mock; warn: jest.Mock; debug: jest.Mock };
 
 // ── TypologiesService ──────────────────────────────────────────────────────
 
 describe('TypologiesService', () => {
   beforeEach(() => {
-    mockKafkaProducer = { send: jest.fn().mockResolvedValue(undefined) };
+    mockKafkaProducer = { emitSafe: jest.fn() };
     mockLogger = { log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
   });
 

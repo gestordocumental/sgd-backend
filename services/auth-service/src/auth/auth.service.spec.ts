@@ -525,6 +525,19 @@ describe('AuthService', () => {
       await expect(service.refresh('valid.refresh.token')).rejects.toThrow(UnauthorizedException);
     });
 
+    it('throws ForbiddenException when the company-scoped token belongs to a now-inactive company', async () => {
+      // Regression: a refresh token issued before deactivation still carries
+      // a valid membership — refresh() must re-check company status on every
+      // rotation, not just at the original switchCompany() call.
+      jwtService.verify.mockReturnValue({ ...validPayload, companyId: 'org-id' });
+      redis.getdel.mockResolvedValue('1');
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserCompanies.mockResolvedValue(['org-id']);
+      orgClient.getOrgStatus.mockResolvedValue({ status: 'inactive' });
+
+      await expect(service.refresh('valid.refresh.token')).rejects.toThrow(ForbiddenException);
+    });
+
     it('throws UnauthorizedException when user not found in user-service during refresh', async () => {
       jwtService.verify.mockReturnValue(validPayload);
       redis.getdel.mockResolvedValue('1');
