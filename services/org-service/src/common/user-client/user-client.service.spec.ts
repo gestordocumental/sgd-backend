@@ -12,7 +12,7 @@ import { UserClientService } from './user-client.service';
 
 describe('UserClientService', () => {
   let service: UserClientService;
-  let httpService: { delete: jest.Mock };
+  let httpService: { delete: jest.Mock; get: jest.Mock };
 
   beforeAll(() => {
     jest.spyOn(Logger.prototype, 'error').mockReturnValue(undefined);
@@ -25,7 +25,7 @@ describe('UserClientService', () => {
   });
 
   beforeEach(async () => {
-    httpService = { delete: jest.fn() };
+    httpService = { delete: jest.fn(), get: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -127,5 +127,28 @@ describe('UserClientService', () => {
     // Only one retry delay (500ms for the first attempt)
     expect((service as any).sleep).toHaveBeenCalledTimes(1);
     expect((service as any).sleep).toHaveBeenCalledWith(500);
+  });
+
+  // ── getActiveUserIds ──────────────────────────────────────────────────────
+
+  describe('getActiveUserIds', () => {
+    it('calls the user-service GET endpoint with the correct URL and token, returning userIds', async () => {
+      httpService.get.mockReturnValue(of({ status: 200, data: { userIds: ['u1', 'u2'] } }));
+
+      await expect(service.getActiveUserIds('org-1')).resolves.toEqual(['u1', 'u2']);
+
+      expect(httpService.get).toHaveBeenCalledWith(
+        'http://localhost:3001/api/v1/users/internal/orgs/org-1/user-ids',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'x-internal-token': 'test-token' }),
+        }),
+      );
+    });
+
+    it('propagates errors from the circuit breaker to the caller', async () => {
+      httpService.get.mockReturnValue(throwError(() => ({ response: { status: 500 } })));
+
+      await expect(service.getActiveUserIds('org-1')).rejects.toBeDefined();
+    });
   });
 });

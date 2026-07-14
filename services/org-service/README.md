@@ -53,6 +53,7 @@ Gestiona las organizaciones (empresas) del sistema y su estructura interna: áre
 | Topic | Rol | Cuándo |
 |---|---|---|
 | `audit.log` | Produce | Acciones sobre organizaciones y estructura |
+| `user.org-deactivated` | Produce | Por cada usuario de la org, al desactivarla (fuerza el cierre de su sesión en esa empresa) |
 
 ## Scripts
 

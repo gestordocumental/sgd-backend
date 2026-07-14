@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
+import { KafkaProducerService } from '@sgd/common';
 import { RolesService } from './roles.service';
 import { Role, RoleScope } from './entities/role.entity';
 import { Permission, PermissionModule, PermissionAction } from './entities/permission.entity';
@@ -43,8 +44,21 @@ describe('RolesService', () => {
   let rolesRepo: jest.Mocked<Repository<Role>>;
   let permissionsRepo: jest.Mocked<Repository<Permission>>;
   let uorRepo: jest.Mocked<Repository<UserOrgRole>>;
+  let redis: { del: jest.Mock };
+  let kafkaProducer: { emitSafe: jest.Mock };
+
+  beforeAll(() => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+  });
+
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
 
   beforeEach(async () => {
+    redis = { del: jest.fn().mockResolvedValue(1) };
+    kafkaProducer = { emitSafe: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RolesService,
@@ -65,8 +79,10 @@ describe('RolesService', () => {
         },
         {
           provide: getRepositoryToken(UserOrgRole),
-          useValue: { countBy: jest.fn() },
+          useValue: { countBy: jest.fn(), find: jest.fn().mockResolvedValue([]) },
         },
+        { provide: 'REDIS_CLIENT', useValue: redis },
+        { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
     }).compile();
 
@@ -297,6 +313,74 @@ describe('RolesService', () => {
         NotFoundException,
       );
     });
+
+    it('invalidates the permission cache and emits USER_PERMISSIONS_CHANGED for every currently-assigned user', async () => {
+      const role = makeRole();
+      const perm = makePermission();
+      const dto = { permissionIds: [perm.id] };
+
+      rolesRepo.findOne.mockResolvedValue(role);
+      permissionsRepo.findBy.mockResolvedValue([perm]);
+      rolesRepo.save.mockResolvedValue({ ...role, permissions: [perm] });
+      uorRepo.find.mockResolvedValue([
+        { userId: 'user-1' },
+        { userId: 'user-2' },
+        { userId: 'user-1' }, // duplicate (e.g. multiple assignments) must be deduped
+      ] as UserOrgRole[]);
+
+      await service.assignPermissions(role.id, dto, ORG_ID);
+
+      expect(uorRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { roleId: role.id, orgId: ORG_ID, removedAt: expect.anything() } }),
+      );
+      expect(redis.del).toHaveBeenCalledWith(`perms:user-1:${ORG_ID}`);
+      expect(redis.del).toHaveBeenCalledWith(`perms:user-2:${ORG_ID}`);
+      expect(redis.del).toHaveBeenCalledTimes(2);
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith('user.permissions-changed', {
+        userId: 'user-1',
+        orgId: ORG_ID,
+      });
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith('user.permissions-changed', {
+        userId: 'user-2',
+        orgId: ORG_ID,
+      });
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not notify anyone when no user currently holds the role', async () => {
+      const role = makeRole();
+      const perm = makePermission();
+
+      rolesRepo.findOne.mockResolvedValue(role);
+      permissionsRepo.findBy.mockResolvedValue([perm]);
+      rolesRepo.save.mockResolvedValue({ ...role, permissions: [perm] });
+      uorRepo.find.mockResolvedValue([]);
+
+      await service.assignPermissions(role.id, { permissionIds: [perm.id] }, ORG_ID);
+
+      expect(redis.del).not.toHaveBeenCalled();
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
+    });
+
+    it('still resolves with the saved role when the best-effort notification lookup fails', async () => {
+      // Regression: the role's permissions are already saved by the time
+      // notifyPermissionsChanged runs — a transient failure in that best-effort
+      // step (e.g. the UserOrgRole lookup rejecting) must not make the whole
+      // assignPermissions() call reject and hide the fact that the save succeeded.
+      const role = makeRole();
+      const perm = makePermission();
+      const saved = { ...role, permissions: [perm] };
+
+      rolesRepo.findOne.mockResolvedValue(role);
+      permissionsRepo.findBy.mockResolvedValue([perm]);
+      rolesRepo.save.mockResolvedValue(saved);
+      uorRepo.find.mockRejectedValue(new Error('connection lost'));
+
+      const result = await service.assignPermissions(role.id, { permissionIds: [perm.id] }, ORG_ID);
+
+      expect(result).toEqual(saved);
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalled();
+    });
   });
 
   // ─── removePermission ─────────────────────────────────────────────────────
@@ -324,6 +408,24 @@ describe('RolesService', () => {
       await expect(
         service.removePermission(systemRole.id, 'perm-1', ORG_ID),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('invalidates the permission cache and emits USER_PERMISSIONS_CHANGED for every currently-assigned user', async () => {
+      const perm1 = makePermission({ id: 'perm-1' });
+      const perm2 = makePermission({ id: 'perm-2', action: PermissionAction.WRITE });
+      const role = makeRole({ permissions: [perm1, perm2] });
+
+      rolesRepo.findOne.mockResolvedValue(role);
+      rolesRepo.save.mockResolvedValue({ ...role, permissions: [perm2] });
+      uorRepo.find.mockResolvedValue([{ userId: 'user-1' }] as UserOrgRole[]);
+
+      await service.removePermission(role.id, perm1.id, ORG_ID);
+
+      expect(redis.del).toHaveBeenCalledWith(`perms:user-1:${ORG_ID}`);
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith('user.permissions-changed', {
+        userId: 'user-1',
+        orgId: ORG_ID,
+      });
     });
   });
 });

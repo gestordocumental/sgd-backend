@@ -47,12 +47,14 @@ function isValidPasswordResetPayload(raw: unknown): raw is PasswordResetPayload 
   );
 }
 
-interface UserOrgRemovedPayload {
+// Shared by user.org-removed, user.org-deactivated and user.permissions-changed —
+// all three carry just { userId, orgId } and are relayed to the browser as an SSE event.
+interface UserOrgEventPayload {
   userId: string;
   orgId: string;
 }
 
-function isValidUserOrgRemovedPayload(raw: unknown): raw is UserOrgRemovedPayload {
+function isValidUserOrgEventPayload(raw: unknown): raw is UserOrgEventPayload {
   if (!raw || typeof raw !== 'object') return false;
   const p = raw as Record<string, unknown>;
   return typeof p['userId'] === 'string' && typeof p['orgId'] === 'string';
@@ -139,7 +141,7 @@ export class NotificationsConsumer
 
     await this.consumer.connect();
     await this.consumer.subscribe({
-      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED, TOPICS.USER_ORG_REMOVED, TOPICS.USER_SUPER_ADMIN_REVOKED, TOPICS.USER_DISABLED, TOPICS.PASSWORD_RESET],
+      topics: [TOPICS.NOTIFICATION_SEND, TOPICS.USER_INVITED, TOPICS.USER_ORG_REMOVED, TOPICS.USER_ORG_DEACTIVATED, TOPICS.USER_PERMISSIONS_CHANGED, TOPICS.USER_SUPER_ADMIN_REVOKED, TOPICS.USER_DISABLED, TOPICS.PASSWORD_RESET],
       fromBeginning: false,
     });
 
@@ -161,7 +163,7 @@ export class NotificationsConsumer
     });
 
     this.logger.log(
-      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}, ${TOPICS.USER_ORG_REMOVED}, ${TOPICS.USER_SUPER_ADMIN_REVOKED}, ${TOPICS.USER_DISABLED}, ${TOPICS.PASSWORD_RESET}]`,
+      `Kafka consumer connected — listening on [${TOPICS.NOTIFICATION_SEND}, ${TOPICS.USER_INVITED}, ${TOPICS.USER_ORG_REMOVED}, ${TOPICS.USER_ORG_DEACTIVATED}, ${TOPICS.USER_PERMISSIONS_CHANGED}, ${TOPICS.USER_SUPER_ADMIN_REVOKED}, ${TOPICS.USER_DISABLED}, ${TOPICS.PASSWORD_RESET}]`,
       'NotificationsConsumer',
     );
   }
@@ -169,6 +171,29 @@ export class NotificationsConsumer
   async onApplicationShutdown() {
     await this.consumer?.disconnect();
     this.logger.log('Kafka consumer disconnected', 'NotificationsConsumer');
+  }
+
+  /**
+   * Validates a { userId, orgId } payload, pushes it as an SSE event, and logs
+   * the outcome — shared by user.org-removed, user.org-deactivated and
+   * user.permissions-changed, which only differ in the topic name, the SSE
+   * event name delivered to the browser, and the log verb.
+   */
+  private handleOrgSessionSignal(
+    raw: unknown,
+    topic: string,
+    eventName: 'session-revoked' | 'permissions-changed',
+    logVerb: string,
+  ): void {
+    if (!isValidUserOrgEventPayload(raw)) {
+      this.logger.warn(`[kafka] Invalid ${topic} payload — skipping`, 'NotificationsConsumer');
+      return;
+    }
+    this.sseService.emit(raw.userId, { orgId: raw.orgId }, eventName);
+    this.logger.log(
+      `${logVerb} SSE sent to user ${raw.userId} for org ${raw.orgId}`,
+      'NotificationsConsumer',
+    );
   }
 
   private async handleMessage({ topic, message }: EachMessagePayload) {
@@ -220,20 +245,25 @@ export class NotificationsConsumer
     }
 
     if (topic === TOPICS.USER_ORG_REMOVED) {
-      if (!isValidUserOrgRemovedPayload(raw)) {
-        this.logger.warn(
-          `[kafka] Invalid user.org-removed payload — skipping`,
-          'NotificationsConsumer',
-        );
-        return;
-      }
       // Push SSE event to revoke the user's active browser session immediately.
       // The frontend listens for 'session-revoked' and clears the auth state.
-      this.sseService.emit(raw.userId, { orgId: raw.orgId }, 'session-revoked');
-      this.logger.log(
-        `Session revocation SSE sent to user ${raw.userId} for org ${raw.orgId}`,
-        'NotificationsConsumer',
-      );
+      this.handleOrgSessionSignal(raw, topic, 'session-revoked', 'Session revocation');
+      return;
+    }
+
+    if (topic === TOPICS.USER_ORG_DEACTIVATED) {
+      // Same session-revoked SSE as user.org-removed — the frontend reacts by
+      // exiting/switching away from that company context regardless of whether
+      // the user lost membership or the company was deactivated.
+      this.handleOrgSessionSignal(raw, topic, 'session-revoked', 'Session revocation');
+      return;
+    }
+
+    if (topic === TOPICS.USER_PERMISSIONS_CHANGED) {
+      // Tells the frontend to silently mint a fresh access token (so the JWT's
+      // baked-in permissions claim is current) and refetch permission-gated
+      // data — unlike session-revoked, the user's session stays open.
+      this.handleOrgSessionSignal(raw, topic, 'permissions-changed', 'Permissions-changed');
       return;
     }
 
