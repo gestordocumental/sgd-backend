@@ -182,6 +182,36 @@ describe('NotificationsConsumer', () => {
     );
   });
 
+  it('dispatches when workflowId/workflowTitle are explicitly null (e.g. NO_FINAL_USER_ALERT, not tied to a workflow)', async () => {
+    // Regression: workflows.service.ts's notifyNoFinalUsers() sends
+    // workflowId/workflowTitle as null (not omitted) since the alert fires
+    // during workflow creation, before any workflow exists. The validator
+    // previously only accepted `undefined` for these fields, so `null`
+    // failed validation and the whole payload was silently dropped — no
+    // notification, no email, for every NO_FINAL_USER_ALERT ever sent.
+    const noFinalUserAlert = {
+      type: 'NO_FINAL_USER_ALERT',
+      recipientUserIds: ['admin-1'],
+      orgId: 'org-1',
+      workflowId: null,
+      workflowTitle: null,
+      message: 'Alerta: la tipología no tiene usuarios finales configurados.',
+      metadata: { typologyId: 'ty-1' },
+    };
+
+    await capturedEachMessage(makeMsg(TOPICS.NOTIFICATION_SEND, JSON.stringify(noFinalUserAlert)));
+
+    expect(notificationsService.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'NO_FINAL_USER_ALERT',
+        recipientUserIds: ['admin-1'],
+        workflowId: null,
+        workflowTitle: null,
+      }),
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it('warns and skips on invalid notification.send payload', async () => {
     const bad = { type: 'WORKFLOW_APPROVED' };
 

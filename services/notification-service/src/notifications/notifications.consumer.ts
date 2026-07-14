@@ -17,8 +17,10 @@ interface NotificationPayload {
   recipientUserIds: string[];
   orgId?: string | null;
   orgName?: string | null;
-  workflowId?: string;
-  workflowTitle?: string;
+  // Nullable: alerts not tied to a specific workflow (e.g. NO_FINAL_USER_ALERT,
+  // raised while creating a workflow before one exists) send these as null.
+  workflowId?: string | null;
+  workflowTitle?: string | null;
   message: string;
   metadata?: Record<string, unknown>;
   timestamp?: string;
@@ -96,8 +98,8 @@ function isValidNotificationPayload(raw: unknown): raw is NotificationPayload {
     typeof p['message'] === 'string' &&
     (orgId        === undefined || orgId        === null || typeof orgId        === 'string') &&
     (orgName      === undefined || orgName      === null || typeof orgName      === 'string') &&
-    (workflowId   === undefined || typeof workflowId   === 'string') &&
-    (workflowTitle === undefined || typeof workflowTitle === 'string') &&
+    (workflowId    === undefined || workflowId    === null || typeof workflowId    === 'string') &&
+    (workflowTitle === undefined || workflowTitle === null || typeof workflowTitle === 'string') &&
     (timestamp    === undefined || typeof timestamp    === 'string') &&
     (metadata === undefined || (metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)))
   );
