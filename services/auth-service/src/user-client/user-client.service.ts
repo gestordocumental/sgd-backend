@@ -47,7 +47,8 @@ export class UserClientService {
         errorThresholdPercentage: 75,
         resetTimeout:             10_000,
         volumeThreshold:          10,
-        errorFilter: (err: any) => isNonTrippingClientError(err?.response?.status),
+        errorFilter: (err: { response?: { status?: number } }) =>
+          isNonTrippingClientError(err?.response?.status),
       },
     );
 
