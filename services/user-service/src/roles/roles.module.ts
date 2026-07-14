@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { KafkaModule } from '@sgd/common';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
 import { UserOrgRole } from './entities/user-org-role.entity';
@@ -11,7 +12,7 @@ import { RolesController } from './roles.controller';
 import { PermissionsController } from './permissions.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Role, Permission, UserOrgRole, User])],
+  imports: [TypeOrmModule.forFeature([Role, Permission, UserOrgRole, User]), KafkaModule],
   controllers: [RolesController, PermissionsController],
   providers: [RolesService, PermissionsService, PermissionsSeeder],
   exports: [RolesService, PermissionsService],

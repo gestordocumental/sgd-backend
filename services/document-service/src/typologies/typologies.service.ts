@@ -1,15 +1,16 @@
 import {
-  Injectable, NotFoundException, ConflictException, BadRequestException,
+  Injectable, NotFoundException, ConflictException, BadRequestException, OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { FilterQuery, Model, Types } from 'mongoose';
+import * as Sentry from '@sentry/node';
 import {
   Typology, TypologyDocument, TypologyStatus, ExtractionStatus, DataSource, CreationSource,
 } from './schemas/typology.schema';
 import { CreateTypologyDto } from './dto/create-typology.dto';
 import { UpdateTypologyDto } from './dto/update-typology.dto';
 import { ResolveDiscrepancyDto, ResolveAction } from './dto/resolve-discrepancy.dto';
-import { KafkaProducerService, TOPICS, getClientIp, getCorrelationId } from '@sgd/common';
+import { KafkaProducerService, TOPICS, getClientIp, getCorrelationId, AppLogger } from '@sgd/common';
 
 /**
  * Determines whether `newVer` represents exactly a +1 increment over `oldVer` at the first differing segment, with all subsequent segments in `newVer` equal to zero.
@@ -43,6 +44,19 @@ function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   return true;
 }
 
+/**
+ * Trims a string value, collapsing an empty result to null. Used to normalize
+ * metadata coming from the extractor/upload paths, which — unlike the
+ * create/update DTOs — aren't run through class-transformer's @Transform.
+ * Without this, "D-MS-F-012" and "D-MS-F-012 " are distinct strings to Mongo's
+ * unique index, letting two "active" typologies for the same code coexist.
+ */
+function trimOrNull(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 interface OrgStructureNames {
   departamentoId: string;
   departamentoNombre: string;
@@ -53,12 +67,35 @@ interface OrgStructureNames {
 }
 
 @Injectable()
-export class TypologiesService {
+export class TypologiesService implements OnModuleInit {
   constructor(
     @InjectModel(Typology.name)
     private readonly model: Model<TypologyDocument>,
     private readonly kafkaProducer: KafkaProducerService,
+    private readonly logger: AppLogger,
   ) {}
+
+  /**
+   * Mongoose's default autoIndex silently fails to build an index if existing
+   * documents already violate it (e.g. duplicate ACTIVE typologies for the same
+   * codigo) — the app boots normally and the constraint is just never enforced,
+   * with nothing but an unlistened connection event to show for it. Forcing an
+   * explicit syncIndexes() here surfaces that failure loudly instead.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.model.syncIndexes();
+    } catch (err) {
+      Sentry.captureException(err);
+      this.logger.error(
+        'Failed to sync typology indexes — the unique-active-codigo constraint may not be enforced. ' +
+          'This usually means duplicate ACTIVE typologies already exist for the same (orgId, codigo); ' +
+          'find and resolve them, then restart this service.',
+        err instanceof Error ? err.stack : String(err),
+        'TypologiesService',
+      );
+    }
+  }
 
   private emitAuditLog(params: {
     actorId: string;
@@ -153,10 +190,11 @@ export class TypologiesService {
     }
   }
 
-  findAll(orgId: string, page = 1, limit = 20): Promise<TypologyDocument[]> {
+  findAll(orgId: string, page = 1, limit = 20, status?: TypologyStatus): Promise<TypologyDocument[]> {
     const skip = (page - 1) * limit;
+    const filter: FilterQuery<TypologyDocument> = status ? { orgId, typologyStatus: status } : { orgId };
     return this.model
-      .find({ orgId, typologyStatus: TypologyStatus.ACTIVE })
+      .find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -267,10 +305,14 @@ export class TypologiesService {
 
     const hasDeclared = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
 
+    const nombre  = trimOrNull(extracted.nombre);
+    const codigo  = trimOrNull(extracted.codigo);
+    const version = trimOrNull(extracted.version);
+
     doc.metadataExtraida = {
-      nombre:      extracted.nombre,
-      codigo:      extracted.codigo,
-      version:     extracted.version,
+      nombre,
+      codigo,
+      version,
       extractedAt: new Date(),
       discrepancias: [],
     };
@@ -278,9 +320,9 @@ export class TypologiesService {
     if (hasDeclared) {
       // Scenario A — compare with declared data
       const discrepancias = [];
-      if (extracted.nombre  && extracted.nombre  !== doc.datosDeclarados.nombre)  discrepancias.push({ campo: 'nombre',  valorDeclarado: doc.datosDeclarados.nombre!,  valorExtraido: extracted.nombre });
-      if (extracted.codigo  && extracted.codigo  !== doc.datosDeclarados.codigo)  discrepancias.push({ campo: 'codigo',  valorDeclarado: doc.datosDeclarados.codigo!,  valorExtraido: extracted.codigo });
-      if (extracted.version && extracted.version !== doc.datosDeclarados.version) discrepancias.push({ campo: 'version', valorDeclarado: doc.datosDeclarados.version!, valorExtraido: extracted.version });
+      if (nombre  && nombre  !== doc.datosDeclarados.nombre)  discrepancias.push({ campo: 'nombre',  valorDeclarado: doc.datosDeclarados.nombre!,  valorExtraido: nombre });
+      if (codigo  && codigo  !== doc.datosDeclarados.codigo)  discrepancias.push({ campo: 'codigo',  valorDeclarado: doc.datosDeclarados.codigo!,  valorExtraido: codigo });
+      if (version && version !== doc.datosDeclarados.version) discrepancias.push({ campo: 'version', valorDeclarado: doc.datosDeclarados.version!, valorExtraido: version });
 
       doc.metadataExtraida.discrepancias = discrepancias;
       doc.documento.extractionStatus = discrepancias.length > 0 ? ExtractionStatus.DISCREPANCY : ExtractionStatus.COMPLETED;
@@ -328,9 +370,14 @@ export class TypologiesService {
     if (dto.action === ResolveAction.KEEP_DECLARED) {
       // No change to datosDeclarados
     } else if (dto.action === ResolveAction.ADOPT_EXTRACTED) {
-      doc.datosDeclarados.nombre  = doc.metadataExtraida.nombre;
-      doc.datosDeclarados.codigo  = doc.metadataExtraida.codigo;
-      doc.datosDeclarados.version = doc.metadataExtraida.version;
+      // A null extracted field means the extractor simply couldn't find that piece of
+      // data in the document — it's not a signal to blank out an already-declared value.
+      // Falling back to the existing declared value avoids silently downgrading a
+      // complete (ACTIVE) typology to INCOMPLETE — which would make it vanish from the
+      // default "active" view — just because e.g. no version string was found.
+      doc.datosDeclarados.nombre  = doc.metadataExtraida.nombre  ?? doc.datosDeclarados.nombre;
+      doc.datosDeclarados.codigo  = doc.metadataExtraida.codigo  ?? doc.datosDeclarados.codigo;
+      doc.datosDeclarados.version = doc.metadataExtraida.version ?? doc.datosDeclarados.version;
       doc.datosDeclarados.fuente  = DataSource.CONFIRMED_FROM_EXTRACTION;
     } else {
       // MANUAL_OVERRIDE

@@ -27,6 +27,7 @@ import { JwtKeyService } from './jwt-key.service';
 import { Credential } from './entities/credential.entity';
 import { AppLogger, KafkaProducerService } from '@sgd/common';
 import { UserClientService } from '../user-client/user-client.service';
+import { OrgClientService } from '../org-client/org-client.service';
 
 // ── Connection helpers ────────────────────────────────────────────────────────
 
@@ -111,6 +112,13 @@ describe('AuthService — integration', () => {
             getUserInfo:                jest.fn().mockResolvedValue({ isSuperAdmin: false }),
             getUserCompanies:           jest.fn().mockResolvedValue(['org-test-1']),
             getUserEffectivePermissions:jest.fn().mockResolvedValue([]),
+          },
+        },
+        // OrgClientService is HTTP-only; mock it as if every test org is active
+        {
+          provide: OrgClientService,
+          useValue: {
+            getOrgStatus: jest.fn().mockResolvedValue({ status: 'active' }),
           },
         },
         {

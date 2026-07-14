@@ -19,6 +19,7 @@ import { Credential, CredentialStatus } from "./entities/credential.entity";
 import { ProvisionCredentialDto } from "./dto/provision-credentials.dto";
 import { LoginDto } from "./dto/login.dto";
 import { UserClientService } from "../user-client/user-client.service";
+import { OrgClientService } from "../org-client/org-client.service";
 import { JwtKeyService } from "./jwt-key.service";
 import { AppLogger, KafkaProducerService, TOPICS, getCorrelationId } from "@sgd/common";
 import { parseDurationToSeconds } from "./utils/parse-duration";
@@ -82,6 +83,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @Inject("REDIS_CLIENT") private readonly redis: Redis,
     private readonly userClientService: UserClientService,
+    private readonly orgClientService: OrgClientService,
     private readonly jwtKeyService: JwtKeyService,
     private readonly kafkaProducer: KafkaProducerService,
     private readonly logger: AppLogger,
@@ -296,6 +298,12 @@ export class AuthService {
       });
     }
 
+    // A company-scoped refresh token issued before the company was deactivated
+    // still passes the membership check above — re-validate status on every
+    // rotation so a stale token can't keep renewing access to a deactivated company.
+    if (payload.companyId) {
+      await this.assertCompanyActive(payload.companyId);
+    }
     let permissions: string[] | undefined;
     if (payload.companyId) {
       const rawPermissions =
@@ -533,6 +541,24 @@ export class AuthService {
   }
 
   /**
+   * Throws ForbiddenException unless companyId is currently active in org-service.
+   * Shared by switchCompany() (entering a company context) and refresh()
+   * (renewing an already-scoped token) — a company-scoped refresh token issued
+   * before deactivation still carries a valid membership, so refresh() must
+   * re-check status on every rotation, not just at the original switch.
+   */
+  private async assertCompanyActive(companyId: string): Promise<void> {
+    const { status } = await this.orgClientService.getOrgStatus(companyId);
+    if (status !== "active") {
+      throw new ForbiddenException({
+        message: `Company ${companyId} is not active`,
+        errorCode: "COMPANY_NOT_ACTIVE",
+        params: { companyId },
+      });
+    }
+  }
+
+  /**
    * Validates the user belongs to companyId and returns a scoped token pair.
    */
   async switchCompany(userId: string, companyId: string) {
@@ -545,6 +571,13 @@ export class AuthService {
         params: { companyId },
       });
     }
+
+    // Reject entering the context of a deactivated company — membership alone
+    // isn't enough. Without this, a super admin (or any multi-company user)
+    // could still select and act inside a company that was deliberately
+    // deactivated, since deactivation only flips a flag in org-service and
+    // doesn't revoke the user's org membership record in user-service.
+    await this.assertCompanyActive(companyId);
 
     const credential = await this.credentialRepo.findOne({
       where: { userId },

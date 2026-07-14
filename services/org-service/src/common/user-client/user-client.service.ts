@@ -101,6 +101,30 @@ export class UserClientService {
     }
   }
 
+  /**
+   * Returns the IDs of users currently (non-removed) assigned to orgId.
+   * Used to proactively revoke sessions when an org is deactivated — best-effort,
+   * callers should treat failures as non-fatal to the org status change itself.
+   */
+  async getActiveUserIds(orgId: string): Promise<string[]> {
+    const correlationId = getCorrelationId();
+    const url = `${this.userServiceUrl}/api/v1/users/internal/orgs/${orgId}/user-ids`;
+
+    const response = await this.fireWithCb<{ data: { userIds: string[] } }>(() =>
+      firstValueFrom(
+        this.httpService
+          .get<{ userIds: string[] }>(url, {
+            headers: {
+              'x-internal-token':      this.internalToken,
+              [CORRELATION_ID_HEADER]: correlationId,
+            },
+          })
+          .pipe(timeout(this.timeoutMs)),
+      ),
+    );
+    return response.data.userIds;
+  }
+
   protected sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

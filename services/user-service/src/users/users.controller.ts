@@ -251,6 +251,20 @@ export class UsersController {
     await this.usersService.removeAllFromOrg(orgId);
   }
 
+  @ApiOperation({ summary: 'Get IDs of users currently assigned to an org — internal only, used when an org is deactivated' })
+  @ApiSecurity('internal-token')
+  @ApiParam({ name: 'orgId', format: 'uuid' })
+  @Get("internal/orgs/:orgId/user-ids")
+  async getActiveUserIds(
+    @Headers("x-internal-token") internalToken: string,
+    @Param("orgId", new ParseUUIDPipe({ version: '4' })) orgId: string,
+  ): Promise<{ userIds: string[] }> {
+    // Only org-service is authorized to call this endpoint
+    this.verifyInternalToken(internalToken, ['INTERNAL_TOKEN_ORG_USER']);
+    const userIds = await this.usersService.getActiveUserIds(orgId);
+    return { userIds };
+  }
+
   @ApiOperation({ summary: 'Get effective permissions for a user in an org (internal only)' })
   @ApiSecurity('internal-token')
   @ApiParam({ name: 'id', format: 'uuid' })

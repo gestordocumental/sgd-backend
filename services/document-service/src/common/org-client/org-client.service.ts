@@ -6,6 +6,17 @@ import { AppLogger, CORRELATION_ID_HEADER } from '@sgd/common';
 import { getCorrelationId } from '@sgd/common';
 import CircuitBreaker = require('opossum');
 
+/**
+ * True for 4xx statuses that are deterministic client/business errors (not found,
+ * forbidden, validation) — repeating the exact same request wouldn't succeed, so
+ * they must not count as a circuit failure. 408 (timeout) and 429 (rate limited)
+ * are deliberately excluded: they signal org-service is struggling, not a bad
+ * request, so they must trip the circuit the same way a 5xx would.
+ */
+export function isNonTrippingClientError(status: unknown): boolean {
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 export interface ResolveStructureItem {
   department: string;
   area?: string;
@@ -64,11 +75,8 @@ export class OrgClientService {
         errorThresholdPercentage: 50,
         resetTimeout:             30_000,
         volumeThreshold:          3,
-        errorFilter:              (err: { response?: { status?: number } }) => {
-          const status = err?.response?.status;
-          // 4xx are business-logic errors, not infrastructure failures — don't trip the circuit
-          return status != null && status >= 400 && status < 500;
-        },
+        errorFilter:              (err: { response?: { status?: number } }) =>
+          isNonTrippingClientError(err?.response?.status),
       },
     );
     this.cb.on('open',     () => this.logger.warn('[circuit] org-service OPEN — failing fast', 'OrgClientService'));

@@ -7,6 +7,7 @@ export const TOPICS = {
   USER_INVITED: 'user.invited',
   PASSWORD_RESET: 'auth.password-reset',
   USER_ORG_REMOVED: 'user.org-removed',
+  USER_ORG_DEACTIVATED: 'user.org-deactivated',
   USER_SUPER_ADMIN_REVOKED: 'user.super-admin-revoked',
   USER_DISABLED: 'user.disabled',
   USER_PERMISSIONS_CHANGED: 'user.permissions-changed',

@@ -169,7 +169,36 @@ export class OrgsService {
       }
       this.emitAuditLog('COMPANY_UPDATED', updated, actorId, { changes });
     }
+
+    // Proactively kick affected users out of this company's session context —
+    // without this, an access token issued before deactivation keeps working
+    // (companyId + permissions are baked into the JWT) until it naturally
+    // expires and the user hits /auth/refresh, which re-checks org status.
+    // Fire-and-forget: notifyOrgDeactivated already isolates its own errors,
+    // so awaiting it here would only add user-service's round-trip latency to
+    // this PATCH response for no benefit.
+    if (before.status === OrgStatus.ACTIVE && updated.status === OrgStatus.INACTIVE) {
+      void this.notifyOrgDeactivated(updated.id);
+    }
+
     return updated;
+  }
+
+  private async notifyOrgDeactivated(orgId: string): Promise<void> {
+    try {
+      const userIds = await this.userClient.getActiveUserIds(orgId);
+      for (const userId of userIds) {
+        this.kafkaProducer.emitSafe(TOPICS.USER_ORG_DEACTIVATED, { userId, orgId });
+      }
+    } catch (err) {
+      // Best-effort: the org status change itself must not fail because the
+      // notification fan-out couldn't reach user-service. Affected sessions
+      // will still be blocked on their next token refresh.
+      this.logger.error(
+        `Failed to notify users of org ${orgId} deactivation`,
+        (err as Error).stack,
+      );
+    }
   }
 
   async remove(id: string, actorId?: string): Promise<void> {
