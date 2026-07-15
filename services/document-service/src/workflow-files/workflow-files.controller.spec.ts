@@ -1,4 +1,4 @@
-import { BadRequestException, StreamableFile } from '@nestjs/common';
+import { BadRequestException, ParseBoolPipe, StreamableFile } from '@nestjs/common';
 import { PassThrough } from 'stream';
 import { WorkflowFilesController } from './workflow-files.controller';
 import { WorkflowFileUploadResponseDto } from './dto/workflow-file-upload-response.dto';
@@ -131,6 +131,21 @@ describe('WorkflowFilesController', () => {
         'application/pdf',
         false,
       );
+    });
+
+    // The controller declares @Body('forceAttachment', new ParseBoolPipe({ optional:
+    // true })) — NestJS's HTTP pipeline invokes that pipe before the handler runs, so a
+    // direct method call here (as in the tests above) bypasses it entirely. What's worth
+    // unit-testing is our specific pipe configuration, not that Nest invokes pipes (that's
+    // framework behavior). A JSON body sends real booleans, but any client posting the
+    // literal string "false" must not have it silently treated as truthy — that would
+    // force attachment and defeat the whole point of requesting an inline PDF preview.
+    it('the forceAttachment ParseBoolPipe coerces "false"/"true" strings, and lets a missing value through unchanged', async () => {
+      const pipe = new ParseBoolPipe({ optional: true });
+
+      await expect(pipe.transform('false', {} as any)).resolves.toBe(false);
+      await expect(pipe.transform('true', {} as any)).resolves.toBe(true);
+      await expect(pipe.transform(undefined as any, {} as any)).resolves.toBeUndefined();
     });
 
     it('throws BadRequestException when storageKey is empty / not provided', async () => {

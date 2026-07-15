@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Param,
+  ParseBoolPipe,
   Post,
   Res,
   StreamableFile,
@@ -96,7 +97,7 @@ export class WorkflowFilesController {
     @Body('storageKey') storageKey: string,
     @Body('originalName') originalName?: string,
     @Body('mimeType') mimeType?: string,
-    @Body('forceAttachment') forceAttachment?: boolean,
+    @Body('forceAttachment', new ParseBoolPipe({ optional: true })) forceAttachment?: boolean,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     if (!storageKey) throw new BadRequestException('storageKey es requerido');
     return this.service.getSignedUrl(orgId, storageKey, originalName, mimeType, forceAttachment ?? true);
