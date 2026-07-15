@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Param,
+  ParseBoolPipe,
   Post,
   Res,
   StreamableFile,
@@ -85,7 +86,9 @@ export class WorkflowFilesController {
     description:
       'Genera una URL R2 pre-firmada válida por SIGNED_URL_EXPIRY segundos (por defecto 5 min). ' +
       'Llamar on-demand (ej. al hacer clic en "Descargar") — la respuesta incluye `expiresAt` ' +
-      'para que el frontend omita una nueva petición si la URL cacheada sigue vigente.',
+      'para que el frontend omita una nueva petición si la URL cacheada sigue vigente. ' +
+      '`forceAttachment` (default true) fuerza Content-Disposition: attachment para cualquier ' +
+      'tipo; pasar false permite que un PDF se sirva inline para previsualizarlo en el navegador.',
   })
   @ApiOkResponse({ schema: { example: { signedUrl: 'https://...', expiresAt: '2025-01-01T00:00:00Z' } } })
   @Post('signed-url')
@@ -94,9 +97,10 @@ export class WorkflowFilesController {
     @Body('storageKey') storageKey: string,
     @Body('originalName') originalName?: string,
     @Body('mimeType') mimeType?: string,
+    @Body('forceAttachment', new ParseBoolPipe({ optional: true })) forceAttachment?: boolean,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     if (!storageKey) throw new BadRequestException('storageKey es requerido');
-    return this.service.getSignedUrl(orgId, storageKey, originalName, mimeType);
+    return this.service.getSignedUrl(orgId, storageKey, originalName, mimeType, forceAttachment ?? true);
   }
 
   @ApiOperation({
