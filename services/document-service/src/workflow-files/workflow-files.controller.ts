@@ -115,8 +115,8 @@ export class WorkflowFilesController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     if (!storageKey) throw new BadRequestException('storageKey es requerido');
-    const buffer = await this.service.downloadContent(orgId, storageKey);
-    res.setHeader('Content-Type', mimeType ?? 'application/octet-stream');
+    const { buffer, contentType } = await this.service.downloadContent(orgId, storageKey, mimeType);
+    res.setHeader('Content-Type', contentType);
     return new StreamableFile(buffer);
   }
 

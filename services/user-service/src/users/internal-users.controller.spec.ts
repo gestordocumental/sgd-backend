@@ -89,6 +89,47 @@ describe('InternalUsersController', () => {
     });
   });
 
+  describe('batchDisplayNames()', () => {
+    it('returns display names without email, falling back to null (not email) when unnamed', async () => {
+      const users = [
+        { id: 'u-1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+        { id: 'u-2', firstName: '',     lastName: '',     email: 'noname@example.com' },
+      ];
+      usersService.findManyByIds.mockResolvedValue(users as any);
+
+      const result = await controller.batchDisplayNames({ ids: ['u-1', 'u-2'] });
+
+      expect(usersService.findManyByIds).toHaveBeenCalledWith(['u-1', 'u-2']);
+      expect(result).toEqual([
+        { id: 'u-1', displayName: 'Jane Doe' },
+        { id: 'u-2', displayName: null },
+      ]);
+      // Regression guard: email must never appear in this contract.
+      for (const entry of result) {
+        expect(entry).not.toHaveProperty('email');
+      }
+    });
+
+    it('throws BadRequestException for an empty ids array', async () => {
+      await expect(
+        controller.batchDisplayNames({ ids: [] }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when ids array exceeds 500 entries', async () => {
+      const ids = Array.from({ length: 501 }, (_, i) => `user-${i}`);
+      await expect(
+        controller.batchDisplayNames({ ids }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when any id is an empty string', async () => {
+      await expect(
+        controller.batchDisplayNames({ ids: ['valid-id', ''] }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
   // ── Security contract ──────────────────────────────────────────────────────
 
   describe('security contract', () => {
@@ -101,11 +142,18 @@ describe('InternalUsersController', () => {
         expect(guards).toContain(InternalGuard);
       });
 
-      it('restricts batchByIds to INTERNAL_TOKEN_NOTIF_USER and INTERNAL_TOKEN_WORKFLOW_USER', () => {
-        // workflow-service also needs this endpoint to resolve actorId -> name
-        // for the workflow timeline, without requiring the viewer to hold USERS:READ.
+      it('restricts batchByIds to INTERNAL_TOKEN_NOTIF_USER only — it returns email, so workflow-service must not hold this token', () => {
+        // workflow-service resolves display names via batch-display-names
+        // instead, which never exposes email. batchByIds staying
+        // notif-only prevents an unrelated viewer (no USERS:READ) from ever
+        // seeing another user's email through the workflow timeline.
         const keys = (Reflect.getMetadata(INTERNAL_TOKEN_KEYS_META, InternalUsersController.prototype.batchByIds) ?? []) as string[];
-        expect(keys).toEqual(expect.arrayContaining([NOTIF_KEY, WORKFLOW_KEY]));
+        expect(keys).toEqual([NOTIF_KEY]);
+      });
+
+      it('restricts batchDisplayNames to INTERNAL_TOKEN_WORKFLOW_USER only', () => {
+        const keys = (Reflect.getMetadata(INTERNAL_TOKEN_KEYS_META, InternalUsersController.prototype.batchDisplayNames) ?? []) as string[];
+        expect(keys).toEqual([WORKFLOW_KEY]);
       });
 
       it('restricts byPosition to INTERNAL_TOKEN_WORKFLOW_USER', () => {
@@ -163,10 +211,20 @@ describe('InternalUsersController', () => {
         expect(() => guard.canActivate(makeCtx({ 'x-internal-token': 'notif-token' }))).toThrow(UnauthorizedException);
       });
 
-      it('accepts the workflow token for batchByIds (allowed alongside the notif token)', () => {
+      it('rejects the workflow token for batchByIds — that endpoint returns email and must stay notif-only', () => {
         const guard = makeGuard(
           { [NOTIF_KEY]: 'notif-token', [WORKFLOW_KEY]: 'workflow-token' },
-          [NOTIF_KEY, WORKFLOW_KEY], // real metadata for batchByIds
+          [NOTIF_KEY], // real metadata for batchByIds
+        );
+        expect(() => guard.canActivate(makeCtx({ 'x-internal-token': 'workflow-token' }))).toThrow(
+          UnauthorizedException,
+        );
+      });
+
+      it('accepts the workflow token for batchDisplayNames', () => {
+        const guard = makeGuard(
+          { [NOTIF_KEY]: 'notif-token', [WORKFLOW_KEY]: 'workflow-token' },
+          [WORKFLOW_KEY], // real metadata for batchDisplayNames
         );
         expect(guard.canActivate(makeCtx({ 'x-internal-token': 'workflow-token' }))).toBe(true);
       });

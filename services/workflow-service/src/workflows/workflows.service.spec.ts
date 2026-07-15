@@ -319,9 +319,9 @@ describe('WorkflowsService', () => {
       dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
       userClientService.getUsersByIds.mockResolvedValue(
         new Map([
-          ['creator-1', { id: 'creator-1', email: 'c@test.com', fullName: 'Carla Creator' }],
-          ['approver-1', { id: 'approver-1', email: 'a@test.com', fullName: 'Ana Approver' }],
-          ['final-1', { id: 'final-1', email: 'f@test.com', fullName: 'Felipe Final' }],
+          ['creator-1', { id: 'creator-1', displayName: 'Carla Creator' }],
+          ['approver-1', { id: 'approver-1', displayName: 'Ana Approver' }],
+          ['final-1', { id: 'final-1', displayName: 'Felipe Final' }],
         ]),
       );
 
@@ -335,6 +335,25 @@ describe('WorkflowsService', () => {
         'approver-1': 'Ana Approver',
         'final-1':    'Felipe Final',
       });
+    });
+
+    it('omits a participant with displayName: null from participantNames, instead of leaking a null or falling back to email', async () => {
+      // Regression: batch-display-names returns displayName: null (never
+      // email) for a user with no first/last name set. That must not end up
+      // as a null value in participantNames (Record<string, string>) — the
+      // frontend's "unknown user" fallback handles a missing key already.
+      const { service, workflowRepo, actionRepo, dataSource, userClientService } = buildService();
+      const wf = makeWorkflow({ createdBy: 'creator-1', approvalSteps: [], attachments: [] });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      userClientService.getUsersByIds.mockResolvedValue(
+        new Map([['creator-1', { id: 'creator-1', displayName: null }]]),
+      );
+
+      const result = await service.findOne('wf-1', makeUser());
+
+      expect(result.participantNames).toEqual({});
     });
 
     it('omits a participant from the map instead of failing when user-service could not resolve it', async () => {
@@ -529,11 +548,9 @@ describe('WorkflowsService', () => {
     });
 
     it('returns mapped timeline events', async () => {
-      const { service, workflowRepo, timelineService, actionRepo, dataSource } = buildService();
+      const { service, workflowRepo, timelineService } = buildService();
       const wf = makeWorkflow({ approvalSteps: [], attachments: [] });
       workflowRepo.findOne.mockResolvedValue(wf);
-      actionRepo.find.mockResolvedValue([]);
-      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
       timelineService.getTimeline.mockResolvedValue([
         {
           id: 'tl-1',
@@ -549,13 +566,38 @@ describe('WorkflowsService', () => {
       expect(result).toHaveLength(1);
     });
 
-    it('resolves actor names via user-service so the timeline does not depend on the viewer holding USERS:READ', async () => {
+    it('validates access without loading actions/admin-cycles or resolving participant names — that work is wasted since the DTO is discarded here', async () => {
+      // Regression: getTimeline used to call the full findOneOrFail (actions +
+      // admin cycles + resolveParticipantNames' own getUsersByIds batch call)
+      // purely to check access, then threw that whole DTO away. That meant two
+      // separate user-service round-trips per request. It must now call the
+      // lightweight, access-only path instead.
       const { service, workflowRepo, timelineService, actionRepo, dataSource, userClientService } =
         buildService();
       const wf = makeWorkflow({ approvalSteps: [], attachments: [] });
       workflowRepo.findOne.mockResolvedValue(wf);
-      actionRepo.find.mockResolvedValue([]);
-      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      timelineService.getTimeline.mockResolvedValue([
+        {
+          id: 'tl-1',
+          workflowId: 'wf-1',
+          eventType: TimelineEventType.WORKFLOW_CREATED,
+          actorId: 'user-1',
+          description: 'Created',
+          createdAt: new Date(),
+        } as WorkflowTimeline,
+      ]);
+
+      await service.getTimeline('wf-1', makeUser());
+
+      expect(actionRepo.find).not.toHaveBeenCalled();
+      expect(dataSource.getRepository).not.toHaveBeenCalled();
+      expect(userClientService.getUsersByIds).toHaveBeenCalledTimes(1);
+    });
+
+    it('resolves actor names via user-service so the timeline does not depend on the viewer holding USERS:READ', async () => {
+      const { service, workflowRepo, timelineService, userClientService } = buildService();
+      const wf = makeWorkflow({ approvalSteps: [], attachments: [] });
+      workflowRepo.findOne.mockResolvedValue(wf);
       timelineService.getTimeline.mockResolvedValue([
         {
           id: 'tl-1',
@@ -584,7 +626,7 @@ describe('WorkflowsService', () => {
         },
       ] as WorkflowTimeline[]);
       userClientService.getUsersByIds.mockResolvedValue(
-        new Map([['user-1', { id: 'user-1', email: 'a@test.com', fullName: 'Ada Lovelace' }]]),
+        new Map([['user-1', { id: 'user-1', displayName: 'Ada Lovelace' }]]),
       );
 
       const result = await service.getTimeline('wf-1', makeUser());

@@ -19,10 +19,13 @@ export interface UserBasicInfo {
   email: string;
 }
 
-export interface UserBasicName {
+// No email — this hits batch-display-names, a contract deliberately scoped to
+// display names only (see internal-users.controller.ts). Workflow timeline
+// and participant names are shown to any viewer regardless of USERS:READ, so
+// this client must never receive (and can't leak) another user's email.
+export interface UserDisplayName {
   id: string;
-  email: string;
-  fullName: string;
+  displayName: string | null;
 }
 
 export interface UsersByPositionResult {
@@ -153,23 +156,48 @@ export class UserClientService {
     }
   }
 
+  // user-service's batch-display-names endpoint rejects requests over 500 ids.
+  private static readonly BATCH_SIZE = 500;
+
   /**
    * Resolves display names for a batch of user IDs — used to show who performed
    * each workflow timeline event without requiring the viewer to hold USERS:READ
    * (an unrelated permission). Best-effort: on any failure, returns an empty map
    * instead of throwing, so the timeline still renders (falling back to raw IDs)
    * rather than becoming unavailable because name resolution failed.
+   *
+   * Splits into chunks of at most 500 ids (the endpoint's own limit) — without
+   * this, a workflow with more participants/actors than that would send a
+   * single oversized request that user-service rejects outright, degrading
+   * name resolution to empty for everyone instead of just the overflow.
+   * Batches are resolved independently, so one failing batch doesn't discard
+   * names that other batches successfully resolved.
    */
-  async getUsersByIds(userIds: string[]): Promise<Map<string, UserBasicName>> {
+  async getUsersByIds(userIds: string[]): Promise<Map<string, UserDisplayName>> {
     if (userIds.length === 0) return new Map();
+
+    const batches: string[][] = [];
+    for (let i = 0; i < userIds.length; i += UserClientService.BATCH_SIZE) {
+      batches.push(userIds.slice(i, i + UserClientService.BATCH_SIZE));
+    }
+
+    const batchResults = await Promise.all(batches.map((batch) => this.fetchUserBatch(batch)));
+    const merged = new Map<string, UserDisplayName>();
+    for (const batchResult of batchResults) {
+      for (const [id, user] of batchResult) merged.set(id, user);
+    }
+    return merged;
+  }
+
+  private async fetchUserBatch(userIds: string[]): Promise<Map<string, UserDisplayName>> {
     const correlationId = getCorrelationId();
-    const url = `${this.userServiceUrl}/internal/users/batch-by-ids`;
+    const url = `${this.userServiceUrl}/internal/users/batch-display-names`;
 
     try {
-      const response = await this.fireWithCb<{ data: UserBasicName[] }>(() =>
+      const response = await this.fireWithCb<{ data: UserDisplayName[] }>(() =>
         firstValueFrom(
           this.httpService
-            .post<UserBasicName[]>(
+            .post<UserDisplayName[]>(
               url,
               { ids: userIds },
               {

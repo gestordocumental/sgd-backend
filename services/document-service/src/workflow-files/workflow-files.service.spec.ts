@@ -308,15 +308,15 @@ describe('WorkflowFilesService', () => {
   // ── downloadContent() ─────────────────────────────────────────────────────
 
   describe('downloadContent()', () => {
-    it('returns the file buffer when storageKey belongs to the org', async () => {
+    it('returns the file buffer and the requested content type when it is an allowed mimetype', async () => {
       const storage = makeStorage();
       const service = new WorkflowFilesService(storage as any);
       const key     = 'org/org-1/workflow-uploads/abc.docx';
 
-      const result = await service.downloadContent('org-1', key);
+      const result = await service.downloadContent('org-1', key, DOCX_MIME);
 
       expect(storage.downloadBuffer).toHaveBeenCalledWith(key);
-      expect(result).toEqual(Buffer.from('file content'));
+      expect(result).toEqual({ buffer: Buffer.from('file content'), contentType: DOCX_MIME });
     });
 
     it('throws ForbiddenException when storageKey belongs to a different org', async () => {
@@ -336,6 +336,43 @@ describe('WorkflowFilesService', () => {
       await expect(
         service.downloadContent('org-1', 'org/org-1/workflow-uploads/file.docx'),
       ).rejects.toThrow('Storage unavailable');
+    });
+
+    // mimeType is client-supplied, so it's validated against the upload
+    // allowlist rather than trusted verbatim as a response Content-Type.
+    it('falls back to application/octet-stream when mimeType is omitted', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      const result = await service.downloadContent('org-1', 'org/org-1/workflow-uploads/f.docx');
+
+      expect(result.contentType).toBe('application/octet-stream');
+    });
+
+    it('falls back to application/octet-stream when mimeType is an empty string', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      const result = await service.downloadContent(
+        'org-1',
+        'org/org-1/workflow-uploads/f.docx',
+        '',
+      );
+
+      expect(result.contentType).toBe('application/octet-stream');
+    });
+
+    it('falls back to application/octet-stream when mimeType is not in the allowlist', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+
+      const result = await service.downloadContent(
+        'org-1',
+        'org/org-1/workflow-uploads/f.docx',
+        'text/html',
+      );
+
+      expect(result.contentType).toBe('application/octet-stream');
     });
   });
 

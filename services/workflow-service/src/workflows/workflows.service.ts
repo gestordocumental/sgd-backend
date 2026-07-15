@@ -575,7 +575,11 @@ export class WorkflowsService {
   // ── Obtener timeline ──────────────────────────────────────────────────────────
 
   async getTimeline(id: string, user: JwtPayload): Promise<TimelineEventResponseDto[]> {
-    await this.findOneOrFail(id, user); // valida acceso
+    // Only validates access (org-scoped existence) — deliberately NOT
+    // findOneOrFail, which also resolves participant names via its own
+    // getUsersByIds batch call. That result would be thrown away here anyway,
+    // and it'd mean two separate user-service round-trips per request.
+    await this.findWorkflowOrFail(id, user);
     const events = await this.timelineService.getTimeline(id);
 
     // Resolved here (not left to the frontend) so the timeline shows actor names
@@ -585,7 +589,7 @@ export class WorkflowsService {
     const usersById = await this.userClientService.getUsersByIds(actorIds);
 
     return events.map((event) =>
-      TimelineEventResponseDto.from(event, usersById.get(event.actorId)?.fullName ?? null),
+      TimelineEventResponseDto.from(event, usersById.get(event.actorId)?.displayName ?? null),
     );
   }
 
@@ -728,7 +732,10 @@ export class WorkflowsService {
     }));
   }
 
-  private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
+  // Org-scoped existence check only — no actions/admin-cycle loading or
+  // participant-name resolution. Used by callers that just need to validate
+  // access (e.g. getTimeline) without paying for the full detail enrichment.
+  private async findWorkflowOrFail(id: string, user: JwtPayload): Promise<Workflow> {
     const orgId    = user.companyId!;
     const workflow = await this.workflowRepo.findOne({
       where: { id, orgId },
@@ -736,6 +743,11 @@ export class WorkflowsService {
     });
 
     if (!workflow) throw new NotFoundException('Workflow not found');
+    return workflow;
+  }
+
+  private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
+    const workflow = await this.findWorkflowOrFail(id, user);
 
     const actions = await this.actionRepo.find({
       where: { workflowId: id },
@@ -788,6 +800,15 @@ export class WorkflowsService {
     }
 
     const usersById = await this.userClientService.getUsersByIds([...ids]);
-    return Object.fromEntries([...usersById].map(([id, u]) => [id, u.fullName]));
+    // Omit entries with no resolvable name (displayName: null) instead of
+    // putting null in a Record<string, string> — the frontend already falls
+    // back to "unknown user" for any id missing from this map.
+    return Object.fromEntries(
+      [...usersById]
+        .filter((entry): entry is [string, { id: string; displayName: string }] =>
+          entry[1].displayName !== null,
+        )
+        .map(([id, u]) => [id, u.displayName]),
+    );
   }
 }
