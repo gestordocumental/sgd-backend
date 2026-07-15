@@ -337,6 +337,48 @@ describe('WorkflowsService', () => {
       });
     });
 
+    it('resolves participant names for allowedOptionalReviewerIds on admin cycles — used by ForwardStepDialog\'s selector', async () => {
+      // Regression: the optional-reviewer selector in ForwardStepDialog showed
+      // the raw user ID instead of a name for a viewer without USERS:READ,
+      // because allowedOptionalReviewerIds was never collected here.
+      const { service, workflowRepo, actionRepo, dataSource, userClientService } = buildService();
+      const wf = makeWorkflow({
+        createdBy: 'creator-1',
+        approvalSteps: [],
+        attachments: [],
+        activeAdminCycleId: 'cycle-1',
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      const cycle = {
+        id: 'cycle-1',
+        workflowId: 'wf-1',
+        cycleNumber: 1,
+        initiatedBy: 'creator-1',
+        steps: [],
+        allowedOptionalReviewerIds: ['optional-1', 'optional-2'],
+      };
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([cycle]) });
+      userClientService.getUsersByIds.mockResolvedValue(
+        new Map([
+          ['creator-1', { id: 'creator-1', displayName: 'Carla Creator' }],
+          ['optional-1', { id: 'optional-1', displayName: 'Oscar One' }],
+          ['optional-2', { id: 'optional-2', displayName: 'Olivia Two' }],
+        ]),
+      );
+
+      const result = await service.findOne('wf-1', makeUser());
+
+      expect(userClientService.getUsersByIds).toHaveBeenCalledWith(
+        expect.arrayContaining(['creator-1', 'optional-1', 'optional-2']),
+      );
+      expect(result.participantNames).toEqual({
+        'creator-1':  'Carla Creator',
+        'optional-1': 'Oscar One',
+        'optional-2': 'Olivia Two',
+      });
+    });
+
     it('omits a participant with displayName: null from participantNames, instead of leaking a null or falling back to email', async () => {
       // Regression: batch-display-names returns displayName: null (never
       // email) for a user with no first/last name set. That must not end up

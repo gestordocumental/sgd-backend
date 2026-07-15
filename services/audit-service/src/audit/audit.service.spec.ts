@@ -28,6 +28,10 @@ function makeLogger(): MockLogger {
   return { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
 }
 
+function makeUserClient() {
+  return { getUsersByIds: jest.fn().mockResolvedValue(new Map()) };
+}
+
 // ── fixtures ───────────────────────────────────────────────────────────────
 
 const validEvent: AuditLogEvent = {
@@ -53,13 +57,15 @@ describe('AuditService', () => {
   let readEs: ReturnType<typeof makeEs>;
   let es: ReturnType<typeof makeEs>; // alias — tests that don't care which client just use this
   let logger: MockLogger;
+  let userClient: ReturnType<typeof makeUserClient>;
 
   beforeEach(() => {
     writeEs = makeEs();
     readEs  = makeEs();
     es      = writeEs; // index() and onModuleInit() go through writeClient
     logger  = makeLogger();
-    service = new AuditService(writeEs as any, readEs as any, logger as any);
+    userClient = makeUserClient();
+    service = new AuditService(writeEs as any, readEs as any, userClient as any, logger as any);
     jest.clearAllMocks();
     // Reset the correlation mock to a known default
     const ctx = require('@sgd/common');
@@ -250,6 +256,36 @@ describe('AuditService', () => {
       expect(call.from).toBe(0);
       expect(call.size).toBe(50);
     });
+
+    it('resolves actorName via user-service so the audit log does not depend on the viewer holding USERS:READ', async () => {
+      const source1 = { ...validEvent, actorId: 'actor-1', indexedAt: 'now', correlationId: null, ip: null };
+      const source2 = { ...validEvent, actorId: 'actor-2', indexedAt: 'now', correlationId: null, ip: null };
+      readEs.search.mockResolvedValue({
+        hits: { hits: [makeHit('doc-1', source1), makeHit('doc-2', source2)], total: { value: 2 } },
+      });
+      userClient.getUsersByIds.mockResolvedValue(
+        new Map([['actor-1', { id: 'actor-1', displayName: 'Ada Lovelace' }]]),
+      );
+
+      const result = await service.query({});
+
+      expect(userClient.getUsersByIds).toHaveBeenCalledWith(['actor-1', 'actor-2']);
+      expect(result.data[0].actorName).toBe('Ada Lovelace');
+      // actor-2 wasn't in the resolved map (e.g. user-service couldn't be
+      // reached for that id) — falls back to null instead of throwing.
+      expect(result.data[1].actorName).toBeNull();
+    });
+
+    it('dedupes repeated actorIds before calling user-service', async () => {
+      const source = { ...validEvent, actorId: 'actor-1', indexedAt: 'now', correlationId: null, ip: null };
+      readEs.search.mockResolvedValue({
+        hits: { hits: [makeHit('doc-1', source), makeHit('doc-2', source)], total: { value: 2 } },
+      });
+
+      await service.query({});
+
+      expect(userClient.getUsersByIds).toHaveBeenCalledWith(['actor-1']);
+    });
   });
 
   // ── export ────────────────────────────────────────────────────────────────
@@ -300,6 +336,18 @@ describe('AuditService', () => {
 
       expect(result[0].id).toBe('exported-1');
     });
+
+    it('resolves actorName for exported rows too', async () => {
+      const source = { ...validEvent, actorId: 'actor-1', indexedAt: 'now', correlationId: null, ip: null };
+      readEs.search.mockResolvedValue({ hits: { hits: [makeHit('exported-1', source)] } });
+      userClient.getUsersByIds.mockResolvedValue(
+        new Map([['actor-1', { id: 'actor-1', displayName: 'Ada Lovelace' }]]),
+      );
+
+      const result = await service.export({});
+
+      expect(result[0].actorName).toBe('Ada Lovelace');
+    });
   });
 
   // ── findById ──────────────────────────────────────────────────────────────
@@ -322,6 +370,19 @@ describe('AuditService', () => {
       const result = await service.findById('doc-1');
 
       expect(result).toBeNull();
+    });
+
+    it('resolves actorName for a single document too', async () => {
+      const source = { ...validEvent, actorId: 'actor-1', indexedAt: 'now', correlationId: null, ip: null };
+      readEs.get.mockResolvedValue({ found: true, _id: 'doc-1', _source: source });
+      userClient.getUsersByIds.mockResolvedValue(
+        new Map([['actor-1', { id: 'actor-1', displayName: 'Ada Lovelace' }]]),
+      );
+
+      const result = await service.findById('doc-1');
+
+      expect(userClient.getUsersByIds).toHaveBeenCalledWith(['actor-1']);
+      expect(result!.actorName).toBe('Ada Lovelace');
     });
 
     it('returns null for a 404 error status', async () => {

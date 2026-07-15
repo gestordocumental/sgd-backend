@@ -76,6 +76,7 @@ en Railway para cada entorno (dev / test / prod).
 | `INTERNAL_TOKEN_NOTIF_USER` | mismo que notification-service | idem | idem | Manual |
 | `INTERNAL_TOKEN_WORKFLOW_USER` | mismo que workflow-service | idem | idem | Manual |
 | `INTERNAL_TOKEN_ORG_USER` | mismo que org-service | idem | idem | Manual |
+| `INTERNAL_TOKEN_AUDIT_USER` | mismo que audit-service | idem | idem | Manual |
 | `INTERNAL_ALLOWED_CIDRS` | `100.64.0.0/10` | `100.64.0.0/10` | `100.64.0.0/10` | Manual |
 | `AUTH_SERVICE_URL` | `http://auth-service.railway.internal:3000` | idem | idem | Manual |
 | `ORG_SERVICE_URL` | `http://org-service.railway.internal:3000` | idem | idem | Manual |
@@ -252,6 +253,8 @@ en Railway para cada entorno (dev / test / prod).
 | `JWT_SECRET_PREV` | *(vacío)* | *(vacío)* | *(vacío)* | Manual |
 | `JWT_SECRET_PREV_KID` | *(vacío)* | *(vacío)* | *(vacío)* | Manual |
 | `INTERNAL_TOKEN` | `<generar>` | `<generar>` | `<generar>` | Manual |
+| `USER_SERVICE_URL` | `http://user-service.railway.internal:3000` | idem | idem | Manual |
+| `INTERNAL_TOKEN_AUDIT_USER` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `ELASTICSEARCH_URL` | `http://elasticsearch.railway.internal:9200` | idem | idem | Manual |
 | `ELASTICSEARCH_USERNAME` | `elastic` | `elastic` | `elastic` | Manual |
 | `ELASTICSEARCH_PASSWORD` | `<generar>` | `<generar>` | `<generar>` | Manual |
