@@ -778,9 +778,10 @@ export class WorkflowsService {
 
   /**
    * Collects every user ID referenced anywhere in a workflow (creator, approval
-   * steps/actions, admin cycle steps, final users) and resolves their display
-   * names in one batch call — so the detail view can show who's involved
-   * without requiring the viewer's role to hold USERS:READ.
+   * steps/actions, admin cycle steps, final users, allowed optional reviewers)
+   * and resolves their display names in one batch call — so the detail view
+   * and dialogs like ForwardStepDialog can show who's involved without
+   * requiring the viewer's role to hold USERS:READ.
    */
   private async resolveParticipantNames(
     workflow: Workflow,
@@ -797,6 +798,10 @@ export class WorkflowsService {
     for (const cycle of allAdminCycles) {
       ids.add(cycle.initiatedBy);
       for (const step of cycle.steps ?? []) ids.add(step.userId);
+      // Users allowed to be picked as the optional reviewer when forwarding an
+      // admin step — shown in ForwardStepDialog's selector, which otherwise
+      // has no other way to resolve their names without USERS:READ.
+      for (const id of cycle.allowedOptionalReviewerIds ?? []) ids.add(id);
     }
 
     const usersById = await this.userClientService.getUsersByIds([...ids]);

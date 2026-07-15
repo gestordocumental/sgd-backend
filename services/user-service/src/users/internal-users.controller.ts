@@ -31,7 +31,7 @@ export class InternalUsersController {
   @AllowInternalTokens('INTERNAL_TOKEN_NOTIF_USER')
   @Post('batch-by-ids')
   async batchByIds(@Body() body: { ids: string[] }) {
-    if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
+    if (!body || !Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
       throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
     }
     if (!body.ids.every((id) => typeof id === 'string' && id.length > 0)) {
@@ -47,15 +47,16 @@ export class InternalUsersController {
 
   // Display-name-only contract for callers that resolve names for viewers who
   // don't hold USERS:READ (e.g. workflow-service's timeline/participant
-  // names). Deliberately excludes email and never falls back to it — a user
-  // with no first/last name gets displayName: null instead of leaking their
-  // email address to every workflow participant.
+  // names, audit-service's actor names). Deliberately excludes email and
+  // never falls back to it — a user with no first/last name gets
+  // displayName: null instead of leaking their email address to every
+  // viewer of a workflow or audit log they're not otherwise entitled to see.
   @ApiOperation({ summary: 'Fetch multiple users\' display names by IDs, no email (internal only)' })
   @ApiSecurity('internal-token')
-  @AllowInternalTokens('INTERNAL_TOKEN_WORKFLOW_USER')
+  @AllowInternalTokens('INTERNAL_TOKEN_WORKFLOW_USER', 'INTERNAL_TOKEN_AUDIT_USER')
   @Post('batch-display-names')
   async batchDisplayNames(@Body() body: { ids: string[] }) {
-    if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
+    if (!body || !Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
       throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
     }
     if (!body.ids.every((id) => typeof id === 'string' && id.length > 0)) {

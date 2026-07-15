@@ -87,6 +87,11 @@ describe('InternalUsersController', () => {
         controller.batchByIds({ ids: ['valid-id', ''] }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('throws BadRequestException instead of crashing when the request body is missing', async () => {
+      await expect(controller.batchByIds(undefined as any)).rejects.toThrow(BadRequestException);
+      await expect(controller.batchByIds(null as any)).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe('batchDisplayNames()', () => {
@@ -128,6 +133,13 @@ describe('InternalUsersController', () => {
         controller.batchDisplayNames({ ids: ['valid-id', ''] }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('throws BadRequestException instead of crashing when the request body is missing', async () => {
+      await expect(controller.batchDisplayNames(undefined as any)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(controller.batchDisplayNames(null as any)).rejects.toThrow(BadRequestException);
+    });
   });
 
   // ── Security contract ──────────────────────────────────────────────────────
@@ -135,6 +147,7 @@ describe('InternalUsersController', () => {
   describe('security contract', () => {
     const NOTIF_KEY    = 'INTERNAL_TOKEN_NOTIF_USER';
     const WORKFLOW_KEY = 'INTERNAL_TOKEN_WORKFLOW_USER';
+    const AUDIT_KEY     = 'INTERNAL_TOKEN_AUDIT_USER';
 
     describe('declarative metadata', () => {
       it('applies @UseGuards(InternalGuard) at controller class level', () => {
@@ -151,9 +164,11 @@ describe('InternalUsersController', () => {
         expect(keys).toEqual([NOTIF_KEY]);
       });
 
-      it('restricts batchDisplayNames to INTERNAL_TOKEN_WORKFLOW_USER only', () => {
+      it('restricts batchDisplayNames to INTERNAL_TOKEN_WORKFLOW_USER and INTERNAL_TOKEN_AUDIT_USER', () => {
+        // audit-service also needs this endpoint to resolve actorId -> name
+        // for the audit log, without requiring the viewer to hold USERS:READ.
         const keys = (Reflect.getMetadata(INTERNAL_TOKEN_KEYS_META, InternalUsersController.prototype.batchDisplayNames) ?? []) as string[];
-        expect(keys).toEqual([WORKFLOW_KEY]);
+        expect(keys).toEqual(expect.arrayContaining([WORKFLOW_KEY, AUDIT_KEY]));
       });
 
       it('restricts byPosition to INTERNAL_TOKEN_WORKFLOW_USER', () => {
@@ -224,9 +239,17 @@ describe('InternalUsersController', () => {
       it('accepts the workflow token for batchDisplayNames', () => {
         const guard = makeGuard(
           { [NOTIF_KEY]: 'notif-token', [WORKFLOW_KEY]: 'workflow-token' },
-          [WORKFLOW_KEY], // real metadata for batchDisplayNames
+          [WORKFLOW_KEY, AUDIT_KEY], // real metadata for batchDisplayNames
         );
         expect(guard.canActivate(makeCtx({ 'x-internal-token': 'workflow-token' }))).toBe(true);
+      });
+
+      it('accepts the audit token for batchDisplayNames (allowed alongside the workflow token)', () => {
+        const guard = makeGuard(
+          { [WORKFLOW_KEY]: 'workflow-token', [AUDIT_KEY]: 'audit-token' },
+          [WORKFLOW_KEY, AUDIT_KEY], // real metadata for batchDisplayNames
+        );
+        expect(guard.canActivate(makeCtx({ 'x-internal-token': 'audit-token' }))).toBe(true);
       });
 
       it('throws UnauthorizedException when no token env vars are configured for the endpoint', () => {
