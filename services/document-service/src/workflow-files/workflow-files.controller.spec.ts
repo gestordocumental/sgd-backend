@@ -34,9 +34,10 @@ function makeUploadResponse(): WorkflowFileUploadResponseDto {
 
 function makeService() {
   return {
-    upload:       jest.fn().mockResolvedValue(makeUploadResponse()),
-    getSignedUrl: jest.fn().mockResolvedValue({ signedUrl: 'https://signed.url', expiresAt: new Date() }),
-    downloadZip:  jest.fn().mockResolvedValue({ stream: new PassThrough(), filename: 'report.zip' }),
+    upload:          jest.fn().mockResolvedValue(makeUploadResponse()),
+    getSignedUrl:    jest.fn().mockResolvedValue({ signedUrl: 'https://signed.url', expiresAt: new Date() }),
+    downloadContent: jest.fn().mockResolvedValue(Buffer.from('file content')),
+    downloadZip:     jest.fn().mockResolvedValue({ stream: new PassThrough(), filename: 'report.zip' }),
   };
 }
 
@@ -121,6 +122,54 @@ describe('WorkflowFilesController', () => {
 
       await expect(
         ctrl.getSignedUrl('org-1', 'org/org-1/workflow-uploads/uuid.pdf'),
+      ).rejects.toThrow('Forbidden');
+    });
+  });
+
+  describe('getContent()', () => {
+    it('delegates to service.downloadContent and sets Content-Type', async () => {
+      const service    = makeService();
+      const ctrl       = new WorkflowFilesController(service as any);
+      const res        = { setHeader: jest.fn() };
+      const storageKey = 'org/org-1/workflow-uploads/uuid.docx';
+      const mimeType   = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+      const result = await ctrl.getContent('org-1', storageKey, mimeType, res as any);
+
+      expect(service.downloadContent).toHaveBeenCalledWith('org-1', storageKey);
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', mimeType);
+      expect(result).toBeInstanceOf(StreamableFile);
+    });
+
+    it('defaults Content-Type to application/octet-stream when mimeType is omitted', async () => {
+      const service = makeService();
+      const ctrl    = new WorkflowFilesController(service as any);
+      const res     = { setHeader: jest.fn() };
+
+      await ctrl.getContent('org-1', 'org/org-1/workflow-uploads/uuid.docx', undefined, res as any);
+
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/octet-stream');
+    });
+
+    it('throws BadRequestException when storageKey is empty / not provided', async () => {
+      const service = makeService();
+      const ctrl    = new WorkflowFilesController(service as any);
+      const res     = { setHeader: jest.fn() };
+
+      await expect(ctrl.getContent('org-1', '', undefined, res as any)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(service.downloadContent).not.toHaveBeenCalled();
+    });
+
+    it('propagates errors from service.downloadContent', async () => {
+      const service = makeService();
+      service.downloadContent.mockRejectedValue(new Error('Forbidden'));
+      const ctrl = new WorkflowFilesController(service as any);
+      const res  = { setHeader: jest.fn() };
+
+      await expect(
+        ctrl.getContent('org-1', 'org/org-1/workflow-uploads/uuid.docx', undefined, res as any),
       ).rejects.toThrow('Forbidden');
     });
   });

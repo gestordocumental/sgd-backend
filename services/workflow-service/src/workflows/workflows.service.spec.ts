@@ -16,6 +16,7 @@ import { WorkflowStatus, ApprovalStepStatus, AttachmentType, TimelineEventType }
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { AppLogger, KafkaProducerService, JwtPayload } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
+import { UserClientService } from '../common/clients/user-client.service';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 
 // ── Factories ─────────────────────────────────────────────────────────────────
@@ -140,6 +141,10 @@ function buildService() {
     }),
   } as unknown as jest.Mocked<DocumentClientService>;
 
+  const userClientService: jest.Mocked<UserClientService> = {
+    getUsersByIds: jest.fn().mockResolvedValue(new Map()),
+  } as unknown as jest.Mocked<UserClientService>;
+
   const logger: jest.Mocked<AppLogger> = {
     log: jest.fn(),
     error: jest.fn(),
@@ -156,10 +161,11 @@ function buildService() {
     timelineService,
     kafkaProducer,
     documentClientService,
+    userClientService,
     logger,
   );
 
-  return { service, workflowRepo, stepRepo, actionRepo, attachmentRepo, timelineRepo, dataSource, timelineService, kafkaProducer, documentClientService };
+  return { service, workflowRepo, stepRepo, actionRepo, attachmentRepo, timelineRepo, dataSource, timelineService, kafkaProducer, documentClientService, userClientService };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -191,11 +197,13 @@ describe('WorkflowsService', () => {
     });
 
     it('creates a workflow and records a timeline event on success', async () => {
-      const { service, workflowRepo, dataSource, timelineService, kafkaProducer } = buildService();
+      const { service, workflowRepo, actionRepo, dataSource, timelineService, kafkaProducer } =
+        buildService();
       const user = makeUser();
 
       const savedWorkflow = makeWorkflow({ approvalSteps: [makeStep()] });
       workflowRepo.findOne.mockResolvedValue(savedWorkflow);
+      actionRepo.find.mockResolvedValue([]);
       dataSource._manager.save.mockImplementation((_Entity: unknown, data: unknown) =>
         Promise.resolve({ id: 'wf-new', ...(data as object) }),
       );
@@ -210,10 +218,11 @@ describe('WorkflowsService', () => {
     });
 
     it('creates attachments when provided', async () => {
-      const { service, workflowRepo, dataSource } = buildService();
+      const { service, workflowRepo, actionRepo, dataSource } = buildService();
       const user = makeUser();
       const savedWorkflow = makeWorkflow({ approvalSteps: [makeStep()] });
       workflowRepo.findOne.mockResolvedValue(savedWorkflow);
+      actionRepo.find.mockResolvedValue([]);
 
       await service.create(
         makeCreateDto({
@@ -292,6 +301,53 @@ describe('WorkflowsService', () => {
       workflowRepo.findOne.mockResolvedValue(null);
 
       await expect(service.findOne('wf-missing', makeUser())).rejects.toThrow(NotFoundException);
+    });
+
+    it('resolves participant names for creator, approval steps and final users — not gated by USERS:READ', async () => {
+      // Regression: DetailWorkflowDialog showed "Usuario desconocido" for every
+      // approver/final user unless the viewer's role also had USERS:READ (an
+      // unrelated permission). Names must come resolved from the backend instead.
+      const { service, workflowRepo, actionRepo, dataSource, userClientService } = buildService();
+      const wf = makeWorkflow({
+        createdBy: 'creator-1',
+        finalUserIds: ['final-1'],
+        approvalSteps: [makeStep({ userId: 'approver-1' })],
+        attachments: [],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      userClientService.getUsersByIds.mockResolvedValue(
+        new Map([
+          ['creator-1', { id: 'creator-1', email: 'c@test.com', fullName: 'Carla Creator' }],
+          ['approver-1', { id: 'approver-1', email: 'a@test.com', fullName: 'Ana Approver' }],
+          ['final-1', { id: 'final-1', email: 'f@test.com', fullName: 'Felipe Final' }],
+        ]),
+      );
+
+      const result = await service.findOne('wf-1', makeUser());
+
+      expect(userClientService.getUsersByIds).toHaveBeenCalledWith(
+        expect.arrayContaining(['creator-1', 'approver-1', 'final-1']),
+      );
+      expect(result.participantNames).toEqual({
+        'creator-1':  'Carla Creator',
+        'approver-1': 'Ana Approver',
+        'final-1':    'Felipe Final',
+      });
+    });
+
+    it('omits a participant from the map instead of failing when user-service could not resolve it', async () => {
+      const { service, workflowRepo, actionRepo, dataSource, userClientService } = buildService();
+      const wf = makeWorkflow({ createdBy: 'creator-1', approvalSteps: [], attachments: [] });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      userClientService.getUsersByIds.mockResolvedValue(new Map()); // best-effort failure
+
+      const result = await service.findOne('wf-1', makeUser());
+
+      expect(result.participantNames).toEqual({});
     });
   });
 
@@ -491,6 +547,54 @@ describe('WorkflowsService', () => {
 
       const result = await service.getTimeline('wf-1', makeUser());
       expect(result).toHaveLength(1);
+    });
+
+    it('resolves actor names via user-service so the timeline does not depend on the viewer holding USERS:READ', async () => {
+      const { service, workflowRepo, timelineService, actionRepo, dataSource, userClientService } =
+        buildService();
+      const wf = makeWorkflow({ approvalSteps: [], attachments: [] });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      timelineService.getTimeline.mockResolvedValue([
+        {
+          id: 'tl-1',
+          workflowId: 'wf-1',
+          eventType: TimelineEventType.WORKFLOW_CREATED,
+          actorId: 'user-1',
+          description: 'Created',
+          createdAt: new Date(),
+        },
+        {
+          id: 'tl-2',
+          workflowId: 'wf-1',
+          eventType: TimelineEventType.STEP_APPROVED,
+          actorId: 'user-2',
+          description: 'Approved',
+          createdAt: new Date(),
+        },
+        // Duplicate actor — must be deduped before calling user-service.
+        {
+          id: 'tl-3',
+          workflowId: 'wf-1',
+          eventType: TimelineEventType.STEP_APPROVED,
+          actorId: 'user-1',
+          description: 'Approved again',
+          createdAt: new Date(),
+        },
+      ] as WorkflowTimeline[]);
+      userClientService.getUsersByIds.mockResolvedValue(
+        new Map([['user-1', { id: 'user-1', email: 'a@test.com', fullName: 'Ada Lovelace' }]]),
+      );
+
+      const result = await service.getTimeline('wf-1', makeUser());
+
+      expect(userClientService.getUsersByIds).toHaveBeenCalledWith(['user-1', 'user-2']);
+      expect(result[0].actorName).toBe('Ada Lovelace');
+      expect(result[2].actorName).toBe('Ada Lovelace');
+      // user-2 wasn't in the resolved map (e.g. user-service couldn't be reached
+      // for that id) — falls back to null instead of throwing or omitting the event.
+      expect(result[1].actorName).toBeNull();
     });
   });
 

@@ -305,6 +305,40 @@ describe('WorkflowFilesService', () => {
     });
   });
 
+  // ── downloadContent() ─────────────────────────────────────────────────────
+
+  describe('downloadContent()', () => {
+    it('returns the file buffer when storageKey belongs to the org', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+      const key     = 'org/org-1/workflow-uploads/abc.docx';
+
+      const result = await service.downloadContent('org-1', key);
+
+      expect(storage.downloadBuffer).toHaveBeenCalledWith(key);
+      expect(result).toEqual(Buffer.from('file content'));
+    });
+
+    it('throws ForbiddenException when storageKey belongs to a different org', async () => {
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+      const key     = 'org/org-other/workflow-uploads/abc.docx';
+
+      await expect(service.downloadContent('org-1', key)).rejects.toThrow(ForbiddenException);
+      expect(storage.downloadBuffer).not.toHaveBeenCalled();
+    });
+
+    it('propagates errors from storage.downloadBuffer', async () => {
+      const storage = makeStorage();
+      storage.downloadBuffer.mockRejectedValue(new Error('Storage unavailable'));
+      const service = new WorkflowFilesService(storage as any);
+
+      await expect(
+        service.downloadContent('org-1', 'org/org-1/workflow-uploads/file.docx'),
+      ).rejects.toThrow('Storage unavailable');
+    });
+  });
+
   // ── downloadZip() ─────────────────────────────────────────────────────────
 
   describe('downloadZip()', () => {

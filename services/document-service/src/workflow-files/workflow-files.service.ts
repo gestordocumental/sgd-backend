@@ -64,6 +64,19 @@ export class WorkflowFilesService {
     return { signedUrl: url, expiresAt };
   }
 
+  // Streams the raw file bytes through our own API instead of a direct R2
+  // signed URL — client-side preview libraries (docx-preview, xlsx) need to
+  // read the bytes via fetch(), which requires CORS headers on whichever
+  // origin serves the response. Our own API already handles CORS (via Kong);
+  // the R2 bucket itself does not have CORS configured for browser fetches.
+  async downloadContent(orgId: string, storageKey: string): Promise<Buffer> {
+    const expectedPrefix = `org/${orgId}/workflow-uploads/`;
+    if (!storageKey.startsWith(expectedPrefix)) {
+      throw new ForbiddenException('El storageKey no pertenece a la organización solicitante');
+    }
+    return this.storage.downloadBuffer(storageKey);
+  }
+
   async downloadZip(
     orgId: string,
     entries: ZipFileEntryDto[],

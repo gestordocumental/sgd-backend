@@ -7,6 +7,7 @@ import {
   UserClientService,
   UserExistsResult,
   UsersByPositionResult,
+  UserBasicName,
 } from './user-client.service';
 import { AppLogger, CORRELATION_ID_HEADER } from '@sgd/common';
 
@@ -139,6 +140,62 @@ describe('UserClientService', () => {
     httpService.get.mockReturnValue(throwError(() => new Error('network down')));
 
     await expect(service.validateUserExists('user-1')).rejects.toThrow(InternalServerErrorException);
+  });
+
+  // ── getUsersByIds (timeline actor-name resolution) ────────────────────────
+
+  describe('getUsersByIds', () => {
+    it('returns empty map without calling the http client for an empty ids array', async () => {
+      const result = await service.getUsersByIds([]);
+
+      expect(result.size).toBe(0);
+      expect(httpService.post).not.toHaveBeenCalled();
+    });
+
+    it('resolves a map keyed by user id on success', async () => {
+      const users: UserBasicName[] = [
+        { id: 'user-1', email: 'ada@test.com', fullName: 'Ada Lovelace' },
+        { id: 'user-2', email: 'bo@test.com', fullName: 'Bo Diaz' },
+      ];
+      httpService.post.mockReturnValue(of({ data: users } as AxiosResponse<UserBasicName[]>));
+
+      const result = await service.getUsersByIds(['user-1', 'user-2']);
+
+      expect(httpService.post).toHaveBeenCalledWith(
+        `${userServiceUrl}/internal/users/batch-by-ids`,
+        { ids: ['user-1', 'user-2'] },
+        {
+          headers: {
+            'x-internal-token': internalToken,
+            [CORRELATION_ID_HEADER]: 'no-correlation-id',
+          },
+        },
+      );
+      expect(result.get('user-1')).toEqual(users[0]);
+      expect(result.get('user-2')).toEqual(users[1]);
+    });
+
+    it('returns an empty map instead of throwing when user-service fails (best-effort)', async () => {
+      httpService.post.mockReturnValue(throwError(() => new Error('network down')));
+
+      const result = await service.getUsersByIds(['user-1']);
+
+      expect(result.size).toBe(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Could not resolve user names for timeline'),
+        'UserClientService',
+      );
+    });
+
+    it('returns an empty map instead of throwing when the circuit breaker is open', async () => {
+      mockCbInstance.fire.mockRejectedValueOnce(
+        Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+      );
+
+      const result = await service.getUsersByIds(['user-1']);
+
+      expect(result.size).toBe(0);
+    });
   });
 
   // ── circuit breaker ──────────────────────────────────────────────────────

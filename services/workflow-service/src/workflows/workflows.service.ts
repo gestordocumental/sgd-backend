@@ -31,6 +31,7 @@ import {
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, AppLogger, JwtPayload, TOPICS } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
+import { UserClientService } from '../common/clients/user-client.service';
 
 @Injectable()
 export class WorkflowsService {
@@ -49,6 +50,7 @@ export class WorkflowsService {
     private readonly timelineService: WorkflowTimelineService,
     private readonly kafkaProducer: KafkaProducerService,
     private readonly documentClientService: DocumentClientService,
+    private readonly userClientService: UserClientService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -575,7 +577,16 @@ export class WorkflowsService {
   async getTimeline(id: string, user: JwtPayload): Promise<TimelineEventResponseDto[]> {
     await this.findOneOrFail(id, user); // valida acceso
     const events = await this.timelineService.getTimeline(id);
-    return events.map(TimelineEventResponseDto.from);
+
+    // Resolved here (not left to the frontend) so the timeline shows actor names
+    // regardless of whether the viewer's role has USERS:READ — best-effort: on
+    // failure getUsersByIds returns an empty map and events just fall back to null.
+    const actorIds = [...new Set(events.map((e) => e.actorId))];
+    const usersById = await this.userClientService.getUsersByIds(actorIds);
+
+    return events.map((event) =>
+      TimelineEventResponseDto.from(event, usersById.get(event.actorId)?.fullName ?? null),
+    );
   }
 
   // ── Helpers privados ──────────────────────────────────────────────────────────
@@ -742,6 +753,41 @@ export class WorkflowsService {
       ? (allAdminCycles.find((c) => c.id === workflow.activeAdminCycleId) ?? null)
       : null;
 
-    return WorkflowResponseDto.from(workflow, actions, activeAdminCycle ?? undefined, allAdminCycles);
+    const participantNames = await this.resolveParticipantNames(workflow, actions, allAdminCycles);
+
+    return WorkflowResponseDto.from(
+      workflow,
+      actions,
+      activeAdminCycle ?? undefined,
+      allAdminCycles,
+      participantNames,
+    );
+  }
+
+  /**
+   * Collects every user ID referenced anywhere in a workflow (creator, approval
+   * steps/actions, admin cycle steps, final users) and resolves their display
+   * names in one batch call — so the detail view can show who's involved
+   * without requiring the viewer's role to hold USERS:READ.
+   */
+  private async resolveParticipantNames(
+    workflow: Workflow,
+    actions: WorkflowApprovalAction[],
+    allAdminCycles: WorkflowAdminCycle[],
+  ): Promise<Record<string, string>> {
+    const ids = new Set<string>([workflow.createdBy]);
+    if (workflow.closedBy) ids.add(workflow.closedBy);
+    if (workflow.cancelledBy) ids.add(workflow.cancelledBy);
+    if (workflow.currentAssignedUserId) ids.add(workflow.currentAssignedUserId);
+    for (const userId of workflow.finalUserIds ?? []) ids.add(userId);
+    for (const step of workflow.approvalSteps ?? []) ids.add(step.userId);
+    for (const action of actions) ids.add(action.userId);
+    for (const cycle of allAdminCycles) {
+      ids.add(cycle.initiatedBy);
+      for (const step of cycle.steps ?? []) ids.add(step.userId);
+    }
+
+    const usersById = await this.userClientService.getUsersByIds([...ids]);
+    return Object.fromEntries([...usersById].map(([id, u]) => [id, u.fullName]));
   }
 }

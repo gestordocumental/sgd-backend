@@ -24,7 +24,7 @@ export class InternalUsersController {
 
   @ApiOperation({ summary: 'Fetch multiple users by IDs in a single call (internal only)' })
   @ApiSecurity('internal-token')
-  @AllowInternalTokens('INTERNAL_TOKEN_NOTIF_USER')
+  @AllowInternalTokens('INTERNAL_TOKEN_NOTIF_USER', 'INTERNAL_TOKEN_WORKFLOW_USER')
   @Post('batch-by-ids')
   async batchByIds(@Body() body: { ids: string[] }) {
     if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {

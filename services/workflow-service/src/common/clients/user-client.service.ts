@@ -19,6 +19,12 @@ export interface UserBasicInfo {
   email: string;
 }
 
+export interface UserBasicName {
+  id: string;
+  email: string;
+  fullName: string;
+}
+
 export interface UsersByPositionResult {
   users: UserBasicInfo[];
 }
@@ -144,6 +150,47 @@ export class UserClientService {
     } catch (error: unknown) {
       if (error instanceof ServiceUnavailableException) throw error;
       return this.handleError(error, 'user-service', url, correlationId);
+    }
+  }
+
+  /**
+   * Resolves display names for a batch of user IDs — used to show who performed
+   * each workflow timeline event without requiring the viewer to hold USERS:READ
+   * (an unrelated permission). Best-effort: on any failure, returns an empty map
+   * instead of throwing, so the timeline still renders (falling back to raw IDs)
+   * rather than becoming unavailable because name resolution failed.
+   */
+  async getUsersByIds(userIds: string[]): Promise<Map<string, UserBasicName>> {
+    if (userIds.length === 0) return new Map();
+    const correlationId = getCorrelationId();
+    const url = `${this.userServiceUrl}/internal/users/batch-by-ids`;
+
+    try {
+      const response = await this.fireWithCb<{ data: UserBasicName[] }>(() =>
+        firstValueFrom(
+          this.httpService
+            .post<UserBasicName[]>(
+              url,
+              { ids: userIds },
+              {
+                headers: {
+                  'x-internal-token':      this.internalToken,
+                  [CORRELATION_ID_HEADER]: correlationId,
+                },
+              },
+            )
+            .pipe(timeout(this.timeoutMs)),
+        ),
+      );
+      return new Map(response.data.map((u) => [u.id, u]));
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Could not resolve user names for timeline (${userIds.length} ids): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        'UserClientService',
+      );
+      return new Map();
     }
   }
 

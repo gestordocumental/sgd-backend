@@ -101,9 +101,11 @@ describe('InternalUsersController', () => {
         expect(guards).toContain(InternalGuard);
       });
 
-      it('restricts batchByIds to INTERNAL_TOKEN_NOTIF_USER', () => {
+      it('restricts batchByIds to INTERNAL_TOKEN_NOTIF_USER and INTERNAL_TOKEN_WORKFLOW_USER', () => {
+        // workflow-service also needs this endpoint to resolve actorId -> name
+        // for the workflow timeline, without requiring the viewer to hold USERS:READ.
         const keys = (Reflect.getMetadata(INTERNAL_TOKEN_KEYS_META, InternalUsersController.prototype.batchByIds) ?? []) as string[];
-        expect(keys).toContain(NOTIF_KEY);
+        expect(keys).toEqual(expect.arrayContaining([NOTIF_KEY, WORKFLOW_KEY]));
       });
 
       it('restricts byPosition to INTERNAL_TOKEN_WORKFLOW_USER', () => {
@@ -156,9 +158,17 @@ describe('InternalUsersController', () => {
       it('rejects a valid token intended for a different endpoint', () => {
         const guard = makeGuard(
           { [NOTIF_KEY]: 'notif-token', [WORKFLOW_KEY]: 'workflow-token' },
-          [NOTIF_KEY], // batchByIds allows only the notif token
+          [WORKFLOW_KEY], // byPosition allows only the workflow token
         );
-        expect(() => guard.canActivate(makeCtx({ 'x-internal-token': 'workflow-token' }))).toThrow(UnauthorizedException);
+        expect(() => guard.canActivate(makeCtx({ 'x-internal-token': 'notif-token' }))).toThrow(UnauthorizedException);
+      });
+
+      it('accepts the workflow token for batchByIds (allowed alongside the notif token)', () => {
+        const guard = makeGuard(
+          { [NOTIF_KEY]: 'notif-token', [WORKFLOW_KEY]: 'workflow-token' },
+          [NOTIF_KEY, WORKFLOW_KEY], // real metadata for batchByIds
+        );
+        expect(guard.canActivate(makeCtx({ 'x-internal-token': 'workflow-token' }))).toBe(true);
       });
 
       it('throws UnauthorizedException when no token env vars are configured for the endpoint', () => {
