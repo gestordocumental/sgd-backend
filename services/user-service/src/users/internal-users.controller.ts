@@ -22,6 +22,16 @@ class ByPositionDto {
 export class InternalUsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  private validateBatchIds(body: { ids: string[] } | undefined | null): string[] {
+    if (!body || !Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
+      throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
+    }
+    if (!body.ids.every((id) => typeof id === 'string' && id.length > 0)) {
+      throw new BadRequestException('Each id must be a non-empty string');
+    }
+    return body.ids;
+  }
+
   // Returns email — restricted to notification-service, which needs it to
   // actually send notifications. Do NOT add other tokens here; any service
   // that only needs display names should use batch-display-names instead,
@@ -31,13 +41,8 @@ export class InternalUsersController {
   @AllowInternalTokens('INTERNAL_TOKEN_NOTIF_USER')
   @Post('batch-by-ids')
   async batchByIds(@Body() body: { ids: string[] }) {
-    if (!body || !Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
-      throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
-    }
-    if (!body.ids.every((id) => typeof id === 'string' && id.length > 0)) {
-      throw new BadRequestException('Each id must be a non-empty string');
-    }
-    const users = await this.usersService.findManyByIds(body.ids);
+    const ids = this.validateBatchIds(body);
+    const users = await this.usersService.findManyByIds(ids);
     return users.map((u) => ({
       id: u.id,
       email: u.email,
@@ -56,13 +61,8 @@ export class InternalUsersController {
   @AllowInternalTokens('INTERNAL_TOKEN_WORKFLOW_USER', 'INTERNAL_TOKEN_AUDIT_USER')
   @Post('batch-display-names')
   async batchDisplayNames(@Body() body: { ids: string[] }) {
-    if (!body || !Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 500) {
-      throw new BadRequestException('ids must be a non-empty array of at most 500 entries');
-    }
-    if (!body.ids.every((id) => typeof id === 'string' && id.length > 0)) {
-      throw new BadRequestException('Each id must be a non-empty string');
-    }
-    const users = await this.usersService.findManyByIds(body.ids);
+    const ids = this.validateBatchIds(body);
+    const users = await this.usersService.findManyByIds(ids);
     return users.map((u) => ({
       id: u.id,
       displayName: [u.firstName, u.lastName].filter(Boolean).join(' ') || null,

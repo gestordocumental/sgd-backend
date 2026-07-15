@@ -31,8 +31,9 @@ export class AuditService implements OnModuleInit {
    * Resolves actorId -> actorName for a batch of audit log entries — so the
    * audit log/detail views show who performed each event without requiring
    * the viewer to hold USERS:READ (an unrelated permission). Best-effort: if
-   * user-service can't be reached, entries just keep actorName undefined and
-   * the frontend falls back to its own resolution (or the raw actorId).
+   * user-service can't be reached (or has no name for that actor), the entry
+   * gets actorName: null and the frontend falls back to its own resolution
+   * (or the raw actorId).
    */
   private async resolveActorNames(docs: AuditLogDocument[]): Promise<AuditLogDocument[]> {
     const actorIds = [...new Set(docs.map((d) => d.actorId))];
