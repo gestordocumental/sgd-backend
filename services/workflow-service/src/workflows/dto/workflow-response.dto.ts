@@ -44,17 +44,22 @@ export class TimelineEventResponseDto {
   @ApiProperty() workflowId!: string;
   @ApiProperty({ enum: TimelineEventType }) eventType!: TimelineEventType;
   @ApiProperty() actorId!: string;
+  // Resolved server-side (see WorkflowsService.getTimeline) so the timeline shows
+  // who did what regardless of whether the viewer's role can read the Users module —
+  // null only if user-service couldn't be reached or the actor no longer exists.
+  @ApiPropertyOptional() actorName: string | null = null;
   @ApiPropertyOptional() targetUserId: string | null = null;
   @ApiProperty() description!: string;
   @ApiPropertyOptional() metadata: Record<string, unknown> | null = null;
   @ApiProperty() createdAt!: Date;
 
-  static from(event: WorkflowTimeline): TimelineEventResponseDto {
+  static from(event: WorkflowTimeline, actorName: string | null = null): TimelineEventResponseDto {
     return {
       id:           event.id,
       workflowId:   event.workflowId,
       eventType:    event.eventType,
       actorId:      event.actorId,
+      actorName,
       targetUserId: event.targetUserId,
       description:  event.description,
       metadata:     event.metadata,
@@ -233,8 +238,21 @@ export class WorkflowResponseDto {
   @ApiProperty({ type: [AdminCycleResponseDto] }) adminCycles!: AdminCycleResponseDto[];
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
+  // Resolved server-side (see WorkflowsService.findOneOrFail) so anyone who can
+  // view the workflow sees who's involved in it — approvers, final users, the
+  // creator — without needing the unrelated USERS:READ permission. Keyed by
+  // userId; a commit missing from this map means user-service couldn't resolve
+  // it (frontend falls back to showing the raw id or "unknown user").
+  @ApiProperty({ type: 'object', additionalProperties: { type: 'string' } })
+  participantNames!: Record<string, string>;
 
-  static from(workflow: Workflow, actions: WorkflowApprovalAction[] = [], activeAdminCycle?: WorkflowAdminCycle, allAdminCycles: WorkflowAdminCycle[] = []): WorkflowResponseDto {
+  static from(
+    workflow: Workflow,
+    actions: WorkflowApprovalAction[] = [],
+    activeAdminCycle?: WorkflowAdminCycle,
+    allAdminCycles: WorkflowAdminCycle[] = [],
+    participantNames: Record<string, string> = {},
+  ): WorkflowResponseDto {
     return {
       id:                       workflow.id,
       orgId:                    workflow.orgId,
@@ -263,6 +281,7 @@ export class WorkflowResponseDto {
       adminCycles:              allAdminCycles.map(AdminCycleResponseDto.from),
       createdAt:                workflow.createdAt,
       updatedAt:                workflow.updatedAt,
+      participantNames,
     };
   }
 }

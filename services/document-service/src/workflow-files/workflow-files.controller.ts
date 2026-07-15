@@ -99,6 +99,27 @@ export class WorkflowFilesController {
     return this.service.getSignedUrl(orgId, storageKey, originalName, mimeType);
   }
 
+  @ApiOperation({
+    summary: 'Obtener el contenido binario de un archivo de workflow',
+    description:
+      'Sirve los bytes del archivo a través de nuestra propia API (en vez de una URL firmada de R2) ' +
+      'para que los visores client-side (DOCX/XLSX) puedan leerlos con fetch() sin tropezar con CORS, ' +
+      'ya que el bucket R2 no tiene configurado CORS para peticiones directas del navegador.',
+  })
+  @ApiOkResponse({ description: 'Contenido binario del archivo' })
+  @Post('content')
+  async getContent(
+    @Param('orgId') orgId: string,
+    @Body('storageKey') storageKey: string,
+    @Body('mimeType') mimeType: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    if (!storageKey) throw new BadRequestException('storageKey es requerido');
+    const { buffer, contentType } = await this.service.downloadContent(orgId, storageKey, mimeType);
+    res.setHeader('Content-Type', contentType);
+    return new StreamableFile(buffer);
+  }
+
   @ApiOperation({ summary: 'Descargar múltiples archivos del workflow como un ZIP' })
   @ApiProduces('application/zip')
   @Post('download-zip')
