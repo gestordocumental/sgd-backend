@@ -55,12 +55,18 @@ export class WorkflowFilesService {
     storageKey: string,
     originalName?: string,
     mimeType?: string,
+    // true (default) forces "Content-Disposition: attachment" for every type
+    // — what the "Descargar" button wants. The main-document preview's "eye"
+    // button passes false so PDFs (the only type getSignedDownloadUrl treats
+    // as inline-eligible) open in the browser's native viewer instead of
+    // downloading immediately.
+    forceAttachment = true,
   ): Promise<{ signedUrl: string; expiresAt: Date }> {
     const expectedPrefix = `org/${orgId}/workflow-uploads/`;
     if (!storageKey.startsWith(expectedPrefix)) {
       throw new ForbiddenException('El storageKey no pertenece a la organización solicitante');
     }
-    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(storageKey, originalName, mimeType, true);
+    const { url, expiresAt } = await this.storage.getSignedDownloadUrl(storageKey, originalName, mimeType, forceAttachment);
     return { signedUrl: url, expiresAt };
   }
 

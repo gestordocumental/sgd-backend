@@ -278,6 +278,25 @@ describe('WorkflowFilesService', () => {
       expect(result.expiresAt).toBeInstanceOf(Date);
     });
 
+    it('passes forceAttachment: false through to storage, so a PDF gets an inline signed URL', async () => {
+      // Regression: the main-document preview's "eye" button must be able to
+      // open a PDF inline in a new tab instead of triggering an immediate
+      // download — hardcoding forceAttachment=true here made every signed
+      // URL force attachment, PDFs included.
+      const storage = makeStorage();
+      const service = new WorkflowFilesService(storage as any);
+      const key     = 'org/org-1/workflow-uploads/abc.pdf';
+
+      await service.getSignedUrl('org-1', key, 'contract.pdf', 'application/pdf', false);
+
+      expect(storage.getSignedDownloadUrl).toHaveBeenCalledWith(
+        key,
+        'contract.pdf',
+        'application/pdf',
+        false,
+      );
+    });
+
     it('throws ForbiddenException when storageKey belongs to a different org', async () => {
       const storage = makeStorage();
       const service = new WorkflowFilesService(storage as any);

@@ -97,8 +97,40 @@ describe('WorkflowFilesController', () => {
 
       const result = await ctrl.getSignedUrl('org-1', storageKey);
 
-      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey, undefined, undefined);
+      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey, undefined, undefined, true);
       expect(result).toMatchObject({ signedUrl: 'https://signed.url' });
+    });
+
+    it('defaults forceAttachment to true when the caller omits it', async () => {
+      const service    = makeService();
+      const ctrl       = new WorkflowFilesController(service as any);
+      const storageKey = 'org/org-1/workflow-uploads/uuid.pdf';
+
+      await ctrl.getSignedUrl('org-1', storageKey, 'file.pdf', 'application/pdf', undefined);
+
+      expect(service.getSignedUrl).toHaveBeenCalledWith(
+        'org-1',
+        storageKey,
+        'file.pdf',
+        'application/pdf',
+        true,
+      );
+    });
+
+    it('passes forceAttachment: false through to the service, for inline PDF preview', async () => {
+      const service    = makeService();
+      const ctrl       = new WorkflowFilesController(service as any);
+      const storageKey = 'org/org-1/workflow-uploads/uuid.pdf';
+
+      await ctrl.getSignedUrl('org-1', storageKey, 'file.pdf', 'application/pdf', false);
+
+      expect(service.getSignedUrl).toHaveBeenCalledWith(
+        'org-1',
+        storageKey,
+        'file.pdf',
+        'application/pdf',
+        false,
+      );
     });
 
     it('throws BadRequestException when storageKey is empty / not provided', async () => {
