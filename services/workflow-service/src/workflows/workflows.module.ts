@@ -23,6 +23,7 @@ import { IdempotencyService } from './idempotency.service';
 import { KafkaModule, AppLogger, PermissionsGuard } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
 import { UserClientService } from '../common/clients/user-client.service';
+import { AuditClientService } from '../common/clients/audit-client.service';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { UserClientService } from '../common/clients/user-client.service';
     WorkflowTimelineService,
     DocumentClientService,
     UserClientService,
+    AuditClientService,
     IdempotencyService,
     AppLogger,
     PermissionsGuard,
