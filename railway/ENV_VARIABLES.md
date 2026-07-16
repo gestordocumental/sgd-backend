@@ -197,10 +197,13 @@ en Railway para cada entorno (dev / test / prod).
 | `JWT_SECRET_PREV_KID` | *(vacío)* | *(vacío)* | *(vacío)* | Manual |
 | `INTERNAL_TOKEN_WORKFLOW_USER` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `INTERNAL_TOKEN_WORKFLOW_DOC` | `<generar>` | `<generar>` | `<generar>` | Manual |
+| `INTERNAL_TOKEN_WORKFLOW_AUDIT` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `DOCUMENT_SERVICE_URL` | `http://document-service.railway.internal:3000` | idem | idem | Manual |
 | `USER_SERVICE_URL` | `http://user-service.railway.internal:3000` | idem | idem | Manual |
+| `AUDIT_SERVICE_URL` | `http://audit-service.railway.internal:3000` | idem | idem | Manual |
 | `DOCUMENT_SERVICE_TIMEOUT_MS` | `5000` | `5000` | `5000` | Manual |
 | `USER_SERVICE_TIMEOUT_MS` | `5000` | `5000` | `5000` | Manual |
+| `AUDIT_SERVICE_TIMEOUT_MS` | `5000` | `5000` | `5000` | Manual |
 | `KAFKA_BROKER` | `kafka.railway.internal:9092` | idem | idem | Manual |
 | `KAFKA_CLIENT_ID` | `workflow-service` | idem | idem | Manual |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(vacío)* (opc) | *(vacío)* | *(vacío)* | Manual |
@@ -255,6 +258,7 @@ en Railway para cada entorno (dev / test / prod).
 | `INTERNAL_TOKEN` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `USER_SERVICE_URL` | `http://user-service.railway.internal:3000` | idem | idem | Manual |
 | `INTERNAL_TOKEN_AUDIT_USER` | `<generar>` | `<generar>` | `<generar>` | Manual |
+| `INTERNAL_TOKEN_WORKFLOW_AUDIT` | mismo que workflow-service | idem | idem | Manual |
 | `ELASTICSEARCH_URL` | `http://elasticsearch.railway.internal:9200` | idem | idem | Manual |
 | `ELASTICSEARCH_USERNAME` | `elastic` | `elastic` | `elastic` | Manual |
 | `ELASTICSEARCH_PASSWORD` | `<generar>` | `<generar>` | `<generar>` | Manual |

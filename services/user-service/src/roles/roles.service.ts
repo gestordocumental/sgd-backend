@@ -129,9 +129,13 @@ export class RolesService {
 
     const assignedCount = await this.userOrgRoleRepository.countBy({ roleId: id });
     if (assignedCount > 0) {
-      throw new ConflictException(
-        `Role "${role.name}" is still assigned to ${assignedCount} user(s) and cannot be deleted`,
-      );
+      // errorCode + params let the frontend render a translated message (see
+      // resolveApiError) instead of this English-only string verbatim.
+      throw new ConflictException({
+        message: `Role "${role.name}" is still assigned to ${assignedCount} user(s) and cannot be deleted`,
+        errorCode: 'ROLE_HAS_ASSIGNED_USERS',
+        params: { name: role.name, count: assignedCount },
+      });
     }
 
     await this.rolesRepository.remove(role);

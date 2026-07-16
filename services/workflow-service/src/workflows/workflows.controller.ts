@@ -36,6 +36,7 @@ import { WorkflowsService } from './workflows.service';
 import { WorkflowApprovalService } from './workflow-approval.service';
 import { WorkflowAdminCycleService } from './workflow-admin-cycle.service';
 import { IdempotencyService } from './idempotency.service';
+import { AuditClientService, AuditLogEntry } from '../common/clients/audit-client.service';
 
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
@@ -71,6 +72,7 @@ export class WorkflowsController {
     private readonly approvalService: WorkflowApprovalService,
     private readonly adminCycleService: WorkflowAdminCycleService,
     private readonly idempotencyService: IdempotencyService,
+    private readonly auditClientService: AuditClientService,
   ) {}
 
   /**
@@ -184,6 +186,29 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
     return this.workflowsService.findOne(id, user);
+  }
+
+  @Get(':id/audit-log')
+  @OrgMember()
+  @RequirePermission('WORKFLOWS', 'READ')
+  @ApiOperation({
+    summary:
+      "Log de auditoría del workflow (agrupado por su Correlation ID = workflow.id). " +
+      'Deliberadamente NO requiere el permiso AUDIT:READ — el mismo acceso que ver el detalle ' +
+      'del workflow (WORKFLOWS:READ) alcanza para descargar su propia traza de auditoría.',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Eventos de auditoría de este workflow' })
+  async getAuditLog(
+    @Param('id', ParseUUIDPipe) id: string,
+    @JwtPayloadParam() user: JwtPayload,
+  ): Promise<AuditLogEntry[]> {
+    // findOne() is the same access check the workflow detail view uses — it
+    // throws if this user can't see this workflow, so no separate guard is
+    // needed here to keep the AUDIT:READ bypass scoped to "workflows this
+    // user can already open", not "any correlationId".
+    const workflow = await this.workflowsService.findOne(id, user);
+    return this.auditClientService.getLogsByCorrelation(workflow.orgId, workflow.id);
   }
 
   @Patch(':id')
