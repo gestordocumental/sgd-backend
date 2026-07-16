@@ -263,11 +263,11 @@ describe('RolesService', () => {
       rolesRepo.findOne.mockResolvedValue(role);
       uorRepo.countBy.mockResolvedValue(3); // 3 users have this role
 
-      await expect(service.remove(role.id, ORG_ID)).rejects.toThrow(ConflictException);
       try {
         await service.remove(role.id, ORG_ID);
         fail('expected remove() to throw');
       } catch (err) {
+        expect(err).toBeInstanceOf(ConflictException);
         expect((err as ConflictException).getResponse()).toEqual({
           message: `Role "${role.name}" is still assigned to 3 user(s) and cannot be deleted`,
           errorCode: 'ROLE_HAS_ASSIGNED_USERS',
