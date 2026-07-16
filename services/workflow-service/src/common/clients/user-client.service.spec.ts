@@ -7,6 +7,7 @@ import {
   UserClientService,
   UserExistsResult,
   UsersByPositionResult,
+  UserDisplayName,
 } from './user-client.service';
 import { AppLogger, CORRELATION_ID_HEADER } from '@sgd/common';
 
@@ -139,6 +140,123 @@ describe('UserClientService', () => {
     httpService.get.mockReturnValue(throwError(() => new Error('network down')));
 
     await expect(service.validateUserExists('user-1')).rejects.toThrow(InternalServerErrorException);
+  });
+
+  // ── getUsersByIds (timeline actor-name resolution) ────────────────────────
+
+  describe('getUsersByIds', () => {
+    it('returns empty map without calling the http client for an empty ids array', async () => {
+      const result = await service.getUsersByIds([]);
+
+      expect(result.size).toBe(0);
+      expect(httpService.post).not.toHaveBeenCalled();
+    });
+
+    it('resolves a map keyed by user id on success, via batch-display-names (no email in the request or response)', async () => {
+      // Regression: this must hit batch-display-names, not batch-by-ids —
+      // the latter returns email, which this service has no use for and must
+      // never receive, since it's shown to any workflow viewer regardless of
+      // whether they hold USERS:READ.
+      const users: UserDisplayName[] = [
+        { id: 'user-1', displayName: 'Ada Lovelace' },
+        { id: 'user-2', displayName: 'Bo Diaz' },
+      ];
+      httpService.post.mockReturnValue(of({ data: users } as AxiosResponse<UserDisplayName[]>));
+
+      const result = await service.getUsersByIds(['user-1', 'user-2']);
+
+      expect(httpService.post).toHaveBeenCalledWith(
+        `${userServiceUrl}/internal/users/batch-display-names`,
+        { ids: ['user-1', 'user-2'] },
+        {
+          headers: {
+            'x-internal-token': internalToken,
+            [CORRELATION_ID_HEADER]: 'no-correlation-id',
+          },
+        },
+      );
+      expect(result.get('user-1')).toEqual(users[0]);
+      expect(result.get('user-2')).toEqual(users[1]);
+    });
+
+    it('resolves displayName: null for a user with no first/last name, instead of falling back to email', async () => {
+      const users: UserDisplayName[] = [{ id: 'user-1', displayName: null }];
+      httpService.post.mockReturnValue(of({ data: users } as AxiosResponse<UserDisplayName[]>));
+
+      const result = await service.getUsersByIds(['user-1']);
+
+      expect(result.get('user-1')).toEqual({ id: 'user-1', displayName: null });
+    });
+
+    it('splits requests into batches of at most 500 ids and merges the results', async () => {
+      // Regression: user-service's batch-display-names endpoint rejects
+      // requests over 500 ids outright — a single oversized request used to
+      // degrade name resolution to empty for every participant/actor, not
+      // just the ones past the limit.
+      const userIds = Array.from({ length: 501 }, (_, i) => `user-${i}`);
+      httpService.post.mockImplementation((_url: string, data?: unknown) => {
+        const body = data as { ids: string[] };
+        const users: UserDisplayName[] = body.ids.map((id) => ({ id, displayName: `Name ${id}` }));
+        return of({ data: users } as AxiosResponse<UserDisplayName[]>);
+      });
+
+      const result = await service.getUsersByIds(userIds);
+
+      expect(httpService.post).toHaveBeenCalledTimes(2);
+      expect(httpService.post).toHaveBeenNthCalledWith(
+        1,
+        `${userServiceUrl}/internal/users/batch-display-names`,
+        { ids: userIds.slice(0, 500) },
+        expect.anything(),
+      );
+      expect(httpService.post).toHaveBeenNthCalledWith(
+        2,
+        `${userServiceUrl}/internal/users/batch-display-names`,
+        { ids: userIds.slice(500) },
+        expect.anything(),
+      );
+      expect(result.size).toBe(501);
+      expect(result.get('user-0')).toEqual({ id: 'user-0', displayName: 'Name user-0' });
+      expect(result.get('user-500')).toEqual({ id: 'user-500', displayName: 'Name user-500' });
+    });
+
+    it('keeps names resolved by other batches when one batch fails (per-batch best-effort)', async () => {
+      const userIds = Array.from({ length: 501 }, (_, i) => `user-${i}`);
+      httpService.post.mockImplementation((_url: string, data?: unknown) => {
+        const body = data as { ids: string[] };
+        if (body.ids.length === 1) return throwError(() => new Error('batch failed'));
+        const users: UserDisplayName[] = body.ids.map((id) => ({ id, displayName: `Name ${id}` }));
+        return of({ data: users } as AxiosResponse<UserDisplayName[]>);
+      });
+
+      const result = await service.getUsersByIds(userIds);
+
+      expect(result.size).toBe(500); // the failing single-id batch contributed nothing
+      expect(result.get('user-0')).toEqual({ id: 'user-0', displayName: 'Name user-0' });
+      expect(result.has('user-500')).toBe(false);
+    });
+
+    it('returns an empty map instead of throwing when user-service fails (best-effort)', async () => {
+      httpService.post.mockReturnValue(throwError(() => new Error('network down')));
+
+      const result = await service.getUsersByIds(['user-1']);
+
+      expect(result.size).toBe(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Could not resolve user names for timeline'),
+        'UserClientService',
+      );
+    });
+
+    it('returns an empty map instead of throwing when the circuit breaker is open', async () => {
+      mockCbInstance.fire.mockRejectedValueOnce(
+        Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+      );
+
+      const result = await service.getUsersByIds(['user-1']);
+
+      expect(result.size).toBe(0);
+    });
   });
 
   // ── circuit breaker ──────────────────────────────────────────────────────

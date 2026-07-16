@@ -9,6 +9,7 @@ import {
   PaginatedAuditLogs,
 } from './dto/audit-query.dto';
 import { ES_WRITE_CLIENT, ES_READ_CLIENT } from './es-client.tokens';
+import { UserClientService } from '../common/clients/user-client.service';
 
 const INDEX = 'audit-logs';
 
@@ -22,8 +23,26 @@ export class AuditService implements OnModuleInit {
   constructor(
     @Inject(ES_WRITE_CLIENT) private readonly writeClient: Client,
     @Inject(ES_READ_CLIENT)  private readonly readClient: Client,
+    private readonly userClient: UserClientService,
     private readonly logger: AppLogger,
   ) {}
+
+  /**
+   * Resolves actorId -> actorName for a batch of audit log entries — so the
+   * audit log/detail views show who performed each event without requiring
+   * the viewer to hold USERS:READ (an unrelated permission). Best-effort: if
+   * user-service can't be reached (or has no name for that actor), the entry
+   * gets actorName: null and the frontend falls back to its own resolution
+   * (or the raw actorId).
+   */
+  private async resolveActorNames(docs: AuditLogDocument[]): Promise<AuditLogDocument[]> {
+    const actorIds = [...new Set(docs.map((d) => d.actorId))];
+    const usersById = await this.userClient.getUsersByIds(actorIds);
+    return docs.map((doc) => ({
+      ...doc,
+      actorName: usersById.get(doc.actorId)?.displayName ?? null,
+    }));
+  }
 
   async onModuleInit() {
     await this.ensureIndex();
@@ -193,7 +212,7 @@ export class AuditService implements OnModuleInit {
         ...(hit._source as Omit<AuditLogDocument, 'id'>),
       }));
 
-      return { data, total, page, limit };
+      return { data: await this.resolveActorNames(data), total, page, limit };
     } catch (err: unknown) {
       if (isIndexNotFound(err)) {
         this.logger.warn(`Index "${INDEX}" not found during query — triggering ensureIndex`, 'AuditService');
@@ -219,10 +238,11 @@ export class AuditService implements OnModuleInit {
         sort:  [{ timestamp: { order: 'desc' } }],
       });
 
-      return response.hits.hits.map((hit) => ({
+      const data: AuditLogDocument[] = response.hits.hits.map((hit) => ({
         id: hit._id ?? '',
         ...(hit._source as Omit<AuditLogDocument, 'id'>),
       }));
+      return this.resolveActorNames(data);
     } catch (err: unknown) {
       if (isIndexNotFound(err)) {
         this.logger.warn(`Index "${INDEX}" not found during export — triggering ensureIndex`, 'AuditService');
@@ -239,7 +259,9 @@ export class AuditService implements OnModuleInit {
     try {
       const response = await this.readClient.get<AuditLogDocument>({ index: INDEX, id });
       if (!response.found) return null;
-      return { id: response._id, ...response._source } as AuditLogDocument;
+      const doc = { id: response._id, ...response._source } as AuditLogDocument;
+      const [withName] = await this.resolveActorNames([doc]);
+      return withName;
     } catch (err: unknown) {
       const statusCode = (err as { meta?: { statusCode?: number } })?.meta?.statusCode;
       if (statusCode === 404) return null;
