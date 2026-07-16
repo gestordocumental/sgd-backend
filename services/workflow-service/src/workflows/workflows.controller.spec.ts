@@ -3,6 +3,7 @@ import { WorkflowsService } from './workflows.service';
 import { WorkflowApprovalService } from './workflow-approval.service';
 import { WorkflowAdminCycleService } from './workflow-admin-cycle.service';
 import { IdempotencyService } from './idempotency.service';
+import { AuditClientService } from '../common/clients/audit-client.service';
 import { JwtPayload } from '@sgd/common';
 import { WorkflowStatus, AdminCycleStatus } from './entities/enums';
 import { WorkflowResponseDto, AdminCycleResponseDto } from './dto/workflow-response.dto';
@@ -80,6 +81,12 @@ function makeIdempotencyService(): jest.Mocked<IdempotencyService> {
   } as unknown as jest.Mocked<IdempotencyService>;
 }
 
+function makeAuditClientService(): jest.Mocked<AuditClientService> {
+  return {
+    getLogsByCorrelation: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<AuditClientService>;
+}
+
 // ── Build controller ──────────────────────────────────────────────────────────
 
 function buildController() {
@@ -87,10 +94,11 @@ function buildController() {
   const approvalService = makeApprovalService();
   const adminCycleService = makeAdminCycleService();
   const idempotencyService = makeIdempotencyService();
+  const auditClientService = makeAuditClientService();
   const controller = new WorkflowsController(
-    workflowsService, approvalService, adminCycleService, idempotencyService,
+    workflowsService, approvalService, adminCycleService, idempotencyService, auditClientService,
   );
-  return { controller, workflowsService, approvalService, adminCycleService };
+  return { controller, workflowsService, approvalService, adminCycleService, auditClientService };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -164,6 +172,34 @@ describe('WorkflowsController', () => {
 
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', expect.any(Object));
       expect(result.id).toBe('wf-1');
+    });
+  });
+
+  describe('getAuditLog()', () => {
+    it('checks workflow access via workflowsService.findOne, then fetches the audit trail by the workflow\'s own id as correlationId', async () => {
+      // The AUDIT:READ permission bypass is scoped to workflows this user can
+      // already open: reusing findOne() means an unauthorized user gets the
+      // same 403/404 as opening the workflow detail — audit-service is never
+      // even called in that case.
+      const { controller, workflowsService, auditClientService } = buildController();
+      const workflow = makeWorkflowDto({ id: 'wf-1', orgId: 'org-1' });
+      workflowsService.findOne.mockResolvedValue(workflow);
+      const logs = [{ id: 'log-1' }];
+      auditClientService.getLogsByCorrelation.mockResolvedValue(logs as any);
+
+      const result = await controller.getAuditLog('wf-1', makeUser());
+
+      expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', expect.any(Object));
+      expect(auditClientService.getLogsByCorrelation).toHaveBeenCalledWith('org-1', 'wf-1');
+      expect(result).toBe(logs);
+    });
+
+    it('propagates the access-check failure without calling audit-service', async () => {
+      const { controller, workflowsService, auditClientService } = buildController();
+      workflowsService.findOne.mockRejectedValue(new Error('not found'));
+
+      await expect(controller.getAuditLog('wf-1', makeUser())).rejects.toThrow('not found');
+      expect(auditClientService.getLogsByCorrelation).not.toHaveBeenCalled();
     });
   });
 

@@ -6,6 +6,7 @@ import { Kafka } from 'kafkajs';
 import { KAFKA_CLIENT, KafkaProducerService } from '@sgd/common';
 import { AppLogger } from '@sgd/common';
 import { AuditController } from './audit.controller';
+import { InternalAuditController } from './internal-audit.controller';
 import { AuditService } from './audit.service';
 import { AuditConsumer } from './audit.consumer';
 import { UserClientService } from '../common/clients/user-client.service';
@@ -51,7 +52,7 @@ function buildEsClient(config: ConfigService, role: 'WRITE' | 'READ'): Client {
 
 @Module({
   imports: [ConfigModule, HttpModule],
-  controllers: [AuditController],
+  controllers: [AuditController, InternalAuditController],
   providers: [
     AuditService,
     AuditConsumer,
