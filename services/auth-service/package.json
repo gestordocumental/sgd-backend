@@ -35,7 +35,7 @@
     "@nestjs/typeorm": "^11.0.0",
     "@sentry/node": "^10.53.1",
     "@sgd/common": "*",
-    "axios": "^1.7.0",
+    "axios": "^1.18.1",
     "bcryptjs": "^2.4.3",
     "multer": "^2.2.0",
     "class-transformer": "^0.5.1",
