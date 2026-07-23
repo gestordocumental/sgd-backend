@@ -1,4 +1,4 @@
-import { BadRequestException, StreamableFile } from '@nestjs/common';
+import { BadRequestException, ParseBoolPipe, StreamableFile } from '@nestjs/common';
 import { PassThrough } from 'stream';
 import { WorkflowFilesController } from './workflow-files.controller';
 import { WorkflowFileUploadResponseDto } from './dto/workflow-file-upload-response.dto';
@@ -34,9 +34,12 @@ function makeUploadResponse(): WorkflowFileUploadResponseDto {
 
 function makeService() {
   return {
-    upload:       jest.fn().mockResolvedValue(makeUploadResponse()),
-    getSignedUrl: jest.fn().mockResolvedValue({ signedUrl: 'https://signed.url', expiresAt: new Date() }),
-    downloadZip:  jest.fn().mockResolvedValue({ stream: new PassThrough(), filename: 'report.zip' }),
+    upload:          jest.fn().mockResolvedValue(makeUploadResponse()),
+    getSignedUrl:    jest.fn().mockResolvedValue({ signedUrl: 'https://signed.url', expiresAt: new Date() }),
+    downloadContent: jest
+      .fn()
+      .mockResolvedValue({ buffer: Buffer.from('file content'), contentType: 'application/octet-stream' }),
+    downloadZip:     jest.fn().mockResolvedValue({ stream: new PassThrough(), filename: 'report.zip' }),
   };
 }
 
@@ -94,8 +97,55 @@ describe('WorkflowFilesController', () => {
 
       const result = await ctrl.getSignedUrl('org-1', storageKey);
 
-      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey, undefined, undefined);
+      expect(service.getSignedUrl).toHaveBeenCalledWith('org-1', storageKey, undefined, undefined, true);
       expect(result).toMatchObject({ signedUrl: 'https://signed.url' });
+    });
+
+    it('defaults forceAttachment to true when the caller omits it', async () => {
+      const service    = makeService();
+      const ctrl       = new WorkflowFilesController(service as any);
+      const storageKey = 'org/org-1/workflow-uploads/uuid.pdf';
+
+      await ctrl.getSignedUrl('org-1', storageKey, 'file.pdf', 'application/pdf', undefined);
+
+      expect(service.getSignedUrl).toHaveBeenCalledWith(
+        'org-1',
+        storageKey,
+        'file.pdf',
+        'application/pdf',
+        true,
+      );
+    });
+
+    it('passes forceAttachment: false through to the service, for inline PDF preview', async () => {
+      const service    = makeService();
+      const ctrl       = new WorkflowFilesController(service as any);
+      const storageKey = 'org/org-1/workflow-uploads/uuid.pdf';
+
+      await ctrl.getSignedUrl('org-1', storageKey, 'file.pdf', 'application/pdf', false);
+
+      expect(service.getSignedUrl).toHaveBeenCalledWith(
+        'org-1',
+        storageKey,
+        'file.pdf',
+        'application/pdf',
+        false,
+      );
+    });
+
+    // The controller declares @Body('forceAttachment', new ParseBoolPipe({ optional:
+    // true })) — NestJS's HTTP pipeline invokes that pipe before the handler runs, so a
+    // direct method call here (as in the tests above) bypasses it entirely. What's worth
+    // unit-testing is our specific pipe configuration, not that Nest invokes pipes (that's
+    // framework behavior). A JSON body sends real booleans, but any client posting the
+    // literal string "false" must not have it silently treated as truthy — that would
+    // force attachment and defeat the whole point of requesting an inline PDF preview.
+    it('the forceAttachment ParseBoolPipe coerces "false"/"true" strings, and lets a missing value through unchanged', async () => {
+      const pipe = new ParseBoolPipe({ optional: true });
+
+      await expect(pipe.transform('false', {} as any)).resolves.toBe(false);
+      await expect(pipe.transform('true', {} as any)).resolves.toBe(true);
+      await expect(pipe.transform(undefined as any, {} as any)).resolves.toBeUndefined();
     });
 
     it('throws BadRequestException when storageKey is empty / not provided', async () => {
@@ -121,6 +171,81 @@ describe('WorkflowFilesController', () => {
 
       await expect(
         ctrl.getSignedUrl('org-1', 'org/org-1/workflow-uploads/uuid.pdf'),
+      ).rejects.toThrow('Forbidden');
+    });
+  });
+
+  describe('getContent()', () => {
+    it('delegates to service.downloadContent (including mimeType, for validation) and sets whatever Content-Type it resolves', async () => {
+      const service    = makeService();
+      const mimeType   = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      service.downloadContent.mockResolvedValue({
+        buffer: Buffer.from('file content'),
+        contentType: mimeType,
+      });
+      const ctrl       = new WorkflowFilesController(service as any);
+      const res        = { setHeader: jest.fn() };
+      const storageKey = 'org/org-1/workflow-uploads/uuid.docx';
+
+      const result = await ctrl.getContent('org-1', storageKey, mimeType, res as any);
+
+      // mimeType is client-supplied — the controller must not decide the
+      // fallback itself; it just forwards it to the service (which validates
+      // against the allowlist) and sets whatever contentType comes back.
+      expect(service.downloadContent).toHaveBeenCalledWith('org-1', storageKey, mimeType);
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', mimeType);
+      expect(result).toBeInstanceOf(StreamableFile);
+    });
+
+    it('sets Content-Type to whatever the service resolves when mimeType is invalid/omitted, without deciding the fallback itself', async () => {
+      const service = makeService();
+      service.downloadContent.mockResolvedValue({
+        buffer: Buffer.from('file content'),
+        contentType: 'application/octet-stream',
+      });
+      const ctrl = new WorkflowFilesController(service as any);
+      const res  = { setHeader: jest.fn() };
+
+      await ctrl.getContent('org-1', 'org/org-1/workflow-uploads/uuid.docx', undefined, res as any);
+
+      expect(service.downloadContent).toHaveBeenCalledWith(
+        'org-1',
+        'org/org-1/workflow-uploads/uuid.docx',
+        undefined,
+      );
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/octet-stream');
+    });
+
+    it('throws BadRequestException when storageKey is empty', async () => {
+      const service = makeService();
+      const ctrl    = new WorkflowFilesController(service as any);
+      const res     = { setHeader: jest.fn() };
+
+      await expect(ctrl.getContent('org-1', '', undefined, res as any)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(service.downloadContent).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when storageKey is undefined', async () => {
+      const service = makeService();
+      const ctrl    = new WorkflowFilesController(service as any);
+      const res     = { setHeader: jest.fn() };
+
+      await expect(
+        ctrl.getContent('org-1', undefined as any, undefined, res as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(service.downloadContent).not.toHaveBeenCalled();
+    });
+
+    it('propagates errors from service.downloadContent', async () => {
+      const service = makeService();
+      service.downloadContent.mockRejectedValue(new Error('Forbidden'));
+      const ctrl = new WorkflowFilesController(service as any);
+      const res  = { setHeader: jest.fn() };
+
+      await expect(
+        ctrl.getContent('org-1', 'org/org-1/workflow-uploads/uuid.docx', undefined, res as any),
       ).rejects.toThrow('Forbidden');
     });
   });

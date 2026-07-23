@@ -14,7 +14,7 @@ import { AuthClientService } from '../auth-client/auth-client.service';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { KafkaProducerService, TOPICS, getClientIp } from '@sgd/common';
 import { OrgClientService } from '../common/org-client/org-client.service';
-import { userDisplayName, encodeCursor, decodeCursor } from './user.helpers';
+import { userDisplayName, encodeCursor, decodeCursor, assertNotSelfAction } from './user.helpers';
 import Redis from 'ioredis';
 
 @Injectable()
@@ -248,6 +248,10 @@ export class UserProfileService {
   }
 
   async globalRemove(id: string, actorId?: string): Promise<void> {
+    assertNotSelfAction(actorId, id, {
+      message: 'You cannot delete your own account',
+      errorCode: 'USER_CANNOT_DELETE_SELF',
+    });
     const user = await this.findOne(id);
     await this.authClientService.disableCredentials(user.id);
     try {
@@ -288,6 +292,10 @@ export class UserProfileService {
     id: string,
     caller: { actorId?: string; companyId?: string; isSuperAdmin?: boolean },
   ): Promise<User> {
+    assertNotSelfAction(caller.actorId, id, {
+      message: 'You cannot disable your own account',
+      errorCode: 'USER_CANNOT_DISABLE_SELF',
+    });
     if (!caller.isSuperAdmin) {
       if (!caller.companyId) {
         throw new ForbiddenException('Organization context required to disable users');
@@ -314,6 +322,10 @@ export class UserProfileService {
         resourceId:   id,
         resourceName: userDisplayName(user),
       });
+      // Push an immediate session-kill SSE event so an already-open tab is
+      // logged out right away, instead of waiting for the access token to
+      // expire or a page refresh to trigger a failed /auth/refresh.
+      this.kafkaProducer.emitSafe(TOPICS.USER_DISABLED, { userId: id });
       return saved;
     } catch (err) {
       await this.authClientService.enableCredentials(id).catch(() => {});
@@ -358,7 +370,14 @@ export class UserProfileService {
   }
 
   async setSuperAdmin(id: string, enabled: boolean, actorId?: string): Promise<User> {
+    assertNotSelfAction(actorId, id, {
+      message: 'You cannot change your own super admin status',
+      errorCode: 'USER_CANNOT_MODIFY_OWN_SUPER_ADMIN',
+    });
     const user = await this.findOne(id);
+    if (user.registrationStatus !== RegistrationStatus.ACTIVE) {
+      throw new ConflictException('Only registered users can have their super admin status changed');
+    }
     const previousState = user.isSuperAdmin;
     user.isSuperAdmin = enabled;
     const saved = await this.usersRepository.save(user);
@@ -409,26 +428,45 @@ export class UserProfileService {
     return users.map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email }));
   }
 
-  async getCountsByOrg(): Promise<{ orgId: string; total: number; active: number; inactive: number }[]> {
+  async getCountsByOrg(): Promise<
+    { orgId: string; total: number; active: number; inactive: number; deleted: number }[]
+  > {
     const rows = await this.userOrgRoleRepository
       .createQueryBuilder('uor')
       .innerJoin('uor.user', 'u')
+      // Without this, TypeORM silently adds "u.deleted_at IS NULL" to the join
+      // condition (deletedAt is a @DeleteDateColumn) — globally-deleted users
+      // would never reach the CASE WHEN below and would vanish from "total" too.
+      .withDeleted()
       .select('uor.org_id', 'orgId')
+      // total counts everyone ever associated with the org — including members
+      // removed from it or globally deleted — so it matches what the org's user
+      // list (which shows removed/deleted rows badged accordingly) actually has.
       .addSelect('COUNT(DISTINCT u.id)', 'total')
       .addSelect(
-        `COUNT(DISTINCT CASE WHEN u.is_active = true AND u.deleted_at IS NULL THEN u.id END)`,
+        `COUNT(DISTINCT CASE WHEN uor.removed_at IS NULL AND u.deleted_at IS NULL AND u.is_active = true THEN u.id END)`,
         'active',
       )
-      .where('uor.role_id IS NOT NULL')
-      .andWhere('u.is_super_admin = false')
+      .addSelect(
+        `COUNT(DISTINCT CASE WHEN uor.removed_at IS NULL AND u.deleted_at IS NULL AND u.is_active = false THEN u.id END)`,
+        'inactive',
+      )
+      .addSelect(
+        `COUNT(DISTINCT CASE WHEN uor.removed_at IS NOT NULL OR u.deleted_at IS NOT NULL THEN u.id END)`,
+        'deleted',
+      )
+      // Counts every user associated with the org regardless of their global
+      // isSuperAdmin flag — this chart must reflect real org membership as-is,
+      // not second-guess it based on an unrelated global privilege flag.
       .groupBy('uor.org_id')
-      .getRawMany<{ orgId: string; total: string; active: string }>();
+      .getRawMany<{ orgId: string; total: string; active: string; inactive: string; deleted: string }>();
 
     return rows.map((r) => ({
       orgId:    r.orgId,
-      total:    parseInt(r.total,  10),
-      active:   parseInt(r.active, 10),
-      inactive: parseInt(r.total,  10) - parseInt(r.active, 10),
+      total:    parseInt(r.total,    10),
+      active:   parseInt(r.active,   10),
+      inactive: parseInt(r.inactive, 10),
+      deleted:  parseInt(r.deleted,  10),
     }));
   }
 }

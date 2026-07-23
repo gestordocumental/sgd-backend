@@ -95,6 +95,10 @@ export class UsersService {
     return this.org.getCompanies(userId);
   }
 
+  getActiveUserIds(orgId: string): Promise<string[]> {
+    return this.org.getActiveUserIds(orgId);
+  }
+
   assignOrg(userId: string, dto: AssignOrgDto, assignedBy: string): Promise<UserOrgRole> {
     return this.org.assignOrg(userId, dto, assignedBy);
   }

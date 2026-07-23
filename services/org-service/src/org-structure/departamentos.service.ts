@@ -39,7 +39,11 @@ export class DepartamentosService {
   async create(orgId: string, dto: CreateDepartamentoDto, actorId?: string): Promise<Departamento> {
     const existing = await this.repo.findOne({ where: { orgId, name: dto.name } });
     if (existing) {
-      throw new ConflictException(`Departamento "${dto.name}" already exists in this organization`);
+      throw new ConflictException({
+        message: `Departamento "${dto.name}" already exists in this organization`,
+        errorCode: 'DEPARTMENT_ALREADY_EXISTS',
+        params: { name: dto.name },
+      });
     }
 
     const departamento = this.repo.create({
@@ -60,7 +64,13 @@ export class DepartamentosService {
 
   async findOne(orgId: string, id: string): Promise<Departamento> {
     const departamento = await this.repo.findOne({ where: { id, orgId } });
-    if (!departamento) throw new NotFoundException(`Departamento ${id} not found`);
+    if (!departamento) {
+      throw new NotFoundException({
+        message: `Departamento ${id} not found`,
+        errorCode: 'DEPARTMENT_NOT_FOUND',
+        params: { id },
+      });
+    }
     return departamento;
   }
 
@@ -70,7 +80,11 @@ export class DepartamentosService {
     if (dto.name && dto.name !== departamento.name) {
       const existing = await this.repo.findOne({ where: { orgId, name: dto.name } });
       if (existing) {
-        throw new ConflictException(`Departamento "${dto.name}" already exists in this organization`);
+        throw new ConflictException({
+          message: `Departamento "${dto.name}" already exists in this organization`,
+          errorCode: 'DEPARTMENT_ALREADY_EXISTS',
+          params: { name: dto.name },
+        });
       }
     }
 
@@ -104,10 +118,28 @@ export class DepartamentosService {
 
   async restore(orgId: string, id: string, actorId?: string): Promise<Departamento> {
     const departamento = await this.repo.findOne({ where: { id, orgId }, withDeleted: true });
-    if (!departamento) throw new NotFoundException(`Departamento ${id} not found`);
-    if (!departamento.deletedAt) throw new ConflictException(`Departamento ${id} is not deleted`);
+    if (!departamento) {
+      throw new NotFoundException({
+        message: `Departamento ${id} not found`,
+        errorCode: 'DEPARTMENT_NOT_FOUND',
+        params: { id },
+      });
+    }
+    if (!departamento.deletedAt) {
+      throw new ConflictException({
+        message: `Departamento ${id} is not deleted`,
+        errorCode: 'DEPARTMENT_NOT_DELETED',
+        params: { id },
+      });
+    }
     const nameConflict = await this.repo.findOne({ where: { orgId, name: departamento.name } });
-    if (nameConflict) throw new ConflictException(`Departamento "${departamento.name}" already exists in this organization`);
+    if (nameConflict) {
+      throw new ConflictException({
+        message: `Departamento "${departamento.name}" already exists in this organization`,
+        errorCode: 'DEPARTMENT_ALREADY_EXISTS',
+        params: { name: departamento.name },
+      });
+    }
     await this.repo.restore(id);
     if (actorId) {
       this.emitAuditLog({ actorId, orgId, action: 'DEPARTAMENTO_RESTORED', resourceId: id, resourceName: departamento.name });

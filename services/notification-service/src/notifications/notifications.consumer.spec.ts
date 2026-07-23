@@ -109,7 +109,10 @@ describe('NotificationsConsumer', () => {
         TOPICS.NOTIFICATION_SEND,
         TOPICS.USER_INVITED,
         TOPICS.USER_ORG_REMOVED,
+        TOPICS.USER_ORG_DEACTIVATED,
+        TOPICS.USER_PERMISSIONS_CHANGED,
         TOPICS.USER_SUPER_ADMIN_REVOKED,
+        TOPICS.USER_DISABLED,
         TOPICS.PASSWORD_RESET,
       ],
       fromBeginning: false,
@@ -177,6 +180,36 @@ describe('NotificationsConsumer', () => {
     expect(notificationsService.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ workflowId: null, workflowTitle: null }),
     );
+  });
+
+  it('dispatches when workflowId/workflowTitle are explicitly null (e.g. NO_FINAL_USER_ALERT, not tied to a workflow)', async () => {
+    // Regression: workflows.service.ts's notifyNoFinalUsers() sends
+    // workflowId/workflowTitle as null (not omitted) since the alert fires
+    // during workflow creation, before any workflow exists. The validator
+    // previously only accepted `undefined` for these fields, so `null`
+    // failed validation and the whole payload was silently dropped — no
+    // notification, no email, for every NO_FINAL_USER_ALERT ever sent.
+    const noFinalUserAlert = {
+      type: 'NO_FINAL_USER_ALERT',
+      recipientUserIds: ['admin-1'],
+      orgId: 'org-1',
+      workflowId: null,
+      workflowTitle: null,
+      message: 'Alerta: la tipología no tiene usuarios finales configurados.',
+      metadata: { typologyId: 'ty-1' },
+    };
+
+    await capturedEachMessage(makeMsg(TOPICS.NOTIFICATION_SEND, JSON.stringify(noFinalUserAlert)));
+
+    expect(notificationsService.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'NO_FINAL_USER_ALERT',
+        recipientUserIds: ['admin-1'],
+        workflowId: null,
+        workflowTitle: null,
+      }),
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it('warns and skips on invalid notification.send payload', async () => {
@@ -309,6 +342,56 @@ describe('NotificationsConsumer', () => {
     expect(sseService.emit).not.toHaveBeenCalled();
   });
 
+  // ── handleMessage — user.org-deactivated ─────────────────────────────────
+
+  it('emits session-revoked SSE event for valid user.org-deactivated payload', async () => {
+    const payload = { userId: 'user-42', orgId: 'org-99' };
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_ORG_DEACTIVATED, JSON.stringify(payload)));
+
+    expect(sseService.emit).toHaveBeenCalledWith('user-42', { orgId: 'org-99' }, 'session-revoked');
+    expect(notificationsService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips on invalid user.org-deactivated payload (missing orgId)', async () => {
+    const bad = { userId: 'user-42' }; // missing orgId
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_ORG_DEACTIVATED, JSON.stringify(bad)));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid user.org-deactivated payload'),
+      'NotificationsConsumer',
+    );
+    expect(sseService.emit).not.toHaveBeenCalled();
+  });
+
+  // ── handleMessage — user.permissions-changed ─────────────────────────────
+
+  it('emits permissions-changed SSE event for valid user.permissions-changed payload', async () => {
+    const payload = { userId: 'user-42', orgId: 'org-99' };
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_PERMISSIONS_CHANGED, JSON.stringify(payload)));
+
+    expect(sseService.emit).toHaveBeenCalledWith(
+      'user-42',
+      { orgId: 'org-99' },
+      'permissions-changed',
+    );
+    expect(notificationsService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips on invalid user.permissions-changed payload (missing orgId)', async () => {
+    const bad = { userId: 'user-42' }; // missing orgId
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_PERMISSIONS_CHANGED, JSON.stringify(bad)));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid user.permissions-changed payload'),
+      'NotificationsConsumer',
+    );
+    expect(sseService.emit).not.toHaveBeenCalled();
+  });
+
   // ── handleMessage — user.super-admin-revoked ──────────────────────────────
 
   it('emits super-admin-revoked SSE event for valid user.super-admin-revoked payload', async () => {
@@ -327,6 +410,29 @@ describe('NotificationsConsumer', () => {
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Invalid user.super-admin-revoked payload'),
+      'NotificationsConsumer',
+    );
+    expect(sseService.emit).not.toHaveBeenCalled();
+  });
+
+  // ── handleMessage — user.disabled ──────────────────────────────────────────
+
+  it('emits account-disabled SSE event for valid user.disabled payload', async () => {
+    const payload = { userId: 'user-77' };
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_DISABLED, JSON.stringify(payload)));
+
+    expect(sseService.emit).toHaveBeenCalledWith('user-77', {}, 'account-disabled');
+    expect(notificationsService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips on invalid user.disabled payload (missing userId)', async () => {
+    const bad = {}; // missing userId
+
+    await capturedEachMessage(makeMsg(TOPICS.USER_DISABLED, JSON.stringify(bad)));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid user.disabled payload'),
       'NotificationsConsumer',
     );
     expect(sseService.emit).not.toHaveBeenCalled();

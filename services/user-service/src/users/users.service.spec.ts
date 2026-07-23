@@ -12,7 +12,7 @@ import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role, RoleScope, SystemRoleName } from '../roles/entities/role.entity';
 import { AuthClientService } from '../auth-client/auth-client.service';
 import { OrgClientService } from '../common/org-client/org-client.service';
-import { KafkaProducerService } from '@sgd/common';
+import { KafkaProducerService, TOPICS } from '@sgd/common';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -235,7 +235,7 @@ describe('UsersService', () => {
       try {
         await service.create(dto);
       } catch (err: any) {
-        expect(err.response).toMatchObject({ userId: deletedUser.id });
+        expect(err.response).toMatchObject({ params: { userId: deletedUser.id } });
       }
     });
 
@@ -253,7 +253,7 @@ describe('UsersService', () => {
       try {
         await service.create(dto);
       } catch (err: any) {
-        expect(err.response).toMatchObject({ userId: existingUser.id });
+        expect(err.response).toMatchObject({ params: { userId: existingUser.id } });
       }
     });
 
@@ -626,6 +626,13 @@ describe('UsersService', () => {
       await expect(service.globalRemove(user.id)).rejects.toThrow('DB error');
       expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
     });
+
+    it('throws BadRequestException when the actor targets their own account', async () => {
+      await expect(service.globalRemove('user-uuid-1', 'user-uuid-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
   });
 
   // ─── restore ──────────────────────────────────────────────────────────────
@@ -676,6 +683,23 @@ describe('UsersService', () => {
       expect(result.isActive).toBe(false);
     });
 
+    it('emits USER_DISABLED so an already-open tab is logged out immediately', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
+      const saved = { ...user, isActive: false };
+
+      uorRepo.findOne.mockResolvedValue(makeUor());
+      usersRepo.findOne.mockResolvedValue(user);
+      authClient.disableCredentials.mockResolvedValue(undefined);
+      authClient.revokeAllTokens.mockResolvedValue(undefined);
+      usersRepo.save.mockResolvedValue(saved as any);
+
+      await service.disable(user.id, { companyId: 'org-uuid-1' });
+
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledWith(TOPICS.USER_DISABLED, {
+        userId: user.id,
+      });
+    });
+
     it('compensates by re-enabling credentials when DB save fails', async () => {
       const user = makeUser({ registrationStatus: RegistrationStatus.ACTIVE });
 
@@ -688,6 +712,10 @@ describe('UsersService', () => {
 
       await expect(service.disable(user.id, { companyId: 'org-uuid-1' })).rejects.toThrow('DB save failed');
       expect(authClient.enableCredentials).toHaveBeenCalledWith(user.id);
+      expect(kafkaProducer.emitSafe).not.toHaveBeenCalledWith(
+        TOPICS.USER_DISABLED,
+        expect.anything(),
+      );
     });
 
     it('throws ConflictException when user is not in ACTIVE status', async () => {
@@ -707,6 +735,14 @@ describe('UsersService', () => {
 
     it('throws ForbiddenException when non-superadmin caller has no companyId', async () => {
       await expect(service.disable('user-uuid-1', {})).rejects.toThrow(ForbiddenException);
+      expect(uorRepo.findOne).not.toHaveBeenCalled();
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when the actor targets their own account', async () => {
+      await expect(
+        service.disable('user-uuid-1', { actorId: 'user-uuid-1', isSuperAdmin: true }),
+      ).rejects.toThrow(BadRequestException);
       expect(uorRepo.findOne).not.toHaveBeenCalled();
       expect(usersRepo.findOne).not.toHaveBeenCalled();
     });
@@ -799,6 +835,42 @@ describe('UsersService', () => {
     });
   });
 
+  // ─── getActiveUserIds ─────────────────────────────────────────────────────
+
+  describe('getActiveUserIds', () => {
+    it('returns deduplicated userIds for non-removed memberships of the org', async () => {
+      const rows = [
+        makeUor({ userId: 'user-1' }),
+        makeUor({ userId: 'user-2' }),
+        makeUor({ userId: 'user-1' }), // duplicate (e.g. multiple roles)
+      ];
+      uorRepo.find.mockResolvedValue(rows as any);
+
+      const result = await service.getActiveUserIds('org-uuid-1');
+
+      expect(result).toEqual(['user-1', 'user-2']);
+      expect(uorRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { orgId: 'org-uuid-1', removedAt: expect.anything() } }),
+      );
+    });
+
+    it('returns empty array when the org has no members', async () => {
+      uorRepo.find.mockResolvedValue([]);
+
+      expect(await service.getActiveUserIds('org-uuid-1')).toEqual([]);
+    });
+
+    it('caps the query so a single deactivation can never fan out an unbounded Kafka burst', async () => {
+      uorRepo.find.mockResolvedValue([]);
+
+      await service.getActiveUserIds('org-uuid-1');
+
+      expect(uorRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 10_000 }),
+      );
+    });
+  });
+
   // ─── provision ────────────────────────────────────────────────────────────
 
   describe('provision', () => {
@@ -832,7 +904,7 @@ describe('UsersService', () => {
 
   describe('setSuperAdmin', () => {
     it('sets isSuperAdmin to true and persists', async () => {
-      const user = makeUser({ isSuperAdmin: false });
+      const user = makeUser({ isSuperAdmin: false, registrationStatus: RegistrationStatus.ACTIVE });
       const updated = { ...user, isSuperAdmin: true };
 
       usersRepo.findOne.mockResolvedValue(user);
@@ -846,7 +918,7 @@ describe('UsersService', () => {
     });
 
     it('sets isSuperAdmin to false and persists', async () => {
-      const user = makeUser({ isSuperAdmin: true });
+      const user = makeUser({ isSuperAdmin: true, registrationStatus: RegistrationStatus.ACTIVE });
       const updated = { ...user, isSuperAdmin: false };
 
       usersRepo.findOne.mockResolvedValue(user);
@@ -862,6 +934,21 @@ describe('UsersService', () => {
       usersRepo.findOne.mockResolvedValue(null);
 
       await expect(service.setSuperAdmin('bad-id', true)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when the actor targets their own account', async () => {
+      await expect(
+        service.setSuperAdmin('user-uuid-1', false, 'user-uuid-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when the user is still completing registration', async () => {
+      const user = makeUser({ registrationStatus: RegistrationStatus.PENDING_CREDENTIALS });
+      usersRepo.findOne.mockResolvedValue(user);
+
+      await expect(service.setSuperAdmin(user.id, false)).rejects.toThrow(ConflictException);
+      expect(usersRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -1010,6 +1097,13 @@ describe('UsersService', () => {
       await expect(service.removeFromOrg('bad-id', 'org-uuid-1')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('throws BadRequestException when the actor targets their own membership', async () => {
+      await expect(
+        service.removeFromOrg('user-uuid-1', 'org-uuid-1', 'user-uuid-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersRepo.findOne).not.toHaveBeenCalled();
     });
   });
 
@@ -1620,14 +1714,15 @@ describe('UsersService', () => {
   describe('getCountsByOrg', () => {
     it('returns counts grouped by org with values parsed as numbers', async () => {
       const qb = {
-        innerJoin:  jest.fn().mockReturnThis(),
-        select:     jest.fn().mockReturnThis(),
-        addSelect:  jest.fn().mockReturnThis(),
-        where:      jest.fn().mockReturnThis(),
-        andWhere:   jest.fn().mockReturnThis(),
-        groupBy:    jest.fn().mockReturnThis(),
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
-          { orgId: 'org-1', total: '10', active: '8' },
+          { orgId: 'org-1', total: '10', active: '7', inactive: '1', deleted: '2' },
         ]),
       };
       uorRepo.createQueryBuilder.mockReturnValue(qb as any);
@@ -1635,8 +1730,125 @@ describe('UsersService', () => {
       const result = await service.getCountsByOrg();
 
       expect(result).toEqual([
-        { orgId: 'org-1', total: 10, active: 8, inactive: 2 },
+        { orgId: 'org-1', total: 10, active: 7, inactive: 1, deleted: 2 },
       ]);
+    });
+
+    it('counts org members regardless of whether they currently hold a role', async () => {
+      // Regression: the total must include members whose role was revoked but who
+      // were never removed from the org — filtering on role_id IS NOT NULL
+      // undercounts the org's real membership.
+      const qb = {
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
+        // 2 org members total, only 1 currently holds a role — the roleless
+        // member must still be counted as active (not removed, not deleted).
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '2', active: '2', inactive: '0', deleted: '0' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(qb.where).not.toHaveBeenCalledWith('uor.role_id IS NOT NULL');
+      expect(result).toEqual([{ orgId: 'org-1', total: 2, active: 2, inactive: 0, deleted: 0 }]);
+    });
+
+    it('counts members removed from the org or globally deleted in the "deleted" bucket, not excluded from total', async () => {
+      // Regression: getCountsByOrg previously filtered out uor.removed_at rows
+      // entirely (uor.removed_at IS NULL in .where()), so removed/deleted members
+      // were missing from "total" — the org's user list (which shows them badged
+      // "Eliminado") had more rows than this card's total.
+      const qb = {
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '8', active: '6', inactive: '0', deleted: '2' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(qb.where).not.toHaveBeenCalledWith('uor.removed_at IS NULL');
+      expect(result).toEqual([{ orgId: 'org-1', total: 8, active: 6, inactive: 0, deleted: 2 }]);
+    });
+
+    it('does not exclude users flagged as global super admin from the org headcount', async () => {
+      // Regression: this chart must reflect real org membership as-is. A user's
+      // global isSuperAdmin flag is an unrelated platform-wide privilege — it
+      // must not make them invisible in the org they're actually assigned to.
+      const qb = {
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '4', active: '4', inactive: '0', deleted: '0' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      // getRawMany() is a canned mock, so it can't prove the real SQL includes
+      // super admins — instead inspect every string the query builder actually
+      // received (join condition, select/addSelect CASE WHEN expressions,
+      // where/andWhere) so an exclusion smuggled into any of them, not just a
+      // top-level .where(), would also be caught.
+      const allArgs = [
+        ...qb.innerJoin.mock.calls,
+        ...qb.select.mock.calls,
+        ...qb.addSelect.mock.calls,
+        ...qb.where.mock.calls,
+        ...qb.andWhere.mock.calls,
+      ].flat();
+      const stringArgs = allArgs.filter((arg): arg is string => typeof arg === 'string');
+      expect(stringArgs.length).toBeGreaterThan(0); // sanity check the builder was actually used
+      for (const arg of stringArgs) {
+        expect(arg.toLowerCase()).not.toContain('super_admin');
+        expect(arg.toLowerCase()).not.toContain('superadmin');
+      }
+      expect(result).toEqual([{ orgId: 'org-1', total: 4, active: 4, inactive: 0, deleted: 0 }]);
+    });
+
+    it('includes globally soft-deleted users in the query instead of letting TypeORM silently drop them from the join', async () => {
+      // Regression: `deletedAt` is a @DeleteDateColumn, so TypeORM adds an
+      // implicit "u.deleted_at IS NULL" to the innerJoin condition unless
+      // .withDeleted() is called — without it, globally-deleted users never
+      // reach the CASE WHEN expressions and vanish from "total"/"deleted" too.
+      const qb = {
+        innerJoin:   jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        select:      jest.fn().mockReturnThis(),
+        addSelect:   jest.fn().mockReturnThis(),
+        where:       jest.fn().mockReturnThis(),
+        andWhere:    jest.fn().mockReturnThis(),
+        groupBy:     jest.fn().mockReturnThis(),
+        getRawMany:  jest.fn().mockResolvedValue([
+          { orgId: 'org-1', total: '3', active: '2', inactive: '0', deleted: '1' },
+        ]),
+      };
+      uorRepo.createQueryBuilder.mockReturnValue(qb as any);
+
+      const result = await service.getCountsByOrg();
+
+      expect(qb.withDeleted).toHaveBeenCalled();
+      expect(result).toEqual([{ orgId: 'org-1', total: 3, active: 2, inactive: 0, deleted: 1 }]);
     });
   });
 

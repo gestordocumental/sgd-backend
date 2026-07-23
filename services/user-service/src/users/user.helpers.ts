@@ -2,6 +2,21 @@ import { BadRequestException } from '@nestjs/common';
 
 export const INVITATION_TTL_SECONDS = 72 * 60 * 60; // 259200s = 72h
 
+/**
+ * Guards self-service actions (delete/disable/remove/etc.) that a caller
+ * must not be able to perform on their own account. Centralized so the
+ * error shape stays consistent across the several call sites that need it.
+ */
+export function assertNotSelfAction(
+  actorId: string | undefined,
+  targetId: string,
+  { message, errorCode }: { message: string; errorCode: string },
+): void {
+  if (actorId && actorId === targetId) {
+    throw new BadRequestException({ message, errorCode, params: { userId: targetId } });
+  }
+}
+
 export function userDisplayName(user: {
   firstName?: string | null;
   lastName?: string | null;

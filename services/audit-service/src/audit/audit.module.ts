@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { HttpModule } from '@nestjs/axios';
 import { Client } from '@elastic/elasticsearch';
 import { Kafka } from 'kafkajs';
 import { KAFKA_CLIENT, KafkaProducerService } from '@sgd/common';
 import { AppLogger } from '@sgd/common';
 import { AuditController } from './audit.controller';
+import { InternalAuditController } from './internal-audit.controller';
 import { AuditService } from './audit.service';
 import { AuditConsumer } from './audit.consumer';
+import { UserClientService } from '../common/clients/user-client.service';
 import { ES_WRITE_CLIENT, ES_READ_CLIENT } from './es-client.tokens';
 
 export { ES_WRITE_CLIENT, ES_READ_CLIENT };
@@ -48,12 +51,13 @@ function buildEsClient(config: ConfigService, role: 'WRITE' | 'READ'): Client {
 }
 
 @Module({
-  imports: [ConfigModule],
-  controllers: [AuditController],
+  imports: [ConfigModule, HttpModule],
+  controllers: [AuditController, InternalAuditController],
   providers: [
     AuditService,
     AuditConsumer,
     KafkaProducerService,
+    UserClientService,
     AppLogger,
     {
       provide: ES_WRITE_CLIENT,

@@ -12,10 +12,13 @@ import { AssignOrgDto } from './dto/assign-org.dto';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role } from '../roles/entities/role.entity';
 import { KafkaProducerService, TOPICS, getClientIp } from '@sgd/common';
-import { userDisplayName, encodeCursor, decodeCursor } from './user.helpers';
+import { userDisplayName, encodeCursor, decodeCursor, assertNotSelfAction } from './user.helpers';
 
 @Injectable()
 export class UserOrgService {
+  // Safety cap for getActiveUserIds()'s Kafka fan-out — see its docblock below.
+  private static readonly MAX_ACTIVE_USER_IDS = 10_000;
+
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
@@ -60,6 +63,24 @@ export class UserOrgService {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException(`User ${id} not found`);
     return user;
+  }
+
+  /**
+   * Returns the IDs of users currently (non-removed) assigned to orgId.
+   * Used by org-service to proactively revoke sessions when an org is deactivated
+   * (one Kafka event per user, fire-and-forget). Capped at MAX_ACTIVE_USER_IDS so a
+   * single deactivation can never fan out an unbounded burst of publishes — an org
+   * past this size isn't expected in practice, and any user left out simply
+   * self-corrects on their next JWT refresh, the same bounded window this feature
+   * narrows for everyone else.
+   */
+  async getActiveUserIds(orgId: string): Promise<string[]> {
+    const rows = await this.userOrgRoleRepository.find({
+      where: { orgId, removedAt: IsNull() },
+      select: { userId: true },
+      take: UserOrgService.MAX_ACTIVE_USER_IDS,
+    });
+    return [...new Set(rows.map((r) => r.userId))];
   }
 
   async getCompanies(userId: string): Promise<string[]> {
@@ -205,6 +226,10 @@ export class UserOrgService {
   }
 
   async removeFromOrg(userId: string, orgId: string, actorId?: string): Promise<void> {
+    assertNotSelfAction(actorId, userId, {
+      message: 'You cannot remove yourself from an organization',
+      errorCode: 'USER_CANNOT_REMOVE_SELF_FROM_ORG',
+    });
     const targetUser = await this.findUser(userId);
     const result = await this.userOrgRoleRepository.update(
       { userId, orgId },

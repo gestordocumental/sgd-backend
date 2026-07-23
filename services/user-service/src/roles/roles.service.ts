@@ -2,9 +2,13 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  Inject,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
+import type { Redis } from 'ioredis';
+import { KafkaProducerService, TOPICS } from '@sgd/common';
 import { Role, RoleScope } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
 import { UserOrgRole } from './entities/user-org-role.entity';
@@ -15,6 +19,8 @@ import { RolePolicy } from './domain/role.policy';
 
 @Injectable()
 export class RolesService {
+  private readonly logger = new Logger(RolesService.name);
+
   constructor(
     @InjectRepository(Role)
     private readonly rolesRepository: Repository<Role>,
@@ -22,7 +28,42 @@ export class RolesService {
     private readonly permissionsRepository: Repository<Permission>,
     @InjectRepository(UserOrgRole)
     private readonly userOrgRoleRepository: Repository<UserOrgRole>,
+    @Inject('REDIS_CLIENT')
+    private readonly redis: Redis,
+    private readonly kafkaProducer: KafkaProducerService,
   ) {}
+
+  /**
+   * Invalidates the cached effective-permissions for every user currently
+   * holding this role, and emits USER_PERMISSIONS_CHANGED per user so the
+   * notification-service can push a live SSE update — without this, a user
+   * with an active session keeps their old permission set (from the Redis
+   * cache and/or their JWT) until the cache TTL expires or they log back in.
+   * Best-effort: the role's permissions have already been saved by the time
+   * this runs, so a failure here (e.g. a transient DB error on the lookup)
+   * must not make assignPermissions()/removePermission() reject.
+   */
+  private async notifyPermissionsChanged(roleId: string, orgId: string): Promise<void> {
+    try {
+      const affected = await this.userOrgRoleRepository.find({
+        where: { roleId, orgId, removedAt: IsNull() },
+        select: { userId: true },
+      });
+      const userIds = [...new Set(affected.map((r) => r.userId))];
+
+      await Promise.all(
+        userIds.map((userId) => this.redis.del(`perms:${userId}:${orgId}`).catch(() => {})),
+      );
+      for (const userId of userIds) {
+        this.kafkaProducer.emitSafe(TOPICS.USER_PERMISSIONS_CHANGED, { userId, orgId });
+      }
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify users of permission changes for role ${roleId}`,
+        (err as Error).stack,
+      );
+    }
+  }
 
   // Returns system roles + custom roles for the given org
   findAll(orgId: string): Promise<Role[]> {
@@ -88,9 +129,13 @@ export class RolesService {
 
     const assignedCount = await this.userOrgRoleRepository.countBy({ roleId: id });
     if (assignedCount > 0) {
-      throw new ConflictException(
-        `Role "${role.name}" is still assigned to ${assignedCount} user(s) and cannot be deleted`,
-      );
+      // errorCode + params let the frontend render a translated message (see
+      // resolveApiError) instead of this English-only string verbatim.
+      throw new ConflictException({
+        message: `Role "${role.name}" is still assigned to ${assignedCount} user(s) and cannot be deleted`,
+        errorCode: 'ROLE_HAS_ASSIGNED_USERS',
+        params: { name: role.name, count: assignedCount },
+      });
     }
 
     await this.rolesRepository.remove(role);
@@ -103,7 +148,9 @@ export class RolesService {
     const permissions = await this.resolvePermissions(dto.permissionIds);
 
     role.permissions = permissions;
-    return this.rolesRepository.save(role);
+    const saved = await this.rolesRepository.save(role);
+    await this.notifyPermissionsChanged(id, orgId);
+    return saved;
   }
 
   private async resolvePermissions(permissionIds: string[]): Promise<Permission[]> {
@@ -122,6 +169,8 @@ export class RolesService {
     RolePolicy.canManagePermissions(role, orgId);
 
     role.permissions = role.permissions.filter((p) => p.id !== permissionId);
-    return this.rolesRepository.save(role);
+    const saved = await this.rolesRepository.save(role);
+    await this.notifyPermissionsChanged(roleId, orgId);
+    return saved;
   }
 }

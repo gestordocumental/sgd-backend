@@ -57,19 +57,53 @@ function makeModel(docOrNull: TypologyDocument | null = null) {
   Model.findOne  = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(docOrNull) });
   Model.find     = jest.fn().mockReturnValue({ sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue([]) });
   Model.updateOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }) });
+  Model.syncIndexes = jest.fn().mockResolvedValue([]);
   return { Model, instance };
 }
 
-let mockKafkaProducer: { send: jest.Mock };
+let mockKafkaProducer: { emitSafe: jest.Mock };
+let mockLogger: { log: jest.Mock; error: jest.Mock; warn: jest.Mock; debug: jest.Mock };
 
 // ── TypologiesService ──────────────────────────────────────────────────────
 
 describe('TypologiesService', () => {
   beforeEach(() => {
-    mockKafkaProducer = { send: jest.fn().mockResolvedValue(undefined) };
+    mockKafkaProducer = { emitSafe: jest.fn() };
+    mockLogger = { log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
   });
 
-  const makeService = (Model: any): TypologiesService => new TypologiesService(Model, mockKafkaProducer as any);
+  const makeService = (Model: any): TypologiesService =>
+    new TypologiesService(Model, mockKafkaProducer as any, mockLogger as any);
+
+  // ── onModuleInit ─────────────────────────────────────────────────────────
+
+  describe('onModuleInit()', () => {
+    it('syncs indexes silently on success', async () => {
+      const { Model } = makeModel();
+      const service = makeService(Model);
+
+      await service.onModuleInit();
+
+      expect(Model.syncIndexes).toHaveBeenCalled();
+      expect(mockLogger.error).not.toHaveBeenCalled();
+    });
+
+    it('logs an error instead of throwing when index sync fails (e.g. pre-existing duplicate ACTIVE codigos)', async () => {
+      const { Model } = makeModel();
+      const syncError = new Error('E11000 duplicate key error');
+      Model.syncIndexes = jest.fn().mockRejectedValue(syncError);
+      const service = makeService(Model);
+
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('unique-active-codigo constraint'),
+        expect.any(String),
+        'TypologiesService',
+      );
+    });
+  });
+
   // ── create ───────────────────────────────────────────────────────────────
 
   describe('create()', () => {
@@ -149,7 +183,7 @@ describe('TypologiesService', () => {
   // ── findAll ───────────────────────────────────────────────────────────────
 
   describe('findAll()', () => {
-    it('queries only ACTIVE typologies with correct pagination', async () => {
+    it('queries typologies of all statuses with correct pagination when no status filter is given', async () => {
       const docs = [makeDoc(), makeDoc()];
       const execMock = jest.fn().mockResolvedValue(docs);
       const chain = { sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: execMock };
@@ -159,10 +193,23 @@ describe('TypologiesService', () => {
       const service = makeService(Model);
       const result = await service.findAll('org-1', 2, 10);
 
-      expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1', typologyStatus: TypologyStatus.ACTIVE });
+      expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1' });
       expect(chain.skip).toHaveBeenCalledWith(10); // page=2, limit=10 → skip=10
       expect(chain.limit).toHaveBeenCalledWith(10);
       expect(result).toEqual(docs);
+    });
+
+    it('filters by the given status when one is provided', async () => {
+      const docs = [makeDoc()];
+      const execMock = jest.fn().mockResolvedValue(docs);
+      const chain = { sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: execMock };
+      const { Model } = makeModel();
+      Model.find = jest.fn().mockReturnValue(chain);
+
+      const service = makeService(Model);
+      await service.findAll('org-1', 1, 20, TypologyStatus.ACTIVE);
+
+      expect(Model.find).toHaveBeenCalledWith({ orgId: 'org-1', typologyStatus: TypologyStatus.ACTIVE });
     });
   });
 
@@ -388,6 +435,25 @@ describe('TypologiesService', () => {
       expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
     });
 
+    it('trims extracted nombre/codigo/version — a stray space must not look like a discrepancy or a different code', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
+      });
+      const { Model } = makeModel(doc);
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
+
+      const service = makeService(Model);
+      await service.applyExtractedMetadata('org-1', doc.id, {
+        nombre: '  Policy  ', codigo: '  POL-001  ', version: '  01  ',
+      });
+
+      expect(doc.metadataExtraida.nombre).toBe('Policy');
+      expect(doc.metadataExtraida.codigo).toBe('POL-001');
+      expect(doc.metadataExtraida.version).toBe('01');
+      expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
+    });
+
     it('scenario B — sets PENDING_CONFIRMATION when no declared data', async () => {
       const doc = makeDoc({
         datosDeclarados: { nombre: null, codigo: null, version: null, fuente: DataSource.MANUAL },
@@ -443,10 +509,10 @@ describe('TypologiesService', () => {
   // ── resolveDiscrepancy ────────────────────────────────────────────────────
 
   describe('resolveDiscrepancy()', () => {
-    it('KEEP_DECLARED — does not change datosDeclarados', async () => {
+    it('KEEP_DECLARED — does not change datosDeclarados when it already matches the extraction', async () => {
       const doc = makeDoc({
         documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
-        metadataExtraida: { nombre: 'Other', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+        metadataExtraida: { nombre: 'Policy', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
       });
       const { Model } = makeModel(doc);
 
@@ -455,6 +521,37 @@ describe('TypologiesService', () => {
 
       expect(doc.datosDeclarados.nombre).toBe('Policy');
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
+    });
+
+    it('KEEP_DECLARED — throws when the declared data still mismatches the extracted content', async () => {
+      const doc = makeDoc({
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Other', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(
+        service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED }),
+      ).rejects.toThrow(BadRequestException);
+      // Left untouched — still DISCREPANCY, not silently CONFIRMED.
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.DISCREPANCY);
+    });
+
+    it('MANUAL_OVERRIDE — throws when the provided values still mismatch the extracted content', async () => {
+      const doc = makeDoc({
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Extracted Name', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(
+        service.resolveDiscrepancy('org-1', doc.id, {
+          action: ResolveAction.MANUAL_OVERRIDE,
+          nombre: 'A Different Name',
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('ADOPT_EXTRACTED — copies extracted values to datosDeclarados', async () => {
@@ -470,6 +567,24 @@ describe('TypologiesService', () => {
       expect(doc.datosDeclarados.nombre).toBe('Extracted');
       expect(doc.datosDeclarados.codigo).toBe('EXT-001');
       expect(doc.datosDeclarados.fuente).toBe(DataSource.CONFIRMED_FROM_EXTRACTION);
+    });
+
+    it('ADOPT_EXTRACTED — keeps the existing declared value when the extractor found no value for a field, staying ACTIVE instead of silently becoming INCOMPLETE', async () => {
+      const doc = makeDoc({
+        typologyStatus: TypologyStatus.ACTIVE,
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
+        // Extractor found a different nombre but couldn't find a version in the document.
+        metadataExtraida: { nombre: 'Extracted Name', codigo: 'POL-001', version: null, extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.ADOPT_EXTRACTED });
+
+      expect(doc.datosDeclarados.nombre).toBe('Extracted Name');
+      expect(doc.datosDeclarados.version).toBe('01'); // preserved, not nulled out
+      expect(doc.typologyStatus).toBe(TypologyStatus.ACTIVE); // still complete — doesn't vanish from the active list
     });
 
     it('MANUAL_OVERRIDE — uses provided values', async () => {

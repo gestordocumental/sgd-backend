@@ -69,6 +69,10 @@ export interface AuditLogDocument {
   id:              string;
   service:         string;
   actorId:         string;
+  // Resolved server-side (see AuditService.resolveActorNames) — present
+  // regardless of whether the viewer's role has USERS:READ. Null only if
+  // user-service couldn't resolve it (best-effort) or the actor has no name set.
+  actorName?:      string | null;
   orgId:           string | null;
   action:          string;
   resourceType:    string;

@@ -10,6 +10,16 @@ import { UserClientService } from '../common/user-client/user-client.service';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
+/**
+ * update() fires notifyOrgDeactivated fire-and-forget (not awaited), so its
+ * internal chain (getActiveUserIds → emitSafe) may still be pending right
+ * after service.update() resolves. Flushing a macrotask lets any queued
+ * microtasks (however many links deep) settle before assertions run.
+ */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /** Returns a chainable QueryBuilder mock whose getMany resolves to rows. */
 function makeQbMock(rows: Org[]) {
   const qb: Record<string, jest.Mock> = {};
@@ -39,7 +49,7 @@ describe('OrgsService', () => {
   let service: OrgsService;
   let repo: MockRepo<Org>;
   let kafkaProducer: { emitSafe: jest.Mock };
-  let userClient: { revokeOrgAccess: jest.Mock };
+  let userClient: { revokeOrgAccess: jest.Mock; getActiveUserIds: jest.Mock };
   const originalFetch = global.fetch;
 
   beforeAll(() => {
@@ -65,7 +75,10 @@ describe('OrgsService', () => {
     };
 
     kafkaProducer = { emitSafe: jest.fn() };
-    userClient = { revokeOrgAccess: jest.fn().mockResolvedValue(undefined) };
+    userClient = {
+      revokeOrgAccess: jest.fn().mockResolvedValue(undefined),
+      getActiveUserIds: jest.fn().mockResolvedValue([]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -272,6 +285,61 @@ describe('OrgsService', () => {
     await service.update(org.id, { name: 'New Name' }, 'actor-1');
 
     expect(kafkaProducer.emitSafe).toHaveBeenCalled();
+  });
+
+  // ── deactivation — proactive session revocation ─────────────────────────
+
+  it('notifies affected users via Kafka when an org transitions from active to inactive', async () => {
+    const org = makeOrg({ status: OrgStatus.ACTIVE });
+    const saved = makeOrg({ status: OrgStatus.INACTIVE });
+    repo.findOne!.mockResolvedValueOnce(org).mockResolvedValueOnce(null);
+    repo.save!.mockResolvedValue(saved);
+    userClient.getActiveUserIds.mockResolvedValue(['user-1', 'user-2']);
+
+    await service.update(org.id, { status: OrgStatus.INACTIVE });
+    await flushMicrotasks(); // let the fire-and-forget notification chain settle
+
+    expect(userClient.getActiveUserIds).toHaveBeenCalledWith(org.id);
+    expect(kafkaProducer.emitSafe).toHaveBeenCalledWith('user.org-deactivated', {
+      userId: 'user-1',
+      orgId: org.id,
+    });
+    expect(kafkaProducer.emitSafe).toHaveBeenCalledWith('user.org-deactivated', {
+      userId: 'user-2',
+      orgId: org.id,
+    });
+  });
+
+  it('does not notify when status is updated but the org was already inactive', async () => {
+    const org = makeOrg({ status: OrgStatus.INACTIVE });
+    const saved = makeOrg({ status: OrgStatus.INACTIVE });
+    repo.findOne!.mockResolvedValueOnce(org).mockResolvedValueOnce(null);
+    repo.save!.mockResolvedValue(saved);
+
+    await service.update(org.id, { status: OrgStatus.INACTIVE });
+
+    expect(userClient.getActiveUserIds).not.toHaveBeenCalled();
+  });
+
+  it('does not notify when a non-status field is updated', async () => {
+    const org = makeOrg({ status: OrgStatus.ACTIVE });
+    const saved = makeOrg({ status: OrgStatus.ACTIVE, phone: '999' });
+    repo.findOne!.mockResolvedValueOnce(org).mockResolvedValueOnce(null);
+    repo.save!.mockResolvedValue(saved);
+
+    await service.update(org.id, { phone: '999' });
+
+    expect(userClient.getActiveUserIds).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the status update when notifying affected users fails', async () => {
+    const org = makeOrg({ status: OrgStatus.ACTIVE });
+    const saved = makeOrg({ status: OrgStatus.INACTIVE });
+    repo.findOne!.mockResolvedValueOnce(org).mockResolvedValueOnce(null);
+    repo.save!.mockResolvedValue(saved);
+    userClient.getActiveUserIds.mockRejectedValueOnce(new Error('user-service unreachable'));
+
+    await expect(service.update(org.id, { status: OrgStatus.INACTIVE })).resolves.toBe(saved);
   });
 
   it('compensates by restoring org when revokeOrgAccess fails during remove', async () => {

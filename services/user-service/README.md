@@ -71,6 +71,7 @@ Gestiona el ciclo de vida de usuarios: creación, invitación, perfil, avatar, a
 | `GET` | `/:id/effective-permissions` | `INTERNAL_TOKEN_AUTH_USER` | auth-service |
 | `GET` | `/:id/companies` | `INTERNAL_TOKEN_AUTH_USER` | auth-service |
 | `DELETE` | `/internal/orgs/:orgId/users` | `INTERNAL_TOKEN_ORG_USER` | org-service |
+| `GET` | `/internal/orgs/:orgId/user-ids` | `INTERNAL_TOKEN_ORG_USER` | org-service |
 
 ## Kafka
 

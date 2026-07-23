@@ -31,6 +31,7 @@ import {
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, AppLogger, JwtPayload, TOPICS } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
+import { UserClientService } from '../common/clients/user-client.service';
 
 @Injectable()
 export class WorkflowsService {
@@ -49,6 +50,7 @@ export class WorkflowsService {
     private readonly timelineService: WorkflowTimelineService,
     private readonly kafkaProducer: KafkaProducerService,
     private readonly documentClientService: DocumentClientService,
+    private readonly userClientService: UserClientService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -573,9 +575,22 @@ export class WorkflowsService {
   // ── Obtener timeline ──────────────────────────────────────────────────────────
 
   async getTimeline(id: string, user: JwtPayload): Promise<TimelineEventResponseDto[]> {
-    await this.findOneOrFail(id, user); // valida acceso
+    // Only validates access (org-scoped existence) — deliberately NOT
+    // findOneOrFail, which also resolves participant names via its own
+    // getUsersByIds batch call. That result would be thrown away here anyway,
+    // and it'd mean two separate user-service round-trips per request.
+    await this.findWorkflowOrFail(id, user);
     const events = await this.timelineService.getTimeline(id);
-    return events.map(TimelineEventResponseDto.from);
+
+    // Resolved here (not left to the frontend) so the timeline shows actor names
+    // regardless of whether the viewer's role has USERS:READ — best-effort: on
+    // failure getUsersByIds returns an empty map and events just fall back to null.
+    const actorIds = [...new Set(events.map((e) => e.actorId))];
+    const usersById = await this.userClientService.getUsersByIds(actorIds);
+
+    return events.map((event) =>
+      TimelineEventResponseDto.from(event, usersById.get(event.actorId)?.displayName ?? null),
+    );
   }
 
   // ── Helpers privados ──────────────────────────────────────────────────────────
@@ -717,7 +732,10 @@ export class WorkflowsService {
     }));
   }
 
-  private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
+  // Org-scoped existence check only — no actions/admin-cycle loading or
+  // participant-name resolution. Used by callers that just need to validate
+  // access (e.g. getTimeline) without paying for the full detail enrichment.
+  private async findWorkflowOrFail(id: string, user: JwtPayload): Promise<Workflow> {
     const orgId    = user.companyId!;
     const workflow = await this.workflowRepo.findOne({
       where: { id, orgId },
@@ -725,6 +743,11 @@ export class WorkflowsService {
     });
 
     if (!workflow) throw new NotFoundException('Workflow not found');
+    return workflow;
+  }
+
+  private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
+    const workflow = await this.findWorkflowOrFail(id, user);
 
     const actions = await this.actionRepo.find({
       where: { workflowId: id },
@@ -742,6 +765,55 @@ export class WorkflowsService {
       ? (allAdminCycles.find((c) => c.id === workflow.activeAdminCycleId) ?? null)
       : null;
 
-    return WorkflowResponseDto.from(workflow, actions, activeAdminCycle ?? undefined, allAdminCycles);
+    const participantNames = await this.resolveParticipantNames(workflow, actions, allAdminCycles);
+
+    return WorkflowResponseDto.from(
+      workflow,
+      actions,
+      activeAdminCycle ?? undefined,
+      allAdminCycles,
+      participantNames,
+    );
+  }
+
+  /**
+   * Collects every user ID referenced anywhere in a workflow (creator, approval
+   * steps/actions, admin cycle steps, final users, allowed optional reviewers)
+   * and resolves their display names in one batch call — so the detail view
+   * and dialogs like ForwardStepDialog can show who's involved without
+   * requiring the viewer's role to hold USERS:READ.
+   */
+  private async resolveParticipantNames(
+    workflow: Workflow,
+    actions: WorkflowApprovalAction[],
+    allAdminCycles: WorkflowAdminCycle[],
+  ): Promise<Record<string, string>> {
+    const ids = new Set<string>([workflow.createdBy]);
+    if (workflow.closedBy) ids.add(workflow.closedBy);
+    if (workflow.cancelledBy) ids.add(workflow.cancelledBy);
+    if (workflow.currentAssignedUserId) ids.add(workflow.currentAssignedUserId);
+    for (const userId of workflow.finalUserIds ?? []) ids.add(userId);
+    for (const step of workflow.approvalSteps ?? []) ids.add(step.userId);
+    for (const action of actions) ids.add(action.userId);
+    for (const cycle of allAdminCycles) {
+      ids.add(cycle.initiatedBy);
+      for (const step of cycle.steps ?? []) ids.add(step.userId);
+      // Users allowed to be picked as the optional reviewer when forwarding an
+      // admin step — shown in ForwardStepDialog's selector, which otherwise
+      // has no other way to resolve their names without USERS:READ.
+      for (const id of cycle.allowedOptionalReviewerIds ?? []) ids.add(id);
+    }
+
+    const usersById = await this.userClientService.getUsersByIds([...ids]);
+    // Omit entries with no resolvable name (displayName: null) instead of
+    // putting null in a Record<string, string> — the frontend already falls
+    // back to "unknown user" for any id missing from this map.
+    return Object.fromEntries(
+      [...usersById]
+        .filter((entry): entry is [string, { id: string; displayName: string }] =>
+          entry[1].displayName !== null,
+        )
+        .map(([id, u]) => [id, u.displayName]),
+    );
   }
 }

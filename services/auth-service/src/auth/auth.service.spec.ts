@@ -15,6 +15,7 @@ import { AuthService } from './auth.service';
 import { JwtKeyService } from './jwt-key.service';
 import { Credential, CredentialStatus } from './entities/credential.entity';
 import { UserClientService } from '../user-client/user-client.service';
+import { OrgClientService } from '../org-client/org-client.service';
 import { AppLogger, KafkaProducerService } from '@sgd/common';
 
 jest.mock('bcryptjs', () => ({
@@ -43,6 +44,7 @@ describe('AuthService', () => {
   let jwtService: Record<string, jest.Mock>;
   let redis: Record<string, jest.Mock>;
   let userClient: Record<string, jest.Mock>;
+  let orgClient: Record<string, jest.Mock>;
   let kafkaProducer: Record<string, jest.Mock>;
 
   beforeEach(async () => {
@@ -66,6 +68,9 @@ describe('AuthService', () => {
       getUserInfo: jest.fn().mockResolvedValue({ isSuperAdmin: false }),
       getUserCompanies: jest.fn().mockResolvedValue(['some-org-id']),
       getUserEffectivePermissions: jest.fn().mockResolvedValue([]),
+    };
+    orgClient = {
+      getOrgStatus: jest.fn().mockResolvedValue({ status: 'active' }),
     };
     kafkaProducer = {
       emitSafe: jest.fn(),
@@ -100,6 +105,7 @@ describe('AuthService', () => {
         JwtKeyService,
         { provide: 'REDIS_CLIENT', useValue: redis },
         { provide: UserClientService, useValue: userClient },
+        { provide: OrgClientService, useValue: orgClient },
         { provide: KafkaProducerService, useValue: kafkaProducer },
         { provide: AppLogger, useValue: { log: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } },
       ],
@@ -519,6 +525,19 @@ describe('AuthService', () => {
       await expect(service.refresh('valid.refresh.token')).rejects.toThrow(UnauthorizedException);
     });
 
+    it('throws ForbiddenException when the company-scoped token belongs to a now-inactive company', async () => {
+      // Regression: a refresh token issued before deactivation still carries
+      // a valid membership — refresh() must re-check company status on every
+      // rotation, not just at the original switchCompany() call.
+      jwtService.verify.mockReturnValue({ ...validPayload, companyId: 'org-id' });
+      redis.getdel.mockResolvedValue('1');
+      credRepo.findOne.mockResolvedValue(makeCredential());
+      userClient.getUserCompanies.mockResolvedValue(['org-id']);
+      orgClient.getOrgStatus.mockResolvedValue({ status: 'inactive' });
+
+      await expect(service.refresh('valid.refresh.token')).rejects.toThrow(ForbiddenException);
+    });
+
     it('throws UnauthorizedException when user not found in user-service during refresh', async () => {
       jwtService.verify.mockReturnValue(validPayload);
       redis.getdel.mockResolvedValue('1');
@@ -716,6 +735,17 @@ describe('AuthService', () => {
       userClient.getUserInfo.mockResolvedValue({ isSuperAdmin: false });
 
       await expect(service.switchCompany('user-id', 'org-id')).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when the target company is not active', async () => {
+      // Regression: a deactivated company must not be enterable even though the
+      // user still belongs to it (deactivation doesn't revoke org membership).
+      userClient.getUserCompanies.mockResolvedValue(['org-id']);
+      userClient.getUserInfo.mockResolvedValue({ isSuperAdmin: false });
+      orgClient.getOrgStatus.mockResolvedValue({ status: 'inactive' });
+
+      await expect(service.switchCompany('user-id', 'org-id')).rejects.toThrow(ForbiddenException);
+      expect(credRepo.findOne).not.toHaveBeenCalled();
     });
 
     it('throws UnauthorizedException when credential is inactive', async () => {

@@ -193,6 +193,15 @@ export class DocumentUploadService {
     const old = await this.model.findOne({ _id: typologyId, orgId, deletedAt: null }).exec();
     if (!old) throw new NotFoundException(`Typology ${typologyId} not found`);
 
+    // These arrive as raw multipart fields (no DTO/@Transform pipeline), unlike
+    // create/update — trim so a stray space doesn't make this look like a
+    // different code/version to Mongo's unique index than the one it's replacing.
+    dto = {
+      ...dto,
+      nombre:  dto.nombre?.trim()  || undefined,
+      version: dto.version?.trim() || undefined,
+    };
+
     const ext = ALLOWED_MIMETYPES[file.mimetype];
     if (!ext) throw new BadRequestException('Format not allowed. Use PDF, DOCX or XLSX.');
     if (file.size > MAX_FILE_SIZE) throw new BadRequestException('File exceeds the maximum allowed size of 20 MB.');
