@@ -51,17 +51,17 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.21",
+    "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.0.0",
-    "@nestjs/testing": "^11.1.21",
+    "@nestjs/testing": "^11.1.28",
     "@types/bcryptjs": "^2.4.6",
     "@types/opossum": "^8.0.0",
-    "@types/express": "^4.17.21",
+    "@types/express": "^4.17.25",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
     "@pact-foundation/pact": "^12.5.0",
     "jest": "^29.7.0",
-    "ts-jest": "^29.2.0",
+    "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
   }
