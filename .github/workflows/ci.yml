@@ -95,8 +95,34 @@ jobs:
 
       - name: Auditoría de dependencias vulnerables
         working-directory: services/${{ matrix.service }}
-        # Falla si hay vulnerabilidades de severidad alta o crítica.
-        run: npm audit --audit-level=high
+        # Falla si hay vulnerabilidades de severidad alta o crítica, salvo las
+        # excluidas explícitamente abajo. Usamos better-npm-audit (via npx, sin
+        # agregarlo como dependencia — este árbol de deps es frágil y cualquier
+        # npm install/update aquí desencadenó cascadas de vulnerabilidades peores
+        # en cada intento) porque `npm audit --audit-level` no soporta excluir
+        # advisories puntuales.
+        #
+        # Cada exclusión de abajo se investigó y no tiene un upgrade seguro
+        # disponible sin romper builds/tests (ver commits e historial de PRs
+        # relacionados con MGESTDOC-56 para el detalle de cada intento fallido):
+        #   - GHSA-45rx-2jwx-cxfr (@opentelemetry/propagator-jaeger): el único
+        #     fix requiere @opentelemetry/sdk-node@0.221.0, un bump breaking.
+        #   - GHSA-3jxr-9vmj-r5cp, GHSA-mh99-v99m-4gvg (brace-expansion): el
+        #     bump limpio existe, pero re-resolver el árbol completo (lo único
+        #     que lo aplica de verdad) arrastra glob/minimatch/rimraf/jest-*
+        #     vulnerables — verificado que empeora el audit de 6 a 35 altas.
+        #   - GHSA-v2hh-gcrm-f6hx, GHSA-4c8g-83qw-93j6 (fast-uri): mismo caso.
+        #   - GHSA-h67p-54hq-rp68, GHSA-52cp-r559-cp3m (js-yaml, vía
+        #     @nestjs/swagger): @nestjs/swagger@11.4.4 fija js-yaml@4.1.1
+        #     internamente; forzar el bump sube @nestjs/swagger a 11.4.6, que
+        #     trae js-yaml@5.2.1 — una vulnerabilidad DoS distinta y nueva.
+        #
+        # Revisar esta lista cuando @nestjs/swagger u @opentelemetry/sdk-node
+        # publiquen una versión que no rompa el resto del árbol.
+        run: |
+          npx --yes better-npm-audit@3.11.0 audit \
+            --level high \
+            --exclude GHSA-45rx-2jwx-cxfr,GHSA-3jxr-9vmj-r5cp,GHSA-mh99-v99m-4gvg,GHSA-v2hh-gcrm-f6hx,GHSA-4c8g-83qw-93j6,GHSA-h67p-54hq-rp68,GHSA-52cp-r559-cp3m
 
   # ── Tests E2E (Playwright) ───────────────────────────────────────────────
   # Playwright intercepts all API calls via page.route() — no real backend needed.
