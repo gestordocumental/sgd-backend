@@ -31,7 +31,7 @@ flowchart TD
         BR_MASTER["rama: master"]
 
         subgraph CI["GitHub Actions — CI (ci.yml)"]
-            CI1["✔ Lint\n✔ Typecheck\n✔ Tests unitarios\n✔ Build\n✔ Seguridad (npm audit)"]
+            CI1["✔ Lint\n✔ Typecheck\n✔ Tests unitarios\n✔ Build\n✔ Auditoría de dependencias"]
         end
 
         subgraph GATE["GitHub Actions — Gate de producción\n(promote-to-prod.yml)"]

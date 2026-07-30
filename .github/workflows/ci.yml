@@ -95,8 +95,15 @@ jobs:
 
       - name: Auditoría de dependencias vulnerables
         working-directory: services/${{ matrix.service }}
-        # Falla si hay vulnerabilidades de severidad alta o crítica.
-        run: npm audit --audit-level=high
+        # Falla si hay vulnerabilidades de severidad alta o crítica, salvo las
+        # excepciones declaradas en el .nsprc de este servicio (con dueño,
+        # notas y fecha de caducidad — better-npm-audit lo detecta solo desde
+        # el working-directory, sin flag adicional). Usamos better-npm-audit
+        # vía npx, sin agregarlo como dependencia — este árbol de deps es
+        # frágil y cualquier npm install/update aquí desencadenó cascadas de
+        # vulnerabilidades peores en cada intento — porque `npm audit
+        # --audit-level` no soporta excluir advisories puntuales.
+        run: npx --yes better-npm-audit@3.11.0 audit --level high
 
   # ── Tests E2E (Playwright) ───────────────────────────────────────────────
   # Playwright intercepts all API calls via page.route() — no real backend needed.
