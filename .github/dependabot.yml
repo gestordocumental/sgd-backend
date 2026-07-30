@@ -5,8 +5,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "ci"]
     groups:
       github-actions:
@@ -18,11 +17,13 @@ updates:
         update-types: ["version-update:semver-major"]
 
   # ── Workspace root (eslint, typescript, etc.) ──────────────────────────────
+  # This scope resolves against the single root package-lock.json, so it also
+  # groups bumps for every workspace member's dependencies (class-validator,
+  # typeorm, etc.) — not just the root package.json's own devDependencies.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies"]
     groups:
       production-dependencies:
@@ -35,13 +36,25 @@ updates:
       # Major version bumps require manual validation
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # These are still pre-1.0 — by semver convention a "minor" bump on a
+      # 0.x package is where breaking changes land, so Dependabot's own
+      # "minor is safe" assumption above doesn't hold for them. Confirmed by
+      # PR #136 (class-validator 0.14→0.15 broke Build + Contract Tests +
+      # Integration Tests across every service in one grouped PR).
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "typeorm"
+        update-types: ["version-update:semver-minor"]
 
   # ── @sgd/common ────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/packages/common"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "common"]
     groups:
       production-dependencies:
@@ -53,13 +66,18 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      # PR #135 (auto-instrumentations-node/exporter-trace-otlp-http/sdk-node
+      # 0.x bumps grouped as "minor") broke Lint + Build for every consumer of
+      # this package, since it's shared by all services.
+      - dependency-name: "@opentelemetry/*"
+        update-types: ["version-update:semver-minor"]
 
   # ── auth-service ────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/auth-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "auth-service"]
     groups:
       production-dependencies:
@@ -71,13 +89,21 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "typeorm"
+        update-types: ["version-update:semver-minor"]
 
   # ── user-service ────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/user-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "user-service"]
     groups:
       production-dependencies:
@@ -89,13 +115,21 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "typeorm"
+        update-types: ["version-update:semver-minor"]
 
   # ── org-service ─────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/org-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "org-service"]
     groups:
       production-dependencies:
@@ -107,13 +141,21 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "typeorm"
+        update-types: ["version-update:semver-minor"]
 
   # ── document-service ────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/document-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "document-service"]
     groups:
       production-dependencies:
@@ -125,13 +167,19 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
 
   # ── workflow-service ─────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/workflow-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "workflow-service"]
     groups:
       production-dependencies:
@@ -143,13 +191,21 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "typeorm"
+        update-types: ["version-update:semver-minor"]
 
   # ── notification-service ────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/notification-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "notification-service"]
     groups:
       production-dependencies:
@@ -161,13 +217,21 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "typeorm"
+        update-types: ["version-update:semver-minor"]
 
   # ── audit-service ────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/audit-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "audit-service"]
     groups:
       production-dependencies:
@@ -179,13 +243,19 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "class-validator"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "class-transformer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
 
   # ── metadata-extractor-service ───────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/services/metadata-extractor-service"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
     labels: ["dependencies", "metadata-extractor-service"]
     groups:
       production-dependencies:
@@ -197,3 +267,6 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Still pre-1.0 — a "minor" bump is their breaking-change slot.
+      - dependency-name: "reflect-metadata"
+        update-types: ["version-update:semver-minor"]
