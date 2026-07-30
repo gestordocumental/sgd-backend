@@ -1,0 +1,37 @@
+{
+  "GHSA-45rx-2jwx-cxfr": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "@opentelemetry/propagator-jaeger DoS via malformed header. Only fix requires @opentelemetry/sdk-node@0.221.0, a breaking bump. See MGESTDOC-56."
+  },
+  "GHSA-3jxr-9vmj-r5cp": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "brace-expansion DoS (exponential expansion). A clean bump exists, but the only way to actually apply it (full lockfile re-resolution) cascades into worse vulnerabilities — verified 6 high -> 35 high. See MGESTDOC-56."
+  },
+  "GHSA-mh99-v99m-4gvg": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "brace-expansion DoS (unbounded expansion / OOM). Same root cause as GHSA-3jxr-9vmj-r5cp."
+  },
+  "GHSA-v2hh-gcrm-f6hx": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "fast-uri host confusion (backslash authority delimiter). Same re-resolution cascade issue as brace-expansion. See MGESTDOC-56."
+  },
+  "GHSA-4c8g-83qw-93j6": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "fast-uri host confusion (IDN canonicalization). Same root cause as GHSA-v2hh-gcrm-f6hx."
+  },
+  "GHSA-h67p-54hq-rp68": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "js-yaml quadratic-complexity DoS, via @nestjs/swagger's internally-bundled js-yaml@4.1.1. Bumping @nestjs/swagger to 11.4.6 fixes this but pulls in js-yaml@5.2.1, which has its own newly-disclosed DoS. See MGESTDOC-56."
+  },
+  "GHSA-52cp-r559-cp3m": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "js-yaml merge-key quadratic CPU DoS. Same root cause as GHSA-h67p-54hq-rp68."
+  }
+}
