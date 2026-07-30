@@ -7,6 +7,6 @@
   "GHSA-mh99-v99m-4gvg": {
     "active": true,
     "expiry": "2026-10-30",
-    "notes": "brace-expansion DoS (unbounded expansion / OOM), via jest/eslint tooling's nested copies. Only fix requires eslint@10.x, a breaking bump. See MGESTDOC-56. (Its sibling GHSA-3jxr-9vmj-r5cp and the js-yaml/fast-uri exceptions that used to live here were resolved by the lockfile modernization in MGESTDOC-56 — removed since better-npm-audit now flags them as unused.)"
+    "notes": "brace-expansion DoS (unbounded expansion / OOM). Only fix requires eslint@10.x, a breaking bump. See MGESTDOC-56. Present in both dev tooling (eslint/jest) and production deps (typeorm, @opentelemetry/resource-detector-gcp, archiver/zip-stream/readdir-glob) — verified not exploitable here though: typeorm's glob pattern is the hardcoded string '__dirname + /migrations/*{.ts,.js}' (data-source.ts), never user input; workflow-files.service.ts's archive.append() passes user filenames only as the literal `name` field, never as a glob pattern for archiver/readdir-glob to parse. (Its sibling GHSA-3jxr-9vmj-r5cp and the js-yaml/fast-uri exceptions that used to live here were resolved by the lockfile modernization in MGESTDOC-56 — removed since better-npm-audit now flags them as unused.)"
   }
 }
