@@ -6,6 +6,9 @@ import { WorkflowStatus } from './entities/enums';
  *
  * DRAFT                     → PENDING_APPROVAL             (creator inicia aprobación)
  * PENDING_APPROVAL          → PENDING_REVIEW_CYCLE         (último aprobador aprueba)
+ * PENDING_APPROVAL          → AVAILABLE_FOR_FINAL_USERS    (último aprobador aprueba, con el ciclo de
+ *                                                           revisión deshabilitado para la org — salta
+ *                                                           PENDING_REVIEW_CYCLE por completo)
  * PENDING_APPROVAL          → REJECTED                     (cualquier aprobador rechaza — terminal)
  * RETURNED_TO_CREATOR       → PENDING_APPROVAL             (legacy: creador reenvía tras rechazo)
  * PENDING_REVIEW_CYCLE      → ADMIN_CYCLE_IN_PROGRESS      (usuario final crea ciclo administrativo)
@@ -18,7 +21,11 @@ import { WorkflowStatus } from './entities/enums';
  */
 export const VALID_TRANSITIONS: Record<WorkflowStatus, WorkflowStatus[]> = {
   [WorkflowStatus.DRAFT]:                     [WorkflowStatus.PENDING_APPROVAL],
-  [WorkflowStatus.PENDING_APPROVAL]:          [WorkflowStatus.PENDING_REVIEW_CYCLE, WorkflowStatus.REJECTED],
+  [WorkflowStatus.PENDING_APPROVAL]:          [
+    WorkflowStatus.PENDING_REVIEW_CYCLE,
+    WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+    WorkflowStatus.REJECTED,
+  ],
   [WorkflowStatus.RETURNED_TO_CREATOR]:       [WorkflowStatus.PENDING_APPROVAL],
   [WorkflowStatus.REJECTED]:                  [],
   [WorkflowStatus.PENDING_REVIEW_CYCLE]:      [WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS, WorkflowStatus.AVAILABLE_FOR_FINAL_USERS],

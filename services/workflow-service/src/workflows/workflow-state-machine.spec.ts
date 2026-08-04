@@ -10,6 +10,7 @@ describe('assertValidTransition', () => {
   const validPairs: [WorkflowStatus, WorkflowStatus][] = [
     [S.DRAFT,                     S.PENDING_APPROVAL],
     [S.PENDING_APPROVAL,          S.PENDING_REVIEW_CYCLE],
+    [S.PENDING_APPROVAL,          S.AVAILABLE_FOR_FINAL_USERS],
     [S.PENDING_APPROVAL,          S.REJECTED],
     [S.RETURNED_TO_CREATOR,       S.PENDING_APPROVAL],
     [S.PENDING_REVIEW_CYCLE,      S.ADMIN_CYCLE_IN_PROGRESS],

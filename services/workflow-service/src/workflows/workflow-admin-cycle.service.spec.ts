@@ -19,6 +19,7 @@ import {
 } from './entities/enums';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, AppLogger } from '@sgd/common';
+import { OrgClientService } from '../common/clients/org-client.service';
 
 // ── Factories ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,10 @@ function buildService() {
     emitSafe: jest.fn(),
   } as unknown as jest.Mocked<KafkaProducerService>;
 
+  const orgClientService: jest.Mocked<OrgClientService> = {
+    isReviewCycleEnabled: jest.fn().mockResolvedValue(true),
+  } as unknown as jest.Mocked<OrgClientService>;
+
   const logger = { log: jest.fn(), error: jest.fn(), warn: jest.fn() } as unknown as AppLogger;
 
   const service = new WorkflowAdminCycleService(
@@ -113,10 +118,20 @@ function buildService() {
     dataSource,
     timelineService,
     kafkaProducer,
+    orgClientService,
     logger,
   );
 
-  return { service, workflowRepo, cycleRepo, stepRepo, dataSource, timelineService, kafkaProducer };
+  return {
+    service,
+    workflowRepo,
+    cycleRepo,
+    stepRepo,
+    dataSource,
+    timelineService,
+    kafkaProducer,
+    orgClientService,
+  };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -143,6 +158,17 @@ describe('WorkflowAdminCycleService', () => {
       const { service, workflowRepo } = buildService();
       workflowRepo.findOneOrFail.mockResolvedValue(makeWorkflow());
       await expect(service.createCycle('wf-1', 'not-final-user', validDto)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws ForbiddenException when the review cycle is disabled for the org (defense in depth)', async () => {
+      const { service, workflowRepo, orgClientService } = buildService();
+      orgClientService.isReviewCycleEnabled.mockResolvedValue(false);
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWorkflow());
+
+      await expect(service.createCycle('wf-1', 'final-user-1', validDto)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(orgClientService.isReviewCycleEnabled).toHaveBeenCalledWith('org-1');
     });
 
     it('throws BadRequestException for non-consecutive step orders', async () => {

@@ -24,6 +24,7 @@ import { KafkaModule, AppLogger, PermissionsGuard } from '@sgd/common';
 import { DocumentClientService } from '../common/clients/document-client.service';
 import { UserClientService } from '../common/clients/user-client.service';
 import { AuditClientService } from '../common/clients/audit-client.service';
+import { OrgClientService } from '../common/clients/org-client.service';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { AuditClientService } from '../common/clients/audit-client.service';
     DocumentClientService,
     UserClientService,
     AuditClientService,
+    OrgClientService,
     IdempotencyService,
     AppLogger,
     PermissionsGuard,
