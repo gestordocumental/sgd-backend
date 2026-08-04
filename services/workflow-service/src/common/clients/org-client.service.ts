@@ -58,8 +58,12 @@ export class OrgClientService {
     const url = `${this.orgServiceUrl}/internal/orgs/${orgId}/review-cycle-enabled`;
 
     try {
-      const response = await this.fireWithCb<{ data: ReviewCycleEnabledResult }>(() =>
-        firstValueFrom(
+      // Validation lives inside the function handed to fireWithCb (not after
+      // it resolves) so a malformed 200 counts as a failure for the circuit
+      // breaker too — otherwise org-service could return garbage on every
+      // call and the breaker would never see it as unhealthy.
+      return await this.fireWithCb<boolean>(async () => {
+        const response = await firstValueFrom(
           this.httpService
             .get<ReviewCycleEnabledResult>(url, {
               headers: {
@@ -68,16 +72,16 @@ export class OrgClientService {
               },
             })
             .pipe(timeout(this.timeoutMs)),
-        ),
-      );
-      const reviewCycleEnabled = response.data?.reviewCycleEnabled;
-      // A malformed/missing field must not be treated as `false` (silently
-      // disables the review cycle) — throwing routes it through the same
-      // fail-open catch below as any other bad response.
-      if (typeof reviewCycleEnabled !== 'boolean') {
-        throw new Error('Invalid reviewCycleEnabled response from org-service');
-      }
-      return reviewCycleEnabled;
+        );
+        const reviewCycleEnabled = response.data?.reviewCycleEnabled;
+        // A malformed/missing field must not be treated as `false` (silently
+        // disables the review cycle) — throwing routes it through the same
+        // fail-open catch below as any other bad response.
+        if (typeof reviewCycleEnabled !== 'boolean') {
+          throw new Error('Invalid reviewCycleEnabled response from org-service');
+        }
+        return reviewCycleEnabled;
+      });
     } catch (error: unknown) {
       this.logger.warn(
         `Could not resolve reviewCycleEnabled for org ${orgId}, defaulting to true: ${

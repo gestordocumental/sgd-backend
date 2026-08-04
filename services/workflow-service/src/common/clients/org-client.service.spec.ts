@@ -90,6 +90,26 @@ describe('OrgClientService', () => {
     await expect(service.isReviewCycleEnabled('org-1')).resolves.toBe(true);
   });
 
+  it('rejects a malformed response from inside the function handed to the circuit breaker, so it counts toward the breaker\'s own failure tracking', async () => {
+    // A real CircuitBreaker only tracks failures of the promise returned by
+    // the function passed to fire() — validating reviewCycleEnabled *after*
+    // fireWithCb resolves would let org-service return garbage on every call
+    // without the breaker ever seeing it as unhealthy. Asserting the captured
+    // fn itself rejects (independent of the outer fail-open catch) proves the
+    // validation is inside that boundary, not after it.
+    httpService.get.mockReturnValue(
+      of({
+        data: { id: 'org-1', reviewCycleEnabled: 'not-a-boolean' },
+      } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await service.isReviewCycleEnabled('org-1');
+
+    expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
+    const firedFn = mockCbInstance.fire.mock.calls[0][0] as () => Promise<unknown>;
+    await expect(firedFn()).rejects.toThrow('Invalid reviewCycleEnabled response from org-service');
+  });
+
   it('defaults to true (fail-open) instead of throwing when org-service errors', async () => {
     httpService.get.mockReturnValue(throwError(() => new Error('network down')));
 
