@@ -23,6 +23,7 @@ import { ResubmitWorkflowDto } from './dto/resubmit-workflow.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, AppLogger, TOPICS } from '@sgd/common';
 import { UserClientService } from '../common/clients/user-client.service';
+import { OrgClientService } from '../common/clients/org-client.service';
 
 @Injectable()
 export class WorkflowApprovalService {
@@ -37,6 +38,7 @@ export class WorkflowApprovalService {
     private readonly timelineService: WorkflowTimelineService,
     private readonly kafkaProducer: KafkaProducerService,
     private readonly userClientService: UserClientService,
+    private readonly orgClientService: OrgClientService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -160,6 +162,13 @@ export class WorkflowApprovalService {
     const nextStep    = sortedSteps.find((s) => s.stepOrder > currentStep.stepOrder);
     const isLast      = !nextStep;
 
+    // Solo se consulta cuando es la última aprobación — es la única rama donde importa.
+    // Llamada fuera de la transacción a propósito: es un HTTP externo y no debe
+    // mantener abierta una transacción de base de datos mientras espera respuesta.
+    const reviewCycleEnabled = isLast
+      ? await this.orgClientService.isReviewCycleEnabled(workflow.orgId)
+      : true;
+
     // Declarado fuera de la transacción para que esté disponible en los eventos Kafka/notificaciones
     let finalUserIds: string[] = [];
 
@@ -192,8 +201,13 @@ export class WorkflowApprovalService {
           ? workflow.finalUserIds!
           : await this.resolveFinalUsers(workflow);
 
+        // Con el ciclo de revisión deshabilitado para esta org, el workflow salta
+        // PENDING_REVIEW_CYCLE por completo y queda disponible de una vez — no hay
+        // paso manual de "omitir" que un usuario final deba accionar.
         await manager.update(Workflow, workflowId, {
-          status:                   WorkflowStatus.PENDING_REVIEW_CYCLE,
+          status: reviewCycleEnabled
+            ? WorkflowStatus.PENDING_REVIEW_CYCLE
+            : WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
           currentApprovalStepOrder: null,
           currentAssignedUserId:    finalUserIds[0] ?? null,
           finalUserIds:             finalUserIds.length > 0 ? finalUserIds : null,
@@ -217,7 +231,9 @@ export class WorkflowApprovalService {
         targetUserId: isLast ? null : (nextStep?.userId ?? null),
         resourceName: workflow.title,
         description:  isLast
-          ? `Aprobación final completada por paso ${currentStep.stepOrder}. Workflow disponible para usuarios finales.`
+          ? reviewCycleEnabled
+            ? `Aprobación final completada por paso ${currentStep.stepOrder}. Workflow pendiente de ciclo de revisión.`
+            : `Aprobación final completada por paso ${currentStep.stepOrder}. Ciclo de revisión deshabilitado para esta organización — workflow disponible directamente para usuarios finales.`
           : `Paso ${currentStep.stepOrder} aprobado. Siguiente aprobador: paso ${nextStep!.stepOrder}`,
         metadata: {
           stepOrder:       currentStep.stepOrder,
@@ -225,6 +241,7 @@ export class WorkflowApprovalService {
           isLastApprover:  isLast,
           nextStepOrder:   isLast ? null : nextStep!.stepOrder,
           attachmentCount: (dto.attachments ?? []).length,
+          ...(isLast && { reviewCycleEnabled }),
         },
       }, manager);
     });
@@ -236,8 +253,10 @@ export class WorkflowApprovalService {
         eventType:    TimelineEventType.WORKFLOW_APPROVED,
         actorId:      userId,
         resourceName: workflow.title,
-        description:  `Aprobado. Pendiente de ciclo de revisión. (${finalUserIds.length} usuario(s) final(es) asignado(s))`,
-        metadata:     { finalUserIds },
+        description:  reviewCycleEnabled
+          ? `Aprobado. Pendiente de ciclo de revisión. (${finalUserIds.length} usuario(s) final(es) asignado(s))`
+          : `Aprobado. Disponible directamente para usuarios finales — ciclo de revisión deshabilitado para esta organización. (${finalUserIds.length} usuario(s) final(es) asignado(s))`,
+        metadata:     { finalUserIds, reviewCycleEnabled },
       });
 
       this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_APPROVAL_COMPLETED, {

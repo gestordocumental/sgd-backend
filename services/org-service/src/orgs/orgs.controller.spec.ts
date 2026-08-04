@@ -22,6 +22,7 @@ const makeOrg = (overrides: Partial<Org> = {}): Org => ({
   updatedAt: new Date('2026-01-02T00:00:00.000Z'),
   deletedAt: null,
   ...overrides,
+  reviewCycleEnabled: overrides.reviewCycleEnabled ?? true,
 });
 
 describe('OrgsController', () => {

@@ -25,6 +25,7 @@ import { ForwardAdminStepDto } from './dto/forward-admin-step.dto';
 import { CloseWorkflowDto } from './dto/close-workflow.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, TOPICS, AppLogger } from '@sgd/common';
+import { OrgClientService } from '../common/clients/org-client.service';
 
 @Injectable()
 export class WorkflowAdminCycleService {
@@ -42,6 +43,7 @@ export class WorkflowAdminCycleService {
     private readonly dataSource: DataSource,
     private readonly timelineService: WorkflowTimelineService,
     private readonly kafkaProducer: KafkaProducerService,
+    private readonly orgClientService: OrgClientService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -66,6 +68,15 @@ export class WorkflowAdminCycleService {
     const finalUserIds = workflow.finalUserIds ?? [];
     if (!finalUserIds.includes(userId)) {
       throw new ForbiddenException('Only designated final users can create admin cycles');
+    }
+
+    // [RN-17] Defensa en profundidad: el ciclo de revisión debe estar habilitado
+    // para esta organización. El frontend ya oculta el botón cuando está
+    // deshabilitado, y approve() ya evita llegar a PENDING_REVIEW_CYCLE en ese
+    // caso — esto solo cubre una llamada directa al endpoint.
+    const reviewCycleEnabled = await this.orgClientService.isReviewCycleEnabled(workflow.orgId);
+    if (!reviewCycleEnabled) {
+      throw new ForbiddenException('The review cycle is disabled for this organization');
     }
 
     // Validar que los stepOrders sean únicos y consecutivos
