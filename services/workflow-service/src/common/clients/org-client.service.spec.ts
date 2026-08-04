@@ -68,6 +68,28 @@ describe('OrgClientService', () => {
     );
   });
 
+  it('defaults to true (fail-open) instead of false when reviewCycleEnabled is missing from the response', async () => {
+    httpService.get.mockReturnValue(
+      of({ data: { id: 'org-1' } } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await expect(service.isReviewCycleEnabled('org-1')).resolves.toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Could not resolve reviewCycleEnabled for org org-1'),
+      'OrgClientService',
+    );
+  });
+
+  it('defaults to true (fail-open) instead of false when reviewCycleEnabled is not a boolean', async () => {
+    httpService.get.mockReturnValue(
+      of({
+        data: { id: 'org-1', reviewCycleEnabled: null },
+      } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await expect(service.isReviewCycleEnabled('org-1')).resolves.toBe(true);
+  });
+
   it('defaults to true (fail-open) instead of throwing when org-service errors', async () => {
     httpService.get.mockReturnValue(throwError(() => new Error('network down')));
 

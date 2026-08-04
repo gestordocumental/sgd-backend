@@ -70,7 +70,14 @@ export class OrgClientService {
             .pipe(timeout(this.timeoutMs)),
         ),
       );
-      return response.data.reviewCycleEnabled;
+      const reviewCycleEnabled = response.data?.reviewCycleEnabled;
+      // A malformed/missing field must not be treated as `false` (silently
+      // disables the review cycle) — throwing routes it through the same
+      // fail-open catch below as any other bad response.
+      if (typeof reviewCycleEnabled !== 'boolean') {
+        throw new Error('Invalid reviewCycleEnabled response from org-service');
+      }
+      return reviewCycleEnabled;
     } catch (error: unknown) {
       this.logger.warn(
         `Could not resolve reviewCycleEnabled for org ${orgId}, defaulting to true: ${

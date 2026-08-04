@@ -232,7 +232,7 @@ export class WorkflowApprovalService {
         resourceName: workflow.title,
         description:  isLast
           ? reviewCycleEnabled
-            ? `Aprobación final completada por paso ${currentStep.stepOrder}. Workflow disponible para usuarios finales.`
+            ? `Aprobación final completada por paso ${currentStep.stepOrder}. Workflow pendiente de ciclo de revisión.`
             : `Aprobación final completada por paso ${currentStep.stepOrder}. Ciclo de revisión deshabilitado para esta organización — workflow disponible directamente para usuarios finales.`
           : `Paso ${currentStep.stepOrder} aprobado. Siguiente aprobador: paso ${nextStep!.stepOrder}`,
         metadata: {
