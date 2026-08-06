@@ -126,7 +126,7 @@ export class WorkflowsController {
   @Get('my-available')
   @OrgMember()
   @RequirePermission('WORKFLOWS', 'READ')
-  @ApiOperation({ summary: 'Workflows disponibles para el usuario como usuario final' })
+  @ApiOperation({ summary: 'Historial de workflows en los que el usuario ha participado (usuario final, revisor, aprobador o creador), en cualquier desenlace' })
   @ApiResponse({ status: 200, type: [WorkflowResponseDto] })
   getMyAvailable(@JwtPayloadParam() user: JwtPayload): Promise<WorkflowResponseDto[]> {
     return this.workflowsService.getMyAvailable(user);
