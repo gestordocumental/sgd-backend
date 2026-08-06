@@ -238,15 +238,19 @@ export class WorkflowsService {
     return Array.from(merged.values()).map((w) => WorkflowResponseDto.from(w));
   }
 
-  // ── Workflows disponibles para usuario final ──────────────────────────────────
+  // ── Historial de workflows del usuario ("Mis flujos") ─────────────────────────
+  // No es solo "disponibles ahora": incluye cualquier workflow donde el usuario
+  // haya participado (usuario final, revisor de ciclo, aprobador o creador), en
+  // cualquier desenlace — disponible, en ciclo, rechazado o cerrado — para que
+  // pueda ver el resultado sin depender de otra pestaña.
 
   async getMyAvailable(user: JwtPayload): Promise<WorkflowResponseDto[]> {
     const userId = user.sub!;
     const orgId  = user.companyId!;
 
     // 1. Workflows donde el usuario es usuario final
-    // REJECTED se incluye para que el usuario final pueda ver flujos que le
-    // fueron notificados pero que quedaron rechazados antes de llegar a él.
+    // REJECTED y CLOSED se incluyen para que el usuario final pueda ver el
+    // desenlace de flujos que le fueron notificados, incluso ya finalizados.
     const finalUserWorkflows = await this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
@@ -257,6 +261,7 @@ export class WorkflowsService {
           WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
           WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
           WorkflowStatus.REJECTED,
+          WorkflowStatus.CLOSED,
         ],
       })
       .andWhere('w.deleted_at IS NULL')
@@ -308,10 +313,11 @@ export class WorkflowsService {
       .take(100)
       .getMany();
 
-    // 4. Workflows donde el usuario participó como revisor opcional en algún ciclo
-    //    (cubre tanto el ciclo activo post-completado como el ciclo ya finalizado con
-    //    el workflow en estado AVAILABLE_FOR_FINAL_USERS o CLOSED)
-    const pastOptionalReviewerWorkflows = await this.workflowRepo
+    // 4. Workflows donde el usuario participó como revisor (obligatorio u opcional)
+    //    en algún ciclo administrativo — cubre tanto el ciclo aún activo tras
+    //    completar su paso como el desenlace final del workflow, sin importar
+    //    si terminó disponible, rechazado o cerrado.
+    const pastAdminReviewerWorkflows = await this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
       .where('w.org_id = :orgId', { orgId })
@@ -319,6 +325,8 @@ export class WorkflowsService {
         visibleStatuses: [
           WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
           WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+          WorkflowStatus.REJECTED,
+          WorkflowStatus.CLOSED,
         ],
       })
       .andWhere('w.deleted_at IS NULL')
@@ -328,7 +336,6 @@ export class WorkflowsService {
           INNER JOIN workflow_admin_steps s ON s.cycle_id = c.id
           WHERE c.workflow_id = w.id
             AND s.user_id = :userId
-            AND s.is_optional = true
         )`,
         { userId },
       )
@@ -337,8 +344,8 @@ export class WorkflowsService {
       .getMany();
 
     // 5. Workflows creados por el usuario (el creador siempre ve sus propios workflows
-    //    en cualquier estado activo o terminal relevante para él, incluyendo rechazados
-    //    y devueltos para que pueda ver el resultado sin necesitar WORKFLOWS:MANAGE).
+    //    en cualquier estado activo o terminal relevante para él, incluyendo rechazados,
+    //    devueltos y cerrados, para que pueda ver el resultado sin necesitar WORKFLOWS:MANAGE).
     const createdByUserWorkflows = await this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
@@ -350,6 +357,7 @@ export class WorkflowsService {
           WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
           WorkflowStatus.REJECTED,
           WorkflowStatus.RETURNED_TO_CREATOR,
+          WorkflowStatus.CLOSED,
         ],
       })
       .andWhere('w.deleted_at IS NULL')
@@ -358,8 +366,8 @@ export class WorkflowsService {
       .getMany();
 
     // 6. Workflows donde el usuario es un aprobador definido (workflow_approval_steps)
-    //    Una vez que el flujo llega a AVAILABLE_FOR_FINAL_USERS o REJECTED, el aprobador
-    //    debe poder ver el resultado en la pestaña "Disponibles para mí".
+    //    Una vez que el flujo llega a AVAILABLE_FOR_FINAL_USERS, REJECTED o CLOSED, el
+    //    aprobador debe poder ver el resultado en la pestaña "Mis flujos".
     const approverWorkflows = await this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
@@ -368,6 +376,7 @@ export class WorkflowsService {
         approverStatuses: [
           WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
           WorkflowStatus.REJECTED,
+          WorkflowStatus.CLOSED,
         ],
       })
       .andWhere('w.deleted_at IS NULL')
@@ -389,7 +398,7 @@ export class WorkflowsService {
       ...finalUserWorkflows,
       ...optionalReviewerWorkflows,
       ...allowedOptionalWorkflows,
-      ...pastOptionalReviewerWorkflows,
+      ...pastAdminReviewerWorkflows,
       ...createdByUserWorkflows,
       ...approverWorkflows,
     ]) {
@@ -401,7 +410,7 @@ export class WorkflowsService {
       `finalUser=${finalUserWorkflows.length} ` +
       `optionalStep=${optionalReviewerWorkflows.length} ` +
       `allowedOptional=${allowedOptionalWorkflows.length} ` +
-      `pastOptional=${pastOptionalReviewerWorkflows.length} ` +
+      `pastAdminReviewer=${pastAdminReviewerWorkflows.length} ` +
       `createdBy=${createdByUserWorkflows.length} ` +
       `approver=${approverWorkflows.length} ` +
       `total=${merged.size}`,

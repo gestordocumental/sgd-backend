@@ -563,6 +563,44 @@ describe('WorkflowsService', () => {
       const result = await service.getMyAvailable(makeUser());
       expect(result).toHaveLength(1);
     });
+
+    it('includes CLOSED in the status filters, so closed workflows the user participated in remain visible', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [], total: 0 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.getMyAvailable(makeUser());
+
+      const includesClosed = (qb.andWhere as jest.Mock).mock.calls.some(
+        ([, params]: [string, Record<string, unknown> | undefined]) =>
+          params &&
+          Object.values(params).some(
+            (v) => Array.isArray(v) && v.includes(WorkflowStatus.CLOSED),
+          ),
+      );
+      expect(includesClosed).toBe(true);
+    });
+
+    it('surfaces mandatory (non-optional) admin-cycle reviewers too, not just optional ones', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [], total: 0 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.getMyAvailable(makeUser());
+
+      const rawSqlCalls = (qb.andWhere as jest.Mock).mock.calls
+        .map(([sql]: [unknown]) => sql)
+        .filter((sql: unknown): sql is string => typeof sql === 'string');
+      // Category 4's EXISTS clause (past admin-cycle reviewers, any outcome) is
+      // the one referencing workflow_admin_steps without a PENDING step filter —
+      // category 2 (active optional-reviewer invitations) also joins that table
+      // but requires PENDING + is_optional, so this distinguishes the two.
+      const pastReviewerSql = rawSqlCalls.find(
+        (sql) => sql.includes('workflow_admin_steps s') && !sql.includes('PENDING'),
+      );
+      expect(pastReviewerSql).toBeDefined();
+      expect(pastReviewerSql).not.toContain('is_optional');
+    });
   });
 
   describe('notifyNoFinalUsers()', () => {
