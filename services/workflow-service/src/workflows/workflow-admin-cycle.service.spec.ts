@@ -441,40 +441,42 @@ describe('WorkflowAdminCycleService', () => {
   });
 
   describe('skipReviewCycle()', () => {
-    it('scopes the workflow lookup to the caller org, so cross-org ids resolve as not found', async () => {
-      const { service, workflowRepo } = buildService();
-      workflowRepo.findOneOrFail.mockRejectedValue(new Error('not found'));
+    it('scopes the locked workflow lookup to the caller org, so cross-org ids resolve as not found', async () => {
+      const { service, dataSource } = buildService();
+      dataSource._manager.findOne.mockResolvedValue(null);
 
-      await expect(service.skipReviewCycle('wf-1', 'final-user-1', 'org-2')).rejects.toThrow();
+      await expect(service.skipReviewCycle('wf-1', 'final-user-1', 'org-2')).rejects.toThrow(NotFoundException);
 
-      expect(workflowRepo.findOneOrFail).toHaveBeenCalledWith({
+      expect(dataSource._manager.findOne).toHaveBeenCalledWith(Workflow, {
         where: { id: 'wf-1', orgId: 'org-2' },
+        lock: { mode: 'pessimistic_write' },
       });
     });
 
     it('throws ConflictException when workflow not in PENDING_REVIEW_CYCLE', async () => {
-      const { service, workflowRepo } = buildService();
-      workflowRepo.findOneOrFail.mockResolvedValue(makeWorkflow({ status: WorkflowStatus.DRAFT }));
+      const { service, dataSource } = buildService();
+      dataSource._manager.findOne.mockResolvedValue(makeWorkflow({ status: WorkflowStatus.DRAFT }));
       await expect(service.skipReviewCycle('wf-1', 'final-user-1', 'org-1')).rejects.toThrow(ConflictException);
     });
 
     it('throws ForbiddenException when user is not a final user', async () => {
-      const { service, workflowRepo } = buildService();
-      workflowRepo.findOneOrFail.mockResolvedValue(makeWorkflow());
+      const { service, dataSource } = buildService();
+      dataSource._manager.findOne.mockResolvedValue(makeWorkflow());
       await expect(service.skipReviewCycle('wf-1', 'not-final-user', 'org-1')).rejects.toThrow(ForbiddenException);
     });
 
     it('transitions workflow to AVAILABLE_FOR_FINAL_USERS', async () => {
-      const { service, workflowRepo, kafkaProducer } = buildService();
+      const { service, workflowRepo, dataSource, kafkaProducer } = buildService();
       const wf = makeWorkflow();
-      workflowRepo.findOneOrFail
-        .mockResolvedValueOnce(wf)
-        .mockResolvedValueOnce(makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }));
-      workflowRepo.update.mockResolvedValue(undefined as never);
+      dataSource._manager.findOne.mockResolvedValue(wf);
+      workflowRepo.findOneOrFail.mockResolvedValue(
+        makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
+      );
 
       await service.skipReviewCycle('wf-1', 'final-user-1', 'org-1');
 
-      expect(workflowRepo.update).toHaveBeenCalledWith(
+      expect(dataSource._manager.update).toHaveBeenCalledWith(
+        Workflow,
         'wf-1',
         expect.objectContaining({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
       );

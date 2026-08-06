@@ -250,7 +250,8 @@ describe('Workflow input DTOs', () => {
       }],
     });
     const errors = await validate(dto);
-    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].property).toBe('attachments');
+    expect(errors[0].children?.[0].children?.[0].constraints).toHaveProperty('isInt');
   });
 
   it('fails add-workflow-note validation when an attachment fileSizeBytes is negative', async () => {
@@ -263,6 +264,7 @@ describe('Workflow input DTOs', () => {
       }],
     });
     const errors = await validate(dto);
-    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].property).toBe('attachments');
+    expect(errors[0].children?.[0].children?.[0].constraints).toHaveProperty('min');
   });
 });

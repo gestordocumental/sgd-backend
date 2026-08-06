@@ -570,40 +570,56 @@ export class WorkflowAdminCycleService {
   // ── Omitir ciclo de revisión ──────────────────────────────────────────────────
 
   async skipReviewCycle(workflowId: string, userId: string, orgId: string): Promise<Workflow> {
-    const workflow = await this.workflowRepo.findOneOrFail({ where: { id: workflowId, orgId } });
+    let workflowOrgId!: string;
+    let finalUserIds: string[] = [];
 
-    if (workflow.status !== WorkflowStatus.PENDING_REVIEW_CYCLE) {
-      throw new ConflictException(`Cannot skip review cycle: workflow status is ${workflow.status}`);
-    }
+    await this.dataSource.transaction(async (manager) => {
+      // Lock the workflow row so a concurrent admin-cycle-start can't change
+      // its status between this check and the update below — without this,
+      // createCycle could move the workflow to ADMIN_CYCLE_IN_PROGRESS with
+      // an active cycle, and this unconditional update would overwrite that
+      // back to AVAILABLE_FOR_FINAL_USERS, orphaning the cycle it just started.
+      const workflow = await manager.findOne(Workflow, {
+        where: { id: workflowId, orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!workflow) throw new NotFoundException('Workflow not found');
 
-    const finalUserIds = workflow.finalUserIds ?? [];
-    if (!finalUserIds.includes(userId)) {
-      throw new ForbiddenException('Only designated final users can skip the review cycle');
-    }
+      if (workflow.status !== WorkflowStatus.PENDING_REVIEW_CYCLE) {
+        throw new ConflictException(`Cannot skip review cycle: workflow status is ${workflow.status}`);
+      }
 
-    await this.workflowRepo.update(workflowId, {
-      status:                WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
-      currentAssignedUserId: userId,
-    });
+      finalUserIds = workflow.finalUserIds ?? [];
+      if (!finalUserIds.includes(userId)) {
+        throw new ForbiddenException('Only designated final users can skip the review cycle');
+      }
 
-    await this.timelineService.record({
-      workflowId,
-      orgId:        workflow.orgId,
-      eventType:    TimelineEventType.WORKFLOW_APPROVED,
-      actorId:      userId,
-      resourceName: workflow.title,
-      description:  `Ciclo de revisión omitido. Workflow marcado como disponible directamente.`,
-      metadata:     { skippedBy: userId },
+      workflowOrgId = workflow.orgId;
+
+      await manager.update(Workflow, workflowId, {
+        status:                WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+        currentAssignedUserId: userId,
+      });
+
+      await this.timelineService.record({
+        workflowId,
+        orgId:        workflow.orgId,
+        eventType:    TimelineEventType.WORKFLOW_APPROVED,
+        actorId:      userId,
+        resourceName: workflow.title,
+        description:  `Ciclo de revisión omitido. Workflow marcado como disponible directamente.`,
+        metadata:     { skippedBy: userId },
+      }, manager);
     });
 
     this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_AVAILABLE_FOR_FINAL_USERS, {
       workflowId,
-      orgId:       workflow.orgId,
+      orgId:       workflowOrgId,
       finalUserIds,
       timestamp:   new Date().toISOString(),
     });
 
-    return this.workflowRepo.findOneOrFail({ where: { id: workflowId } });
+    return this.workflowRepo.findOneOrFail({ where: { id: workflowId, orgId } });
   }
 
   // ── Finalizar ciclo (alias visual — el ciclo se completa en el último step) ───

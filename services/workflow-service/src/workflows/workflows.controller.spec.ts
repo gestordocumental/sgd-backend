@@ -302,6 +302,20 @@ describe('WorkflowsController', () => {
     });
   });
 
+  describe('forwardAdminStep()', () => {
+    it('delegates to adminCycleService.forwardStep', async () => {
+      const { controller, adminCycleService } = buildController();
+      const user = makeUser();
+      const dto = { optionalReviewerId: 'optional-user-1', notes: 'Forwarding for review' };
+
+      await controller.forwardAdminStep(undefined, 'wf-1', 'cycle-1', 'step-1', dto, user);
+
+      expect(adminCycleService.forwardStep).toHaveBeenCalledWith(
+        'wf-1', 'cycle-1', 'step-1', user.sub, user.companyId, dto,
+      );
+    });
+  });
+
   describe('finalizeAdminCycle()', () => {
     it('calls adminCycleService.finalizeCycle and returns mapped DTO', async () => {
       const { controller, adminCycleService } = buildController();
