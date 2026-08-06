@@ -739,7 +739,7 @@ export class WorkflowsService {
     const orgId    = user.companyId!;
     const workflow = await this.workflowRepo.findOne({
       where: { id, orgId },
-      relations: ['approvalSteps', 'attachments'],
+      relations: ['approvalSteps', 'attachments', 'notes'],
     });
 
     if (!workflow) throw new NotFoundException('Workflow not found');

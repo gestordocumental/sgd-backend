@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { AttachmentType } from './enums';
 import { Workflow } from './workflow.entity';
+import { WorkflowNote } from './workflow-note.entity';
 
 /**
  * Adjuntos del workflow base (documento principal + documentos de soporte).
@@ -55,9 +56,17 @@ export class WorkflowAttachment {
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
+  /** Solo para attachmentType MANAGEMENT — la nota que este adjunto acompaña, si hay una. */
+  @Column({ name: 'note_id', type: 'uuid', nullable: true })
+  noteId: string | null = null;
+
   // ── Relaciones ────────────────────────────────────────────────────────────────
 
   @ManyToOne(() => Workflow, (workflow) => workflow.attachments, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'workflow_id' })
   workflow!: Workflow;
+
+  @ManyToOne(() => WorkflowNote, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'note_id' })
+  note: WorkflowNote | null = null;
 }

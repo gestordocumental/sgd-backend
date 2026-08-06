@@ -70,6 +70,7 @@ function makeAdminCycleService(): jest.Mocked<WorkflowAdminCycleService> {
     finalizeCycle: jest.fn().mockResolvedValue({ id: 'cycle-1', steps: [] }),
     skipReviewCycle: jest.fn().mockResolvedValue(undefined),
     closeWorkflow: jest.fn().mockResolvedValue(undefined),
+    addNote: jest.fn().mockResolvedValue(undefined),
     forwardStep: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<WorkflowAdminCycleService>;
 }
@@ -282,7 +283,7 @@ describe('WorkflowsController', () => {
 
       const result = await controller.createAdminCycle(undefined, 'wf-1', dto, user);
 
-      expect(adminCycleService.createCycle).toHaveBeenCalledWith('wf-1', user.sub, dto);
+      expect(adminCycleService.createCycle).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
       expect(result).toBeDefined();
     });
   });
@@ -296,7 +297,21 @@ describe('WorkflowsController', () => {
       await controller.completeAdminStep(undefined, 'wf-1', 'cycle-1', 'step-1', dto, user);
 
       expect(adminCycleService.completeStep).toHaveBeenCalledWith(
-        'wf-1', 'cycle-1', 'step-1', user.sub, dto,
+        'wf-1', 'cycle-1', 'step-1', user.sub, user.companyId, dto,
+      );
+    });
+  });
+
+  describe('forwardAdminStep()', () => {
+    it('delegates to adminCycleService.forwardStep', async () => {
+      const { controller, adminCycleService } = buildController();
+      const user = makeUser();
+      const dto = { optionalReviewerId: 'optional-user-1', notes: 'Forwarding for review' };
+
+      await controller.forwardAdminStep(undefined, 'wf-1', 'cycle-1', 'step-1', dto, user);
+
+      expect(adminCycleService.forwardStep).toHaveBeenCalledWith(
+        'wf-1', 'cycle-1', 'step-1', user.sub, user.companyId, dto,
       );
     });
   });
@@ -329,7 +344,7 @@ describe('WorkflowsController', () => {
 
       await controller.skipReviewCycle(undefined, 'wf-1', user);
 
-      expect(adminCycleService.skipReviewCycle).toHaveBeenCalledWith('wf-1', user.sub);
+      expect(adminCycleService.skipReviewCycle).toHaveBeenCalledWith('wf-1', user.sub, user.companyId);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
     });
   });
@@ -342,7 +357,20 @@ describe('WorkflowsController', () => {
 
       await controller.close(undefined, 'wf-1', dto, user);
 
-      expect(adminCycleService.closeWorkflow).toHaveBeenCalledWith('wf-1', user.sub, dto);
+      expect(adminCycleService.closeWorkflow).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
+      expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
+    });
+  });
+
+  describe('addNote()', () => {
+    it('calls adminCycleService.addNote then workflowsService.findOne', async () => {
+      const { controller, adminCycleService, workflowsService } = buildController();
+      const user = makeUser();
+      const dto = { content: 'See attached', attachments: [] };
+
+      await controller.addNote(undefined, 'wf-1', dto, user);
+
+      expect(adminCycleService.addNote).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
     });
   });
