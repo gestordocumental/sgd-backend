@@ -283,7 +283,7 @@ describe('WorkflowsController', () => {
 
       const result = await controller.createAdminCycle(undefined, 'wf-1', dto, user);
 
-      expect(adminCycleService.createCycle).toHaveBeenCalledWith('wf-1', user.sub, dto);
+      expect(adminCycleService.createCycle).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
       expect(result).toBeDefined();
     });
   });
@@ -297,7 +297,7 @@ describe('WorkflowsController', () => {
       await controller.completeAdminStep(undefined, 'wf-1', 'cycle-1', 'step-1', dto, user);
 
       expect(adminCycleService.completeStep).toHaveBeenCalledWith(
-        'wf-1', 'cycle-1', 'step-1', user.sub, dto,
+        'wf-1', 'cycle-1', 'step-1', user.sub, user.companyId, dto,
       );
     });
   });
@@ -330,7 +330,7 @@ describe('WorkflowsController', () => {
 
       await controller.skipReviewCycle(undefined, 'wf-1', user);
 
-      expect(adminCycleService.skipReviewCycle).toHaveBeenCalledWith('wf-1', user.sub);
+      expect(adminCycleService.skipReviewCycle).toHaveBeenCalledWith('wf-1', user.sub, user.companyId);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
     });
   });
@@ -343,7 +343,7 @@ describe('WorkflowsController', () => {
 
       await controller.close(undefined, 'wf-1', dto, user);
 
-      expect(adminCycleService.closeWorkflow).toHaveBeenCalledWith('wf-1', user.sub, dto);
+      expect(adminCycleService.closeWorkflow).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
     });
   });
@@ -356,7 +356,7 @@ describe('WorkflowsController', () => {
 
       await controller.addNote(undefined, 'wf-1', dto, user);
 
-      expect(adminCycleService.addNote).toHaveBeenCalledWith('wf-1', user.sub, dto);
+      expect(adminCycleService.addNote).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
     });
   });

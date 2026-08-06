@@ -327,7 +327,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<AdminCycleResponseDto> {
     return this.withIdempotency(idempotencyKey, user.sub!, async () => {
-      const cycle = await this.adminCycleService.createCycle(id, user.sub!, dto);
+      const cycle = await this.adminCycleService.createCycle(id, user.sub!, user.companyId!, dto);
       return AdminCycleResponseDto.from(cycle);
     });
   }
@@ -353,7 +353,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ) {
     return this.withIdempotency(idempotencyKey, user.sub!, () =>
-      this.adminCycleService.completeStep(id, cycleId, stepId, user.sub!, dto),
+      this.adminCycleService.completeStep(id, cycleId, stepId, user.sub!, user.companyId!, dto),
     );
   }
 
@@ -378,7 +378,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ) {
     return this.withIdempotency(idempotencyKey, user.sub!, () =>
-      this.adminCycleService.forwardStep(id, cycleId, stepId, user.sub!, dto),
+      this.adminCycleService.forwardStep(id, cycleId, stepId, user.sub!, user.companyId!, dto),
     );
   }
 
@@ -413,7 +413,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
     return this.withIdempotency(idempotencyKey, user.sub!, async () => {
-      await this.adminCycleService.skipReviewCycle(id, user.sub!);
+      await this.adminCycleService.skipReviewCycle(id, user.sub!, user.companyId!);
       return this.workflowsService.findOne(id, user);
     });
   }
@@ -438,7 +438,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
     return this.withIdempotency(idempotencyKey, user.sub!, async () => {
-      await this.adminCycleService.addNote(id, user.sub!, dto);
+      await this.adminCycleService.addNote(id, user.sub!, user.companyId!, dto);
       return this.workflowsService.findOne(id, user);
     });
   }
@@ -462,7 +462,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
     return this.withIdempotency(idempotencyKey, user.sub!, async () => {
-      await this.adminCycleService.closeWorkflow(id, user.sub!, dto);
+      await this.adminCycleService.closeWorkflow(id, user.sub!, user.companyId!, dto);
       return this.workflowsService.findOne(id, user);
     });
   }

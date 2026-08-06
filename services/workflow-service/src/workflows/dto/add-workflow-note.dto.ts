@@ -1,12 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsArray, MaxLength, IsNumber, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsArray, MaxLength, IsInt, Min, Max, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class WorkflowNoteAttachmentDto {
   @ApiProperty() @IsString() @MaxLength(500) storageKey!: string;
   @ApiProperty() @IsString() @MaxLength(500) originalName!: string;
   @ApiProperty() @IsString() @MaxLength(100) mimeType!: string;
-  @ApiPropertyOptional() @IsOptional() @IsNumber() fileSizeBytes?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER)
+  @Type(() => Number)
+  fileSizeBytes?: number;
 }
 
 /**
