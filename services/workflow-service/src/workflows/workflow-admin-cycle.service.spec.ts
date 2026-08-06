@@ -10,11 +10,13 @@ import { Workflow } from './entities/workflow.entity';
 import { WorkflowAdminCycle } from './entities/workflow-admin-cycle.entity';
 import { WorkflowAdminStep } from './entities/workflow-admin-step.entity';
 import { WorkflowAdminAttachment } from './entities/workflow-admin-attachment.entity';
+import { WorkflowAttachment } from './entities/workflow-attachment.entity';
 import { WorkflowNote } from './entities/workflow-note.entity';
 import {
   WorkflowStatus,
   AdminCycleStatus,
   AdminStepStatus,
+  AttachmentType,
   TimelineEventType,
 } from './entities/enums';
 import { WorkflowTimelineService } from './workflow-timeline.service';
@@ -612,6 +614,113 @@ describe('WorkflowAdminCycleService', () => {
       expect(dataSource._manager.save).toHaveBeenCalledWith(
         WorkflowAdminAttachment,
         expect.arrayContaining([expect.objectContaining({ storageKey: 'att-1' })]),
+      );
+    });
+  });
+
+  describe('addNote()', () => {
+    it('throws ConflictException when workflow is not AVAILABLE_FOR_FINAL_USERS', async () => {
+      const { service, workflowRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(makeWorkflow({ status: WorkflowStatus.DRAFT }));
+
+      await expect(
+        service.addNote('wf-1', 'final-user-1', { content: 'hi' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws ForbiddenException when user is not a designated final user', async () => {
+      const { service, workflowRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(
+        makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
+      );
+
+      await expect(
+        service.addNote('wf-1', 'not-final-user', { content: 'hi' }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws BadRequestException when neither content nor attachments are provided', async () => {
+      const { service, workflowRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(
+        makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
+      );
+
+      await expect(service.addNote('wf-1', 'final-user-1', {})).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws BadRequestException when content is only whitespace and no attachments', async () => {
+      const { service, workflowRepo } = buildService();
+      workflowRepo.findOneOrFail.mockResolvedValue(
+        makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
+      );
+
+      await expect(
+        service.addNote('wf-1', 'final-user-1', { content: '   ' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('saves a WorkflowNote with cycleId/adminStepId left null and records a NOTE_ADDED event', async () => {
+      const { service, workflowRepo, dataSource, timelineService } = buildService();
+      const wf = makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS });
+      workflowRepo.findOneOrFail.mockResolvedValueOnce(wf).mockResolvedValueOnce(wf);
+
+      await service.addNote('wf-1', 'final-user-1', { content: '  Looks fine  ' });
+
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowNote,
+        expect.objectContaining({ workflowId: 'wf-1', createdBy: 'final-user-1', content: 'Looks fine' }),
+      );
+      expect(timelineService.record).toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: TimelineEventType.NOTE_ADDED }),
+        expect.anything(),
+      );
+    });
+
+    it('saves MANAGEMENT attachments linked to the note when both are provided', async () => {
+      const { service, workflowRepo, dataSource } = buildService();
+      const wf = makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS });
+      workflowRepo.findOneOrFail.mockResolvedValueOnce(wf).mockResolvedValueOnce(wf);
+      dataSource._manager.save.mockResolvedValueOnce({ id: 'note-1' });
+
+      await service.addNote('wf-1', 'final-user-1', {
+        content: 'See attached',
+        attachments: [{ storageKey: 'k1', originalName: 'doc.pdf', mimeType: 'application/pdf' }],
+      });
+
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowAttachment,
+        expect.arrayContaining([
+          expect.objectContaining({
+            storageKey: 'k1',
+            attachmentType: AttachmentType.MANAGEMENT,
+            noteId: 'note-1',
+          }),
+        ]),
+      );
+    });
+
+    it('saves attachments with a null noteId when no content is provided', async () => {
+      const { service, workflowRepo, dataSource, timelineService } = buildService();
+      const wf = makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS });
+      workflowRepo.findOneOrFail.mockResolvedValueOnce(wf).mockResolvedValueOnce(wf);
+
+      await service.addNote('wf-1', 'final-user-1', {
+        attachments: [{ storageKey: 'k1', originalName: 'doc.pdf', mimeType: 'application/pdf' }],
+      });
+
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowAttachment,
+        expect.arrayContaining([expect.objectContaining({ storageKey: 'k1', noteId: null })]),
+      );
+      const noteSaveCalls = (dataSource._manager.save as jest.Mock).mock.calls.filter(
+        (c: [unknown]) => c[0] === WorkflowNote,
+      );
+      expect(noteSaveCalls).toHaveLength(0);
+      expect(timelineService.record).toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: TimelineEventType.ATTACHMENT_ADDED }),
+        expect.anything(),
       );
     });
   });

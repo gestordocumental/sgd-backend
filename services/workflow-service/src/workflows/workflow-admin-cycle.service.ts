@@ -12,17 +12,20 @@ import { Workflow } from './entities/workflow.entity';
 import { WorkflowAdminCycle } from './entities/workflow-admin-cycle.entity';
 import { WorkflowAdminStep } from './entities/workflow-admin-step.entity';
 import { WorkflowAdminAttachment } from './entities/workflow-admin-attachment.entity';
+import { WorkflowAttachment } from './entities/workflow-attachment.entity';
 import { WorkflowNote } from './entities/workflow-note.entity';
 import {
   WorkflowStatus,
   AdminCycleStatus,
   AdminStepStatus,
+  AttachmentType,
   TimelineEventType,
 } from './entities/enums';
 import { CreateAdminCycleDto } from './dto/create-admin-cycle.dto';
 import { CompleteAdminStepDto } from './dto/complete-admin-step.dto';
 import { ForwardAdminStepDto } from './dto/forward-admin-step.dto';
 import { CloseWorkflowDto } from './dto/close-workflow.dto';
+import { AddWorkflowNoteDto } from './dto/add-workflow-note.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, TOPICS, AppLogger } from '@sgd/common';
 import { OrgClientService } from '../common/clients/org-client.service';
@@ -570,6 +573,79 @@ export class WorkflowAdminCycleService {
     }
 
     return cycle;
+  }
+
+  // ── Gestionar: comentario/adjuntos repetibles sin ciclo administrativo ────────
+
+  /**
+   * El usuario final deja un comentario y/o adjuntos en el workflow mientras
+   * está AVAILABLE_FOR_FINAL_USERS, sin iniciar un ciclo administrativo
+   * formal con revisores. A diferencia de un ciclo, esto puede llamarse
+   * cuantas veces se quiera antes de que el usuario final decida cerrar el
+   * workflow (closeWorkflow) o iniciar un ciclo real.
+   */
+  async addNote(
+    workflowId: string,
+    userId: string,
+    dto: AddWorkflowNoteDto,
+  ): Promise<Workflow> {
+    const workflow = await this.workflowRepo.findOneOrFail({ where: { id: workflowId } });
+
+    if (workflow.status !== WorkflowStatus.AVAILABLE_FOR_FINAL_USERS) {
+      throw new ConflictException(`Cannot add a note: workflow status is ${workflow.status}`);
+    }
+
+    const finalUserIds = workflow.finalUserIds ?? [];
+    if (!finalUserIds.includes(userId)) {
+      throw new ForbiddenException('Only designated final users can manage this workflow');
+    }
+
+    const content = dto.content?.trim() || undefined;
+    const attachmentCount = dto.attachments?.length ?? 0;
+    if (!content && attachmentCount === 0) {
+      throw new BadRequestException('Provide at least a comment or an attachment');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      let noteId: string | null = null;
+      if (content) {
+        const note = await manager.save(WorkflowNote, {
+          workflowId,
+          createdBy: userId,
+          content,
+        });
+        noteId = note.id;
+      }
+
+      if (dto.attachments?.length) {
+        const attachments = dto.attachments.map((a) => ({
+          workflowId,
+          uploadedBy:     userId,
+          documentId:     a.storageKey,
+          storageKey:     a.storageKey,
+          originalName:   a.originalName,
+          mimeType:       a.mimeType,
+          fileSizeBytes:  a.fileSizeBytes ?? null,
+          attachmentType: AttachmentType.MANAGEMENT,
+          noteId,
+        }));
+        await manager.save(WorkflowAttachment, attachments);
+      }
+
+      await this.timelineService.record({
+        workflowId,
+        orgId:        workflow.orgId,
+        eventType:    content ? TimelineEventType.NOTE_ADDED : TimelineEventType.ATTACHMENT_ADDED,
+        actorId:      userId,
+        resourceName: workflow.title,
+        description:  content
+          ? `Comentario agregado por el usuario final.`
+          : `${attachmentCount} adjunto(s) agregado(s) por el usuario final.`,
+        metadata: { content: content ?? null, attachmentCount },
+      }, manager);
+    });
+
+    return this.workflowRepo.findOneOrFail({ where: { id: workflowId } });
   }
 
   // ── Cerrar workflow ───────────────────────────────────────────────────────────
