@@ -21,20 +21,4 @@ export class InternalOrgsController {
     const org = await this.service.findOne(id);
     return { id: org.id, status: org.status };
   }
-
-  @ApiOperation({
-    summary:
-      'Get an organization\'s review-cycle feature flag — used by workflow-service to decide ' +
-      'whether approved workflows go through the admin review cycle step',
-  })
-  @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiOkResponse({ schema: { example: { id: 'uuid', reviewCycleEnabled: true } } })
-  @Get('orgs/:id/review-cycle-enabled')
-  @AllowInternalTokens('INTERNAL_TOKEN_WORKFLOW_ORG')
-  async getReviewCycleEnabled(
-    @Param('id') id: string,
-  ): Promise<{ id: string; reviewCycleEnabled: boolean }> {
-    const org = await this.service.findOne(id);
-    return { id: org.id, reviewCycleEnabled: org.reviewCycleEnabled };
-  }
 }

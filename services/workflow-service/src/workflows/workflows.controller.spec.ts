@@ -70,6 +70,7 @@ function makeAdminCycleService(): jest.Mocked<WorkflowAdminCycleService> {
     finalizeCycle: jest.fn().mockResolvedValue({ id: 'cycle-1', steps: [] }),
     skipReviewCycle: jest.fn().mockResolvedValue(undefined),
     closeWorkflow: jest.fn().mockResolvedValue(undefined),
+    cancelWorkflow: jest.fn().mockResolvedValue(undefined),
     addNote: jest.fn().mockResolvedValue(undefined),
     forwardStep: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<WorkflowAdminCycleService>;
@@ -358,6 +359,19 @@ describe('WorkflowsController', () => {
       await controller.close(undefined, 'wf-1', dto, user);
 
       expect(adminCycleService.closeWorkflow).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
+      expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
+    });
+  });
+
+  describe('cancel()', () => {
+    it('calls adminCycleService.cancelWorkflow then workflowsService.findOne', async () => {
+      const { controller, adminCycleService, workflowsService } = buildController();
+      const user = makeUser();
+      const dto = { reason: 'No longer needed' };
+
+      await controller.cancel(undefined, 'wf-1', dto, user);
+
+      expect(adminCycleService.cancelWorkflow).toHaveBeenCalledWith('wf-1', user.sub, user.companyId, dto);
       expect(workflowsService.findOne).toHaveBeenCalledWith('wf-1', user);
     });
   });

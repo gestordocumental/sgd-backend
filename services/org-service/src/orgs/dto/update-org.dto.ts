@@ -4,7 +4,6 @@ import {
   MaxLength,
   IsOptional,
   IsEnum,
-  IsBoolean,
 } from 'class-validator';
 import { OrgStatus } from '../entities/org.entity';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -39,11 +38,4 @@ export class UpdateOrgDto {
   @IsOptional()
   @IsEnum(OrgStatus)
   status?: OrgStatus;
-
-  @ApiPropertyOptional({
-    description: 'Whether workflows in this org go through the admin review cycle step',
-  })
-  @IsOptional()
-  @IsBoolean()
-  reviewCycleEnabled?: boolean;
 }

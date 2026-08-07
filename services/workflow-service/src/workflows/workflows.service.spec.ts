@@ -138,6 +138,7 @@ function buildService() {
       codigo: 'TYP-001',
       version: 1,
       nombre: 'Tipología Test',
+      reviewCycleEnabled: false,
     }),
   } as unknown as jest.Mocked<DocumentClientService>;
 
@@ -215,6 +216,29 @@ describe('WorkflowsService', () => {
         expect.objectContaining({ eventType: TimelineEventType.WORKFLOW_CREATED }),
       );
       expect(kafkaProducer.emitSafe).toHaveBeenCalled();
+    });
+
+    it('snapshots the typology\'s reviewCycleEnabled flag onto the workflow at creation time', async () => {
+      const { service, workflowRepo, actionRepo, dataSource, documentClientService } = buildService();
+      const user = makeUser();
+      documentClientService.getTypologyInfo.mockResolvedValue({
+        codigo: 'TYP-001',
+        version: '1',
+        nombre: 'Tipología Test',
+        reviewCycleEnabled: true,
+      } as never);
+      const savedWorkflow = makeWorkflow({ approvalSteps: [makeStep()] });
+      workflowRepo.findOne.mockResolvedValue(savedWorkflow);
+      actionRepo.find.mockResolvedValue([]);
+
+      await service.create(makeCreateDto({ title: 'New Workflow' }), user);
+
+      const workflowSaveCall = (dataSource._manager.create as jest.Mock).mock.calls.find(
+        (c: [unknown, unknown]) => c[0] === Workflow,
+      );
+      expect(workflowSaveCall?.[1]).toEqual(
+        expect.objectContaining({ reviewCycleEnabled: true }),
+      );
     });
 
     it('creates attachments when provided', async () => {

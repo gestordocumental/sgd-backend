@@ -51,6 +51,16 @@ export class Workflow {
   @Column({ name: 'typology_name', type: 'varchar', length: 500 })
   typologyName!: string;
 
+  /**
+   * Snapshot of the typology's reviewCycleEnabled flag at creation time —
+   * denormalized for the same reason as typologyCode/Name/Version. Only used
+   * for frontend display; approve()/createCycle() re-check document-service
+   * live instead of trusting this value, since it can go stale if the
+   * typology's setting changes after this workflow was created.
+   */
+  @Column({ name: 'review_cycle_enabled', type: 'boolean', default: false })
+  reviewCycleEnabled!: boolean;
+
   // ── Documento principal ──────────────────────────────────────────────────────
 
   /** ID del documento principal en document-service. */

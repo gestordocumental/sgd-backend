@@ -25,6 +25,12 @@ export interface TypologyPublicInfo {
     cargoId: string | null;
     cargoNombre: string | null;
   };
+  reviewCycleEnabled: boolean;
+}
+
+export interface ReviewCycleEnabledResult {
+  id: string;
+  reviewCycleEnabled: boolean;
 }
 
 export interface DocumentDiscrepancy {
@@ -186,6 +192,54 @@ export class DocumentClientService {
     } catch (error: unknown) {
       if (error instanceof ServiceUnavailableException) throw error;
       return this.handleError(error, 'document-service', url, correlationId);
+    }
+  }
+
+  /**
+   * Whether workflows created against this typology should go through the
+   * admin review cycle step. Best-effort: if document-service can't be
+   * reached, defaults to `false` (today's default for every typology) rather
+   * than throwing — a document-service outage must not block the approval
+   * flow, and failing closed here only means the review cycle step is
+   * skipped, never that it gets forced on a typology that opted out.
+   *
+   * Endpoint requerido en document-service:
+   *   GET /internal/typologies/:id/review-cycle-enabled?orgId=:orgId
+   */
+  async isReviewCycleEnabledForTypology(orgId: string, typologyId: string): Promise<boolean> {
+    const correlationId = getCorrelationId();
+    const url = `${this.documentServiceUrl}/internal/typologies/${typologyId}/review-cycle-enabled?orgId=${encodeURIComponent(orgId)}`;
+
+    try {
+      // Validation lives inside the function handed to fireWithCb (not after
+      // it resolves) so a malformed 200 counts as a failure for the circuit
+      // breaker too — otherwise document-service could return garbage on
+      // every call and the breaker would never see it as unhealthy.
+      return await this.fireWithCb<boolean>(async () => {
+        const response = await firstValueFrom(
+          this.httpService
+            .get<ReviewCycleEnabledResult>(url, {
+              headers: {
+                'x-internal-token':      this.internalToken,
+                [CORRELATION_ID_HEADER]: correlationId,
+              },
+            })
+            .pipe(timeout(this.timeoutMs)),
+        );
+        const reviewCycleEnabled = response.data?.reviewCycleEnabled;
+        if (typeof reviewCycleEnabled !== 'boolean') {
+          throw new Error('Invalid reviewCycleEnabled response from document-service');
+        }
+        return reviewCycleEnabled;
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Could not resolve reviewCycleEnabled for typology ${typologyId}, defaulting to false: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        'DocumentClientService',
+      );
+      return false;
     }
   }
 

@@ -88,6 +88,7 @@ export class WorkflowsService {
         typologyCode:          typologyInfo.codigo,
         typologyVersion:       typologyInfo.version,
         typologyName:          typologyInfo.nombre,
+        reviewCycleEnabled:    typologyInfo.reviewCycleEnabled,
         mainDocumentId:        dto.mainDocument?.storageKey ?? null,
         mainDocumentValidated,
         mainDocumentMetadata,

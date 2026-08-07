@@ -85,6 +85,7 @@ describe('Workflow response DTO mappers', () => {
       typologyCode: 'TYP',
       typologyVersion: '1',
       typologyName: 'Typology',
+      reviewCycleEnabled: true,
       mainDocumentId: 'doc-1',
       mainDocumentValidated: true,
       mainDocumentMetadata: { ok: true },
@@ -182,6 +183,7 @@ describe('Workflow response DTO mappers', () => {
     expect(dto.attachments[0].attachmentType).toBe(AttachmentType.SUPPORTING);
     expect(dto.activeAdminCycle?.steps[0].notes[0].content).toBe('Looks good');
     expect(dto.adminCycles).toHaveLength(1);
+    expect(dto.reviewCycleEnabled).toBe(true);
   });
 
   it('exposes noteId on attachments added via "Gestionar" (attachmentType MANAGEMENT)', () => {

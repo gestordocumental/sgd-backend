@@ -25,10 +25,11 @@ import { CreateAdminCycleDto } from './dto/create-admin-cycle.dto';
 import { CompleteAdminStepDto } from './dto/complete-admin-step.dto';
 import { ForwardAdminStepDto } from './dto/forward-admin-step.dto';
 import { CloseWorkflowDto } from './dto/close-workflow.dto';
+import { CancelWorkflowDto } from './dto/cancel-workflow.dto';
 import { AddWorkflowNoteDto } from './dto/add-workflow-note.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, TOPICS, AppLogger } from '@sgd/common';
-import { OrgClientService } from '../common/clients/org-client.service';
+import { DocumentClientService } from '../common/clients/document-client.service';
 
 @Injectable()
 export class WorkflowAdminCycleService {
@@ -46,7 +47,7 @@ export class WorkflowAdminCycleService {
     private readonly dataSource: DataSource,
     private readonly timelineService: WorkflowTimelineService,
     private readonly kafkaProducer: KafkaProducerService,
-    private readonly orgClientService: OrgClientService,
+    private readonly documentClientService: DocumentClientService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -59,15 +60,25 @@ export class WorkflowAdminCycleService {
     dto: CreateAdminCycleDto,
   ): Promise<WorkflowAdminCycle> {
     // [RN-17] Defensa en profundidad: el ciclo de revisión debe estar habilitado
-    // para esta organización. El frontend ya oculta el botón cuando está
-    // deshabilitado, y approve() ya evita llegar a PENDING_REVIEW_CYCLE en ese
-    // caso — esto solo cubre una llamada directa al endpoint. Es una llamada
-    // externa independiente del estado mutable del workflow, así que se hace
-    // antes de abrir la transacción para no retener el lock de fila durante
-    // un round-trip de red.
-    const reviewCycleEnabled = await this.orgClientService.isReviewCycleEnabled(orgId);
-    if (!reviewCycleEnabled) {
-      throw new ForbiddenException('The review cycle is disabled for this organization');
+    // para la tipología de este workflow. El frontend ya oculta el botón cuando
+    // está deshabilitado, y approve() ya evita llegar a PENDING_REVIEW_CYCLE en
+    // ese caso — esto solo cubre una llamada directa al endpoint. Es una llamada
+    // externa así que se hace antes de abrir la transacción para no retener el
+    // lock de fila durante un round-trip de red — de ahí esta lectura preliminar
+    // sin lock, solo para conocer la tipología. Si el workflow no existe, la
+    // lectura con lock dentro de la transacción abajo lo reportará como tal.
+    const preliminaryWorkflow = await this.workflowRepo.findOne({
+      where: { id: workflowId, orgId },
+      select: ['typologyId'],
+    });
+    if (preliminaryWorkflow) {
+      const reviewCycleEnabled = await this.documentClientService.isReviewCycleEnabledForTypology(
+        orgId,
+        preliminaryWorkflow.typologyId,
+      );
+      if (!reviewCycleEnabled) {
+        throw new ForbiddenException('The review cycle is disabled for this typology');
+      }
     }
 
     // Validar que los stepOrders sean únicos y consecutivos
@@ -810,6 +821,90 @@ export class WorkflowAdminCycleService {
       workflowId,
       workflowTitle:    workflowTitle,
       message:          `El workflow "${workflowTitle}" ha sido cerrado definitivamente.`,
+      timestamp:        new Date().toISOString(),
+    });
+
+    return this.workflowRepo.findOneOrFail({ where: { id: workflowId, orgId } });
+  }
+
+  // ── Cancelar workflow ──────────────────────────────────────────────────────────
+
+  async cancelWorkflow(
+    workflowId: string,
+    userId: string,
+    orgId: string,
+    dto: CancelWorkflowDto,
+  ): Promise<Workflow> {
+    let workflowOrgId!: string;
+    let workflowTitle!: string;
+    let workflowCreatedBy!: string;
+
+    await this.dataSource.transaction(async (manager) => {
+      // Lock the workflow row so a concurrent admin-cycle-start can't change
+      // its status between this check and the writes below — without this,
+      // both transactions could read AVAILABLE_FOR_FINAL_USERS and commit,
+      // cancelling a workflow that just entered a fresh admin cycle.
+      const workflow = await manager.findOne(Workflow, {
+        where: { id: workflowId, orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!workflow) throw new NotFoundException('Workflow not found');
+
+      // Solo AVAILABLE_FOR_FINAL_USERS puede cancelarse; ADMIN_CYCLE_IN_PROGRESS y otros estados fallan aquí
+      assertValidTransition(workflow.status, WorkflowStatus.CANCELLED);
+
+      // Solo usuarios finales pueden cancelar
+      const finalUserIds = workflow.finalUserIds ?? [];
+      if (!finalUserIds.includes(userId)) {
+        throw new ForbiddenException('Only designated final users can cancel this workflow');
+      }
+
+      workflowOrgId     = workflow.orgId;
+      workflowTitle     = workflow.title;
+      workflowCreatedBy = workflow.createdBy;
+
+      await manager.save(WorkflowNote, {
+        workflowId,
+        createdBy: userId,
+        content:   dto.reason,
+      });
+
+      await manager.update(Workflow, workflowId, {
+        status:                WorkflowStatus.CANCELLED,
+        cancelledBy:           userId,
+        cancelledAt:           new Date(),
+        currentAssignedUserId: workflow.createdBy, // llega al creador original para visualización
+        activeAdminCycleId:    null,
+      });
+
+      await this.timelineService.record({
+        workflowId,
+        orgId:        workflow.orgId,
+        eventType:    TimelineEventType.WORKFLOW_CANCELLED,
+        actorId:      userId,
+        targetUserId: workflow.createdBy,
+        resourceName: workflow.title,
+        description:  `Workflow cancelado por usuario final. No se permiten más modificaciones.`,
+        metadata:     { reason: dto.reason, cancelledBy: userId },
+      }, manager);
+    });
+
+    this.kafkaProducer.emitSafe(TOPICS.WORKFLOW_CANCELLED, {
+      workflowId,
+      orgId:         workflowOrgId,
+      cancelledBy:   userId,
+      reason:        dto.reason,
+      notifyCreator: workflowCreatedBy,
+      timestamp:     new Date().toISOString(),
+    });
+
+    this.kafkaProducer.emitSafe(TOPICS.NOTIFICATION_SEND, {
+      type:             'WORKFLOW_CANCELLED',
+      recipientUserIds: [workflowCreatedBy],
+      orgId:            workflowOrgId,
+      workflowId,
+      workflowTitle:    workflowTitle,
+      message:          `El workflow "${workflowTitle}" ha sido cancelado.`,
       timestamp:        new Date().toISOString(),
     });
 

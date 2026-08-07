@@ -5,6 +5,7 @@ import { of, throwError, TimeoutError } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import {
   DocumentClientService,
+  ReviewCycleEnabledResult,
   TypologyPublicInfo,
   ValidateDocumentResult,
 } from './document-client.service';
@@ -73,6 +74,7 @@ describe('DocumentClientService', () => {
         cargoId: null,
         cargoNombre: null,
       },
+      reviewCycleEnabled: false,
     };
     httpService.get.mockReturnValue(of({ data: typology } as AxiosResponse<TypologyPublicInfo>));
 
@@ -152,6 +154,81 @@ describe('DocumentClientService', () => {
     await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
       InternalServerErrorException,
     );
+  });
+
+  // ── isReviewCycleEnabledForTypology ──────────────────────────────────────
+
+  it('returns reviewCycleEnabled from document-service', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: true };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(true);
+
+    expect(httpService.get).toHaveBeenCalledWith(
+      `${documentServiceUrl}/internal/typologies/typology-1/review-cycle-enabled?orgId=org-1`,
+      {
+        headers: {
+          'x-internal-token': internalToken,
+          [CORRELATION_ID_HEADER]: 'no-correlation-id',
+        },
+      },
+    );
+  });
+
+  it('defaults to false (fail-closed) instead of throwing when reviewCycleEnabled is missing from the response', async () => {
+    httpService.get.mockReturnValue(
+      of({ data: { id: 'typology-1' } } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Could not resolve reviewCycleEnabled for typology typology-1'),
+      'DocumentClientService',
+    );
+  });
+
+  it('defaults to false (fail-closed) when reviewCycleEnabled is not a boolean', async () => {
+    httpService.get.mockReturnValue(
+      of({
+        data: { id: 'typology-1', reviewCycleEnabled: null },
+      } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+  });
+
+  it('rejects a malformed response from inside the function handed to the circuit breaker, so it counts toward the breaker\'s own failure tracking', async () => {
+    httpService.get.mockReturnValue(
+      of({
+        data: { id: 'typology-1', reviewCycleEnabled: 'not-a-boolean' },
+      } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await service.isReviewCycleEnabledForTypology('org-1', 'typology-1');
+
+    expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
+    const firedFn = mockCbInstance.fire.mock.calls[0][0] as () => Promise<unknown>;
+    await expect(firedFn()).rejects.toThrow('Invalid reviewCycleEnabled response from document-service');
+  });
+
+  it('defaults to false (fail-closed) instead of throwing when document-service errors', async () => {
+    httpService.get.mockReturnValue(throwError(() => new Error('network down')));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+  });
+
+  it('defaults to false (fail-closed) on a timeout', async () => {
+    httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+  });
+
+  it('defaults to false (fail-closed) when the circuit breaker is open', async () => {
+    mockCbInstance.fire.mockRejectedValueOnce(
+      Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+    );
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
   });
 
   // ── circuit breaker ──────────────────────────────────────────────────────

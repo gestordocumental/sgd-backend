@@ -37,6 +37,22 @@ export class InternalTypologiesController {
         cargoId:           doc.estructuraOrg.cargoId,
         cargoNombre:       doc.estructuraOrg.cargoNombre,
       },
+      reviewCycleEnabled: doc.reviewCycleEnabled ?? false,
+    };
+  }
+
+  @Get(':id/review-cycle-enabled')
+  async getReviewCycleEnabled(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+  ) {
+    if (!orgId) throw new BadRequestException('orgId query param is required');
+
+    const doc = await this.typologiesService.findByIdPublic(orgId, id);
+
+    return {
+      id: (doc._id as { toString(): string }).toString(),
+      reviewCycleEnabled: doc.reviewCycleEnabled ?? false,
     };
   }
 }

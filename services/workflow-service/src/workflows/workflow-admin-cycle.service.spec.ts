@@ -21,7 +21,7 @@ import {
 } from './entities/enums';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, AppLogger } from '@sgd/common';
-import { OrgClientService } from '../common/clients/org-client.service';
+import { DocumentClientService } from '../common/clients/document-client.service';
 
 // ── Factories ─────────────────────────────────────────────────────────────────
 
@@ -106,9 +106,9 @@ function buildService() {
     emitSafe: jest.fn(),
   } as unknown as jest.Mocked<KafkaProducerService>;
 
-  const orgClientService: jest.Mocked<OrgClientService> = {
-    isReviewCycleEnabled: jest.fn().mockResolvedValue(true),
-  } as unknown as jest.Mocked<OrgClientService>;
+  const documentClientService: jest.Mocked<DocumentClientService> = {
+    isReviewCycleEnabledForTypology: jest.fn().mockResolvedValue(true),
+  } as unknown as jest.Mocked<DocumentClientService>;
 
   const logger = { log: jest.fn(), error: jest.fn(), warn: jest.fn() } as unknown as AppLogger;
 
@@ -121,7 +121,7 @@ function buildService() {
     dataSource,
     timelineService,
     kafkaProducer,
-    orgClientService,
+    documentClientService,
     logger,
   );
 
@@ -133,7 +133,7 @@ function buildService() {
     dataSource,
     timelineService,
     kafkaProducer,
-    orgClientService,
+    documentClientService,
   };
 }
 
@@ -188,15 +188,31 @@ describe('WorkflowAdminCycleService', () => {
       await expect(service.createCycle('wf-1', 'not-final-user', 'org-1', validDto)).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws ForbiddenException when the review cycle is disabled for the org (defense in depth), without touching the workflow row', async () => {
-      const { service, dataSource, orgClientService } = buildService();
-      orgClientService.isReviewCycleEnabled.mockResolvedValue(false);
+    it('throws ForbiddenException when the review cycle is disabled for the typology (defense in depth), without touching the locked workflow row', async () => {
+      const { service, workflowRepo, dataSource, documentClientService } = buildService();
+      workflowRepo.findOne.mockResolvedValue({ typologyId: 'typ-1' } as Workflow);
+      documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(false);
 
       await expect(service.createCycle('wf-1', 'final-user-1', 'org-1', validDto)).rejects.toThrow(
         ForbiddenException,
       );
-      expect(orgClientService.isReviewCycleEnabled).toHaveBeenCalledWith('org-1');
+      expect(workflowRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'wf-1', orgId: 'org-1' },
+        select: ['typologyId'],
+      });
+      expect(documentClientService.isReviewCycleEnabledForTypology).toHaveBeenCalledWith('org-1', 'typ-1');
       expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('skips the review-cycle-enabled check without erroring when the preliminary workflow lookup finds nothing — the locked read inside the transaction surfaces the real not-found', async () => {
+      const { service, workflowRepo, dataSource, documentClientService } = buildService();
+      workflowRepo.findOne.mockResolvedValue(null);
+      dataSource._manager.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.createCycle('wf-1', 'final-user-1', 'org-2', validDto),
+      ).rejects.toThrow(NotFoundException);
+      expect(documentClientService.isReviewCycleEnabledForTypology).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException for non-consecutive step orders, without touching the workflow row', async () => {
@@ -882,6 +898,91 @@ describe('WorkflowAdminCycleService', () => {
 
       expect(timelineService.record).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: TimelineEventType.WORKFLOW_CLOSED }),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('cancelWorkflow()', () => {
+    it('scopes the locked workflow lookup to the caller org, so cross-org ids resolve as not found', async () => {
+      const { service, dataSource } = buildService();
+      dataSource._manager.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.cancelWorkflow('wf-1', 'final-user-1', 'org-2', { reason: 'No longer needed' }),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(dataSource._manager.findOne).toHaveBeenCalledWith(Workflow, {
+        where: { id: 'wf-1', orgId: 'org-2' },
+        lock: { mode: 'pessimistic_write' },
+      });
+    });
+
+    it('throws ConflictException when workflow is ADMIN_CYCLE_IN_PROGRESS', async () => {
+      const { service, dataSource } = buildService();
+      dataSource._manager.findOne.mockResolvedValue(
+        makeWorkflow({ status: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS }),
+      );
+      await expect(
+        service.cancelWorkflow('wf-1', 'final-user-1', 'org-1', { reason: 'No longer needed' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws ConflictException when workflow is not AVAILABLE_FOR_FINAL_USERS', async () => {
+      const { service, dataSource } = buildService();
+      dataSource._manager.findOne.mockResolvedValue(makeWorkflow({ status: WorkflowStatus.DRAFT }));
+      await expect(
+        service.cancelWorkflow('wf-1', 'final-user-1', 'org-1', { reason: 'No longer needed' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws ForbiddenException when user is not a final user', async () => {
+      const { service, dataSource } = buildService();
+      dataSource._manager.findOne.mockResolvedValue(
+        makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
+      );
+      await expect(
+        service.cancelWorkflow('wf-1', 'not-final-user', 'org-1', { reason: 'No longer needed' }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('transitions workflow to CANCELLED and emits kafka events', async () => {
+      const { service, dataSource, kafkaProducer } = buildService();
+      const wf = makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS });
+      dataSource._manager.findOne.mockResolvedValue(wf);
+
+      await service.cancelWorkflow('wf-1', 'final-user-1', 'org-1', { reason: 'No longer needed' });
+
+      expect(dataSource._manager.update).toHaveBeenCalledWith(
+        Workflow,
+        'wf-1',
+        expect.objectContaining({ status: WorkflowStatus.CANCELLED, cancelledBy: 'final-user-1' }),
+      );
+      expect(kafkaProducer.emitSafe).toHaveBeenCalledTimes(2); // CANCELLED + NOTIFICATION_SEND
+    });
+
+    it('always saves the cancellation reason as a note', async () => {
+      const { service, dataSource } = buildService();
+      const wf = makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS });
+      dataSource._manager.findOne.mockResolvedValue(wf);
+
+      await service.cancelWorkflow('wf-1', 'final-user-1', 'org-1', { reason: 'No longer needed' });
+
+      expect(dataSource._manager.save).toHaveBeenCalledWith(
+        WorkflowNote,
+        expect.objectContaining({ content: 'No longer needed' }),
+      );
+    });
+
+    it('records WORKFLOW_CANCELLED timeline event', async () => {
+      const { service, dataSource, timelineService } = buildService();
+      const wf = makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS });
+      dataSource._manager.findOne.mockResolvedValue(wf);
+
+      await service.cancelWorkflow('wf-1', 'final-user-1', 'org-1', { reason: 'No longer needed' });
+
+      expect(timelineService.record).toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: TimelineEventType.WORKFLOW_CANCELLED }),
         expect.anything(),
       );
     });

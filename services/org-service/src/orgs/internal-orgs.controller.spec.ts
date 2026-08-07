@@ -17,7 +17,6 @@ const makeOrg = (overrides: Partial<Org> = {}): Org => ({
   updatedAt: new Date('2026-01-02T00:00:00.000Z'),
   deletedAt: null,
   ...overrides,
-  reviewCycleEnabled: overrides.reviewCycleEnabled ?? true,
 });
 
 describe('InternalOrgsController', () => {
@@ -55,23 +54,4 @@ describe('InternalOrgsController', () => {
     });
   });
 
-  describe('getReviewCycleEnabled()', () => {
-    it('returns the org id and reviewCycleEnabled flag', async () => {
-      service.findOne.mockResolvedValue(makeOrg({ reviewCycleEnabled: false }));
-
-      const result = await controller.getReviewCycleEnabled('78a71a1c-e4e8-4d7c-8cf6-8d319d46177f');
-
-      expect(service.findOne).toHaveBeenCalledWith('78a71a1c-e4e8-4d7c-8cf6-8d319d46177f');
-      expect(result).toEqual({
-        id: '78a71a1c-e4e8-4d7c-8cf6-8d319d46177f',
-        reviewCycleEnabled: false,
-      });
-    });
-
-    it('propagates NotFoundException for an unknown or deleted org', async () => {
-      service.findOne.mockRejectedValue(new NotFoundException('Organization x not found'));
-
-      await expect(controller.getReviewCycleEnabled('x')).rejects.toThrow(NotFoundException);
-    });
-  });
 });

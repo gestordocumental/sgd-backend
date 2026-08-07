@@ -242,6 +242,10 @@ export class WorkflowResponseDto {
   @ApiProperty() typologyCode!: string;
   @ApiProperty() typologyVersion!: string;
   @ApiProperty() typologyName!: string;
+  // Snapshot al crear el workflow — ver comentario en la entidad Workflow.
+  // El chequeo autoritativo es en vivo contra document-service en
+  // approve()/createCycle(); esto es solo para mostrar/ocultar el botón.
+  @ApiProperty() reviewCycleEnabled!: boolean;
   @ApiPropertyOptional() mainDocumentId: string | null = null;
   @ApiProperty() mainDocumentValidated!: boolean;
   @ApiPropertyOptional() mainDocumentMetadata: Record<string, unknown> | null = null;
@@ -289,6 +293,7 @@ export class WorkflowResponseDto {
       typologyCode:             workflow.typologyCode,
       typologyVersion:          workflow.typologyVersion,
       typologyName:             workflow.typologyName,
+      reviewCycleEnabled:       workflow.reviewCycleEnabled,
       mainDocumentId:           workflow.mainDocumentId,
       mainDocumentValidated:    workflow.mainDocumentValidated,
       mainDocumentMetadata:     workflow.mainDocumentMetadata,

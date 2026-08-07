@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -38,4 +38,11 @@ export class UpdateTypologyDto {
   @MaxLength(50)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   version?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether workflows created against this typology go through the admin review cycle step',
+  })
+  @IsOptional()
+  @IsBoolean()
+  reviewCycleEnabled?: boolean;
 }

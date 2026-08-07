@@ -39,10 +39,6 @@ export class Org {
   })
   status!: OrgStatus;
 
-  /** Feature flag: whether workflows in this org go through the admin review cycle step */
-  @Column({ name: 'review_cycle_enabled', type: 'boolean', default: true })
-  reviewCycleEnabled!: boolean;
-
   /** UUID of the user who created the organization */
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy!: string | null;

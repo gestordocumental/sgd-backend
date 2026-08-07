@@ -111,6 +111,9 @@ export class TypologyResponseDto {
   @ApiProperty({ enum: CreationSource })
   fuenteCreacion!: CreationSource;
 
+  @ApiProperty({ description: 'Whether workflows created against this typology go through the admin review cycle step' })
+  reviewCycleEnabled!: boolean;
+
   @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
   deletedAt!: Date | null;
 
@@ -158,6 +161,7 @@ export class TypologyResponseDto {
       })),
     };
     dto.fuenteCreacion = doc.fuenteCreacion;
+    dto.reviewCycleEnabled = doc.reviewCycleEnabled ?? false;
     dto.deletedAt = doc.deletedAt ?? null;
     dto.createdAt = (doc as any).createdAt;
     dto.updatedAt = (doc as any).updatedAt;
