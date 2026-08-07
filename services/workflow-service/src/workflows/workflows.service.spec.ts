@@ -564,21 +564,40 @@ describe('WorkflowsService', () => {
       expect(result).toHaveLength(1);
     });
 
-    it('includes CLOSED in the status filters, so closed workflows the user participated in remain visible', async () => {
+    it('includes CLOSED in every status filter — final user, past reviewer, creator and approver — so closed workflows the user participated in remain visible', async () => {
       const { service, workflowRepo } = buildService();
       const qb = makeQb({ data: [], total: 0 });
       workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
       await service.getMyAvailable(makeUser());
 
-      const includesClosed = (qb.andWhere as jest.Mock).mock.calls.some(
-        ([, params]: [string, Record<string, unknown> | undefined]) =>
-          params &&
-          Object.values(params).some(
-            (v) => Array.isArray(v) && v.includes(WorkflowStatus.CLOSED),
-          ),
+      const statusParams = (qb.andWhere as jest.Mock).mock.calls
+        .map(([, params]: [string, Record<string, unknown> | undefined]) => params)
+        .filter((params): params is Record<string, unknown> => params !== undefined);
+
+      expect(statusParams).toEqual(
+        expect.arrayContaining([
+          // finalUserWorkflows
+          expect.objectContaining({
+            statuses: expect.arrayContaining([WorkflowStatus.CLOSED]),
+          }),
+          // pastAdminReviewerWorkflows
+          expect.objectContaining({
+            visibleStatuses: expect.arrayContaining([
+              WorkflowStatus.REJECTED,
+              WorkflowStatus.CLOSED,
+            ]),
+          }),
+          // createdByUserWorkflows
+          expect.objectContaining({
+            creatorStatuses: expect.arrayContaining([WorkflowStatus.CLOSED]),
+          }),
+          // approverWorkflows
+          expect.objectContaining({
+            approverStatuses: expect.arrayContaining([WorkflowStatus.CLOSED]),
+          }),
+        ]),
       );
-      expect(includesClosed).toBe(true);
     });
 
     it('surfaces mandatory (non-optional) admin-cycle reviewers too, not just optional ones', async () => {
