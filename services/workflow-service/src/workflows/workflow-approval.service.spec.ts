@@ -244,7 +244,10 @@ describe('WorkflowApprovalService', () => {
       expect(dataSource._manager.update).toHaveBeenCalledWith(
         Workflow,
         'wf-1',
-        expect.objectContaining({ status: WorkflowStatus.PENDING_REVIEW_CYCLE }),
+        expect.objectContaining({
+          status: WorkflowStatus.PENDING_REVIEW_CYCLE,
+          reviewCycleEnabled: true,
+        }),
       );
     });
 
@@ -265,8 +268,36 @@ describe('WorkflowApprovalService', () => {
       expect(dataSource._manager.update).toHaveBeenCalledWith(
         Workflow,
         'wf-1',
-        expect.objectContaining({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
+        expect.objectContaining({
+          status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+          reviewCycleEnabled: false,
+        }),
       );
+    });
+
+    it('propagates the error and leaves the workflow untouched when the review-cycle lookup fails on the last step', async () => {
+      const { service, workflowRepo, dataSource, documentClientService } = buildService();
+      documentClientService.isReviewCycleEnabledForTypology.mockRejectedValue(
+        new InternalServerErrorException('document-service unavailable'),
+      );
+      const wf = pendingWorkflow({
+        mainDocumentMetadata: {
+          typologyOrgStructure: { cargoId: 'cargo-1' },
+        } as unknown as Record<string, unknown>,
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+
+      await expect(service.approve('wf-1', 'approver-1', {})).rejects.toThrow(
+        InternalServerErrorException,
+      );
+
+      // Called before the transaction opens (see approve()'s comment), so a
+      // failed lookup must leave no trace: no approval action recorded, no
+      // step marked approved, and — the concern this guards against — no
+      // silent transition to AVAILABLE_FOR_FINAL_USERS that would skip a
+      // review cycle the typology actually has enabled.
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(dataSource._manager.update).not.toHaveBeenCalled();
     });
 
     it('does not call document-service when there are more approval steps left', async () => {

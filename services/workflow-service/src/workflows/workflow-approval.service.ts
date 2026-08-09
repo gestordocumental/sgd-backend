@@ -211,6 +211,10 @@ export class WorkflowApprovalService {
           currentApprovalStepOrder: null,
           currentAssignedUserId:    finalUserIds[0] ?? null,
           finalUserIds:             finalUserIds.length > 0 ? finalUserIds : null,
+          // Refresca la instantánea con el valor recién consultado en vivo —
+          // ya se pagó el costo de la llamada arriba, así que de paso se
+          // corrige si la tipología cambió desde la creación del workflow.
+          reviewCycleEnabled,
         });
       } else {
         // Hay más aprobadores — activar siguiente paso

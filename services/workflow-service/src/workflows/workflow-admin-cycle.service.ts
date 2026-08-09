@@ -67,10 +67,28 @@ export class WorkflowAdminCycleService {
     // lock de fila durante un round-trip de red — de ahí esta lectura preliminar
     // sin lock, solo para conocer la tipología. Si el workflow no existe, la
     // lectura con lock dentro de la transacción abajo lo reportará como tal.
+    //
+    // Riesgo residual aceptado (TOCTOU): entre esta consulta en vivo y el commit
+    // de la transacción de más abajo solo corre validación síncrona en memoria
+    // (sin I/O), así que la ventana ya es del orden de microsegundos — no hay
+    // margen real para acortarla sin violar la convención de este codebase de
+    // no hacer llamadas HTTP dentro de una transacción de DB (ver comentarios
+    // equivalentes en workflow-approval.service.ts y workflows.service.ts).
+    // Cerrarla del todo requeriría un contrato de consistencia atómica entre
+    // el Postgres de workflow-service y el MongoDB de document-service
+    // (versionado optimista o saga) — cambio de arquitectura cross-servicio,
+    // desproporcionado frente al impacto real: en el peor caso se crea un
+    // ciclo administrativo para una tipología deshabilitada en el instante
+    // exacto de esta llamada, recuperable manualmente y sin implicaciones de
+    // seguridad o integridad de datos. Se acepta este riesgo residual.
     const preliminaryWorkflow = await this.workflowRepo.findOne({
       where: { id: workflowId, orgId },
       select: ['typologyId'],
     });
+    // Solo llega aquí como `true` — el `false` lanza abajo — así que sirve de
+    // paso para refrescar la instantánea desactualizada más adelante, ya que
+    // el costo de la llamada en vivo ya se pagó.
+    let liveReviewCycleEnabled: true | undefined;
     if (preliminaryWorkflow) {
       const reviewCycleEnabled = await this.documentClientService.isReviewCycleEnabledForTypology(
         orgId,
@@ -79,6 +97,7 @@ export class WorkflowAdminCycleService {
       if (!reviewCycleEnabled) {
         throw new ForbiddenException('The review cycle is disabled for this typology');
       }
+      liveReviewCycleEnabled = true;
     }
 
     // Validar que los stepOrders sean únicos y consecutivos
@@ -166,6 +185,7 @@ export class WorkflowAdminCycleService {
         status:              WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
         activeAdminCycleId:  savedCycle.id,
         currentAssignedUserId: firstStep.userId,
+        ...(liveReviewCycleEnabled !== undefined && { reviewCycleEnabled: liveReviewCycleEnabled }),
       });
 
       await this.timelineService.record({

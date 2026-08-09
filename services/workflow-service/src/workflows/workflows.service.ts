@@ -759,6 +759,43 @@ export class WorkflowsService {
   private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
     const workflow = await this.findWorkflowOrFail(id, user);
 
+    // El botón "Iniciar ciclo de revisión" del frontend depende de
+    // reviewCycleEnabled — para una lectura de UN SOLO workflow (nunca una
+    // lista/paginada, así que no hay riesgo de N+1) se refresca en vivo
+    // contra document-service en los estados donde realmente importa, en vez
+    // de servir la instantánea de creación/última aprobación, que puede haber
+    // quedado desactualizada si la tipología cambió mientras el workflow
+    // esperaba acción del usuario final.
+    //
+    // A diferencia de approve()/createCycle() (donde un false autoritativo
+    // conduce una transición de estado y por eso un fallo de document-service
+    // debe propagarse), este es solo un refresco de UI best-effort sobre una
+    // lectura — nunca debe tumbar la vista de detalle de un workflow porque
+    // document-service esté caído momentáneamente. Ante fallo, se conserva la
+    // instantánea existente y se registra la advertencia.
+    if (
+      workflow.status === WorkflowStatus.PENDING_REVIEW_CYCLE ||
+      workflow.status === WorkflowStatus.AVAILABLE_FOR_FINAL_USERS
+    ) {
+      try {
+        const liveReviewCycleEnabled = await this.documentClientService.isReviewCycleEnabledForTypology(
+          workflow.orgId,
+          workflow.typologyId,
+        );
+        if (liveReviewCycleEnabled !== workflow.reviewCycleEnabled) {
+          workflow.reviewCycleEnabled = liveReviewCycleEnabled;
+          await this.workflowRepo.update(id, { reviewCycleEnabled: liveReviewCycleEnabled });
+        }
+      } catch (error: unknown) {
+        this.logger.warn(
+          `Could not refresh reviewCycleEnabled for workflow ${id}, serving stale snapshot: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          'WorkflowsService',
+        );
+      }
+    }
+
     const actions = await this.actionRepo.find({
       where: { workflowId: id },
       order: { createdAt: 'ASC' },

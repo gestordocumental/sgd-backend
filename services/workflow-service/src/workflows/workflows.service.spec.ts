@@ -71,6 +71,7 @@ function makeRepo<T extends ObjectLiteral>(): jest.Mocked<Repository<T>> {
     find: jest.fn(),
     save: jest.fn(),
     create: jest.fn(),
+    update: jest.fn().mockResolvedValue(undefined),
     softDelete: jest.fn(),
     createQueryBuilder: jest.fn(),
     count: jest.fn().mockResolvedValue(0),
@@ -140,6 +141,7 @@ function buildService() {
       nombre: 'Tipología Test',
       reviewCycleEnabled: false,
     }),
+    isReviewCycleEnabledForTypology: jest.fn().mockResolvedValue(true),
   } as unknown as jest.Mocked<DocumentClientService>;
 
   const userClientService: jest.Mocked<UserClientService> = {
@@ -166,7 +168,7 @@ function buildService() {
     logger,
   );
 
-  return { service, workflowRepo, stepRepo, actionRepo, attachmentRepo, timelineRepo, dataSource, timelineService, kafkaProducer, documentClientService, userClientService };
+  return { service, workflowRepo, stepRepo, actionRepo, attachmentRepo, timelineRepo, dataSource, timelineService, kafkaProducer, documentClientService, userClientService, logger };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -433,6 +435,113 @@ describe('WorkflowsService', () => {
       const result = await service.findOne('wf-1', makeUser());
 
       expect(result.participantNames).toEqual({});
+    });
+  });
+
+  describe('findOne() — live reviewCycleEnabled refresh', () => {
+    it.each([WorkflowStatus.PENDING_REVIEW_CYCLE, WorkflowStatus.AVAILABLE_FOR_FINAL_USERS])(
+      'overrides the stale snapshot with the live value and persists it when status is %s',
+      async (status) => {
+        const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
+          buildService();
+        const wf = makeWorkflow({
+          status,
+          typologyId: 'typ-1',
+          reviewCycleEnabled: false,
+          approvalSteps: [],
+          attachments: [],
+        });
+        workflowRepo.findOne.mockResolvedValue(wf);
+        actionRepo.find.mockResolvedValue([]);
+        dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+        documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(true);
+
+        const result = await service.findOne('wf-1', makeUser());
+
+        expect(documentClientService.isReviewCycleEnabledForTypology).toHaveBeenCalledWith(
+          'org-1',
+          'typ-1',
+        );
+        expect(result.reviewCycleEnabled).toBe(true);
+        expect(workflowRepo.update).toHaveBeenCalledWith('wf-1', { reviewCycleEnabled: true });
+      },
+    );
+
+    it('does not call document-service or persist when the live value matches the stored snapshot', async () => {
+      const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
+        buildService();
+      const wf = makeWorkflow({
+        status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+        reviewCycleEnabled: true,
+        approvalSteps: [],
+        attachments: [],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(true);
+
+      const result = await service.findOne('wf-1', makeUser());
+
+      expect(result.reviewCycleEnabled).toBe(true);
+      expect(workflowRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('serves the stale snapshot and keeps the read succeeding when the live lookup fails', async () => {
+      const { service, workflowRepo, actionRepo, dataSource, documentClientService, logger } =
+        buildService();
+      const wf = makeWorkflow({
+        status: WorkflowStatus.PENDING_REVIEW_CYCLE,
+        typologyId: 'typ-1',
+        reviewCycleEnabled: true,
+        approvalSteps: [],
+        attachments: [],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      documentClientService.isReviewCycleEnabledForTypology.mockRejectedValue(
+        new Error('document-service unavailable'),
+      );
+
+      // Unlike approve()/createCycle(), this is a best-effort display refresh
+      // on a read path — a document-service outage must not break viewing the
+      // workflow, so the stale snapshot is served instead of propagating.
+      const result = await service.findOne('wf-1', makeUser());
+
+      expect(result.reviewCycleEnabled).toBe(true);
+      expect(workflowRepo.update).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Could not refresh reviewCycleEnabled for workflow wf-1'),
+        'WorkflowsService',
+      );
+    });
+
+    it.each([
+      WorkflowStatus.DRAFT,
+      WorkflowStatus.PENDING_APPROVAL,
+      WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+      WorkflowStatus.CLOSED,
+      WorkflowStatus.CANCELLED,
+      WorkflowStatus.REJECTED,
+    ])('does not live-check when status is %s — snapshot is not action-relevant there', async (status) => {
+      const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
+        buildService();
+      const wf = makeWorkflow({
+        status,
+        reviewCycleEnabled: false,
+        approvalSteps: [],
+        attachments: [],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+
+      const result = await service.findOne('wf-1', makeUser());
+
+      expect(documentClientService.isReviewCycleEnabledForTypology).not.toHaveBeenCalled();
+      expect(workflowRepo.update).not.toHaveBeenCalled();
+      expect(result.reviewCycleEnabled).toBe(false);
     });
   });
 

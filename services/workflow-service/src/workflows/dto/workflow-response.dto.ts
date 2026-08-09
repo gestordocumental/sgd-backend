@@ -242,9 +242,12 @@ export class WorkflowResponseDto {
   @ApiProperty() typologyCode!: string;
   @ApiProperty() typologyVersion!: string;
   @ApiProperty() typologyName!: string;
-  // Snapshot al crear el workflow — ver comentario en la entidad Workflow.
-  // El chequeo autoritativo es en vivo contra document-service en
-  // approve()/createCycle(); esto es solo para mostrar/ocultar el botón.
+  // Snapshot denormalizado — ver comentario en la entidad Workflow. El
+  // chequeo autoritativo siempre es en vivo contra document-service
+  // (approve()/createCycle()); este campo es solo para mostrar/ocultar el
+  // botón. En respuestas de UN SOLO workflow (nunca listas/paginadas) se
+  // refresca en vivo en WorkflowsService.findOneOrFail cuando el estado lo
+  // amerita, así que ahí siempre coincide con la disponibilidad real.
   @ApiProperty() reviewCycleEnabled!: boolean;
   @ApiPropertyOptional() mainDocumentId: string | null = null;
   @ApiProperty() mainDocumentValidated!: boolean;

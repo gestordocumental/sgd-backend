@@ -52,11 +52,18 @@ export class Workflow {
   typologyName!: string;
 
   /**
-   * Snapshot of the typology's reviewCycleEnabled flag at creation time —
-   * denormalized for the same reason as typologyCode/Name/Version. Only used
-   * for frontend display; approve()/createCycle() re-check document-service
-   * live instead of trusting this value, since it can go stale if the
-   * typology's setting changes after this workflow was created.
+   * Snapshot of the typology's reviewCycleEnabled flag, denormalized for the
+   * same reason as typologyCode/Name/Version — only used for frontend
+   * display, never for authorization (approve()/createCycle() always
+   * re-check document-service live). Refreshed opportunistically whenever a
+   * live check already happens elsewhere for another reason (final approval,
+   * createCycle's RN-17 guard) and, for single-workflow reads specifically
+   * (never list/paginated reads, to avoid N+1), in
+   * WorkflowsService.findOneOrFail — so the "start review cycle" button in
+   * the detail view stays accurate even if the typology's setting changed
+   * after this workflow was created or last transitioned. List/paginated
+   * views may still show a snapshot that's briefly behind the typology's
+   * live setting.
    */
   @Column({ name: 'review_cycle_enabled', type: 'boolean', default: false })
   reviewCycleEnabled!: boolean;

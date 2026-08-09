@@ -3,5 +3,10 @@
     "active": true,
     "expiry": "2026-10-30",
     "notes": "@opentelemetry/propagator-jaeger DoS via malformed header. Only fix requires @opentelemetry/sdk-node@0.221.0, a breaking bump. See MGESTDOC-56. (Its sibling GHSA-mh99-v99m-4gvg — brace-expansion DoS — was resolved by a non-breaking `npm audit fix` at the workspace root, bumping brace-expansion to 1.1.18/2.1.4/5.0.9 and fast-uri to 3.1.5; removed here since better-npm-audit now flags it as unused.)"
+  },
+  "GHSA-pm4m-ph32-ghv5": {
+    "active": true,
+    "expiry": "2026-10-30",
+    "notes": "js-yaml quadratic-time DoS in flow collections (5.0.0-5.2.1, fixed in 5.2.2). Nested inside @nestjs/swagger@11.4.6's own bundled js-yaml@5.2.1 (node_modules/@nestjs/swagger/node_modules/js-yaml) — @nestjs/swagger pins js-yaml to an exact version in its own package.json, so npm's `overrides` can't reach that nested copy even with the correct parent-scoped override syntax (verified: the root workspace override for js-yaml was bumped from the older, now-also-vulnerable ^4.2.0 to ^5.2.3, which fixed the sibling GHSA-5p4m-2wfm-xmqj advisory everywhere else in the tree, but this one nested copy stays pinned). Requires @nestjs/swagger to bump its own js-yaml dependency upstream."
   }
 }

@@ -145,7 +145,10 @@ export class Typology {
   /**
    * Feature flag: whether workflows created against this typology go through
    * the admin review cycle step. Replaces the old org-wide flag — each
-   * typology now controls this independently. Defaults to false (opt-in).
+   * typology now controls this independently. Defaults to false (opt-in) for
+   * typologies created from now on. Typologies that predate this field were
+   * backfilled to true by scripts/backfill-review-cycle-enabled.ts, matching
+   * the old org-wide default they used to inherit — see that script for why.
    */
   @Prop({ type: Boolean, default: false })
   reviewCycleEnabled!: boolean;

@@ -197,11 +197,15 @@ export class DocumentClientService {
 
   /**
    * Whether workflows created against this typology should go through the
-   * admin review cycle step. Best-effort: if document-service can't be
-   * reached, defaults to `false` (today's default for every typology) rather
-   * than throwing — a document-service outage must not block the approval
-   * flow, and failing closed here only means the review cycle step is
-   * skipped, never that it gets forced on a typology that opted out.
+   * admin review cycle step. `false` is only ever a genuine, validated answer
+   * from document-service — never a stand-in for "couldn't tell". Both
+   * callers (approve()'s final-approval branch and createCycle()'s RN-17
+   * guard) treat `false` as authoritative and act on it immediately (skip
+   * the review cycle / reject creating one), so silently defaulting to
+   * `false` on a document-service outage would silently skip a review cycle
+   * that was actually enabled. Propagate failures instead — the caller
+   * surfaces a 503/500 and the client can retry once document-service is
+   * back, same as every other method on this class.
    *
    * Endpoint requerido en document-service:
    *   GET /internal/typologies/:id/review-cycle-enabled?orgId=:orgId
@@ -233,13 +237,8 @@ export class DocumentClientService {
         return reviewCycleEnabled;
       });
     } catch (error: unknown) {
-      this.logger.warn(
-        `Could not resolve reviewCycleEnabled for typology ${typologyId}, defaulting to false: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        'DocumentClientService',
-      );
-      return false;
+      if (error instanceof ServiceUnavailableException) throw error;
+      return this.handleError(error, 'document-service', url, correlationId);
     }
   }
 

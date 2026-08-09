@@ -175,26 +175,33 @@ describe('DocumentClientService', () => {
     );
   });
 
-  it('defaults to false (fail-closed) instead of throwing when reviewCycleEnabled is missing from the response', async () => {
+  it('returns reviewCycleEnabled: false from document-service as-is (a genuine, validated answer)', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: false };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+  });
+
+  it('throws InternalServerErrorException instead of defaulting to false when reviewCycleEnabled is missing from the response', async () => {
     httpService.get.mockReturnValue(
       of({ data: { id: 'typology-1' } } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
     );
 
-    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Could not resolve reviewCycleEnabled for typology typology-1'),
-      'DocumentClientService',
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      InternalServerErrorException,
     );
   });
 
-  it('defaults to false (fail-closed) when reviewCycleEnabled is not a boolean', async () => {
+  it('throws InternalServerErrorException instead of defaulting to false when reviewCycleEnabled is not a boolean', async () => {
     httpService.get.mockReturnValue(
       of({
         data: { id: 'typology-1', reviewCycleEnabled: null },
       } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
     );
 
-    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      InternalServerErrorException,
+    );
   });
 
   it('rejects a malformed response from inside the function handed to the circuit breaker, so it counts toward the breaker\'s own failure tracking', async () => {
@@ -204,31 +211,37 @@ describe('DocumentClientService', () => {
       } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
     );
 
-    await service.isReviewCycleEnabledForTypology('org-1', 'typology-1');
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow();
 
     expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
     const firedFn = mockCbInstance.fire.mock.calls[0][0] as () => Promise<unknown>;
     await expect(firedFn()).rejects.toThrow('Invalid reviewCycleEnabled response from document-service');
   });
 
-  it('defaults to false (fail-closed) instead of throwing when document-service errors', async () => {
+  it('throws InternalServerErrorException instead of defaulting to false when document-service errors', async () => {
     httpService.get.mockReturnValue(throwError(() => new Error('network down')));
 
-    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      InternalServerErrorException,
+    );
   });
 
-  it('defaults to false (fail-closed) on a timeout', async () => {
+  it('throws GatewayTimeoutException instead of defaulting to false on a timeout', async () => {
     httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
 
-    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      GatewayTimeoutException,
+    );
   });
 
-  it('defaults to false (fail-closed) when the circuit breaker is open', async () => {
+  it('throws ServiceUnavailableException instead of defaulting to false when the circuit breaker is open', async () => {
     mockCbInstance.fire.mockRejectedValueOnce(
       Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
     );
 
-    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      ServiceUnavailableException,
+    );
   });
 
   // ── circuit breaker ──────────────────────────────────────────────────────
