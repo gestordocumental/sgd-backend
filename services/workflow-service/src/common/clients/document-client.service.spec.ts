@@ -1,7 +1,7 @@
 import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { of, throwError, TimeoutError } from 'rxjs';
+import { NEVER, of, throwError, TimeoutError } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import {
   DocumentClientService,
@@ -244,6 +244,32 @@ describe('DocumentClientService', () => {
     expect(logger.http).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.stringContaining('timed out after 1500ms') }),
     );
+  });
+
+  it('actually applies the overridden timeoutMs to the request, not just to the log message', async () => {
+    // NEVER: the request never resolves on its own, so a rejection can only
+    // come from the RxJS `timeout(timeoutMs)` operator itself — proving it's
+    // really wired to the 200ms override. The override must be well below
+    // the shared default this suite mocks ConfigService.get() to return
+    // (1000ms, see beforeEach) — otherwise advancing fake timers past the
+    // override value could also already be past the shared default, and the
+    // assertion would pass even if the code silently fell back to
+    // `this.timeoutMs` instead of the passed-in `timeoutMs` (verified this
+    // was a real false-positive risk, not hypothetical, while writing this
+    // test).
+    httpService.get.mockReturnValue(NEVER);
+    jest.useFakeTimers();
+
+    try {
+      const promise = service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 200, false);
+      const assertion = expect(promise).rejects.toThrow(GatewayTimeoutException);
+
+      await jest.advanceTimersByTimeAsync(200);
+
+      await assertion;
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('throws ServiceUnavailableException instead of defaulting to false when the circuit breaker is open', async () => {
