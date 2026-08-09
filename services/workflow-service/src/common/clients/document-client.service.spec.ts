@@ -234,6 +234,18 @@ describe('DocumentClientService', () => {
     );
   });
 
+  it('logs the effective (overridden) timeout, not the shared default, on a timeout with a tightened timeoutMs', async () => {
+    httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+
+    await expect(
+      service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500, false),
+    ).rejects.toThrow(GatewayTimeoutException);
+
+    expect(logger.http).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('timed out after 1500ms') }),
+    );
+  });
+
   it('throws ServiceUnavailableException instead of defaulting to false when the circuit breaker is open', async () => {
     mockCbInstance.fire.mockRejectedValueOnce(
       Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),

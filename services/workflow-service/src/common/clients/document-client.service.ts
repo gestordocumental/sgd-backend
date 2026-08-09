@@ -264,7 +264,7 @@ export class DocumentClientService {
       return await (useCircuitBreaker ? this.fireWithCb(fetchAndValidate) : fetchAndValidate());
     } catch (error: unknown) {
       if (error instanceof ServiceUnavailableException) throw error;
-      return this.handleError(error, 'document-service', url, correlationId);
+      return this.handleError(error, 'document-service', url, correlationId, timeoutMs);
     }
   }
 
@@ -284,6 +284,7 @@ export class DocumentClientService {
     target: string,
     url: string,
     correlationId: string,
+    timeoutMs: number = this.timeoutMs,
   ): never {
     if (error instanceof TimeoutError) {
       this.logger.http({
@@ -291,7 +292,7 @@ export class DocumentClientService {
         target,
         statusCode: 504,
         correlationId,
-        message: `← [${target}] ${url} 504: timed out after ${this.timeoutMs}ms`,
+        message: `← [${target}] ${url} 504: timed out after ${timeoutMs}ms`,
       });
       throw new GatewayTimeoutException(`${target} did not respond in time`);
     }
