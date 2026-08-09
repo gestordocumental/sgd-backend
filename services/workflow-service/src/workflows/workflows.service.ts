@@ -42,6 +42,12 @@ export class WorkflowsService {
   // decision is worth it. Here a slow-but-alive document-service should just
   // fall back to the stale snapshot (via the try/catch around the call)
   // sooner rather than stall the whole read.
+  //
+  // This shorter timeout deliberately times out more often, so the call
+  // below also passes useCircuitBreaker: false — otherwise a burst of these
+  // best-effort reads could trip the breaker shared with approve()/
+  // createCycle() and make those fail fast (EOPENBREAKER) even when
+  // document-service would have answered fine within its own full timeout.
   private static readonly REVIEW_CYCLE_REFRESH_TIMEOUT_MS = 1_500;
 
   constructor(
@@ -791,6 +797,7 @@ export class WorkflowsService {
           workflow.orgId,
           workflow.typologyId,
           WorkflowsService.REVIEW_CYCLE_REFRESH_TIMEOUT_MS,
+          false, // useCircuitBreaker — see constant's comment above
         );
         if (liveReviewCycleEnabled !== workflow.reviewCycleEnabled) {
           workflow.reviewCycleEnabled = liveReviewCycleEnabled;

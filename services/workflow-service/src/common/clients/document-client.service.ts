@@ -215,6 +215,17 @@ export class DocumentClientService {
    * a read path should fall back to the stale snapshot sooner instead of
    * stalling the whole request.
    *
+   * `useCircuitBreaker` (default `true`) gates whether this call's outcome
+   * feeds the circuit breaker shared with getTypologyInfo()/validateDocument().
+   * A tightened `timeoutMs` deliberately makes timeouts more likely — routing
+   * those through the shared breaker would let a burst of best-effort detail
+   * reads (document-service merely slow, not down) trip it open, and then
+   * approve()/createCycle() would get EOPENBREAKER even though a real
+   * document-service call within their full timeout would have succeeded.
+   * Callers passing a tightened timeout should pass `false` here too, so
+   * their failures stay local instead of poisoning the breaker for the
+   * authoritative call sites.
+   *
    * Endpoint requerido en document-service:
    *   GET /internal/typologies/:id/review-cycle-enabled?orgId=:orgId
    */
@@ -222,32 +233,35 @@ export class DocumentClientService {
     orgId: string,
     typologyId: string,
     timeoutMs: number = this.timeoutMs,
+    useCircuitBreaker: boolean = true,
   ): Promise<boolean> {
     const correlationId = getCorrelationId();
     const url = `${this.documentServiceUrl}/internal/typologies/${typologyId}/review-cycle-enabled?orgId=${encodeURIComponent(orgId)}`;
 
+    // Validation lives inside this closure (not after it resolves) so a
+    // malformed 200 counts as a failure for the circuit breaker too, when the
+    // breaker is in play — otherwise document-service could return garbage on
+    // every call and the breaker would never see it as unhealthy.
+    const fetchAndValidate = async (): Promise<boolean> => {
+      const response = await firstValueFrom(
+        this.httpService
+          .get<ReviewCycleEnabledResult>(url, {
+            headers: {
+              'x-internal-token':      this.internalToken,
+              [CORRELATION_ID_HEADER]: correlationId,
+            },
+          })
+          .pipe(timeout(timeoutMs)),
+      );
+      const reviewCycleEnabled = response.data?.reviewCycleEnabled;
+      if (typeof reviewCycleEnabled !== 'boolean') {
+        throw new Error('Invalid reviewCycleEnabled response from document-service');
+      }
+      return reviewCycleEnabled;
+    };
+
     try {
-      // Validation lives inside the function handed to fireWithCb (not after
-      // it resolves) so a malformed 200 counts as a failure for the circuit
-      // breaker too — otherwise document-service could return garbage on
-      // every call and the breaker would never see it as unhealthy.
-      return await this.fireWithCb<boolean>(async () => {
-        const response = await firstValueFrom(
-          this.httpService
-            .get<ReviewCycleEnabledResult>(url, {
-              headers: {
-                'x-internal-token':      this.internalToken,
-                [CORRELATION_ID_HEADER]: correlationId,
-              },
-            })
-            .pipe(timeout(timeoutMs)),
-        );
-        const reviewCycleEnabled = response.data?.reviewCycleEnabled;
-        if (typeof reviewCycleEnabled !== 'boolean') {
-          throw new Error('Invalid reviewCycleEnabled response from document-service');
-        }
-        return reviewCycleEnabled;
-      });
+      return await (useCircuitBreaker ? this.fireWithCb(fetchAndValidate) : fetchAndValidate());
     } catch (error: unknown) {
       if (error instanceof ServiceUnavailableException) throw error;
       return this.handleError(error, 'document-service', url, correlationId);

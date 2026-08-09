@@ -462,6 +462,7 @@ describe('WorkflowsService', () => {
           'org-1',
           'typ-1',
           expect.any(Number),
+          false,
         );
         expect(result.reviewCycleEnabled).toBe(true);
         expect(workflowRepo.update).toHaveBeenCalledWith('wf-1', { reviewCycleEnabled: true });

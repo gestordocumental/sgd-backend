@@ -244,6 +244,53 @@ describe('DocumentClientService', () => {
     );
   });
 
+  // ── isReviewCycleEnabledForTypology — breaker isolation ──────────────────
+
+  it('routes through the shared circuit breaker by default (useCircuitBreaker defaults to true)', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: true };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500);
+
+    expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
+  });
+
+  it('bypasses the shared circuit breaker entirely when useCircuitBreaker is false, calling document-service directly', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: true };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await expect(
+      service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500, false),
+    ).resolves.toBe(true);
+
+    expect(mockCbInstance.fire).not.toHaveBeenCalled();
+    expect(httpService.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let repeated bypassed-breaker failures poison the breaker shared with approve()/createCycle()', async () => {
+    // Best-effort calls (useCircuitBreaker: false) fail repeatedly — as would
+    // happen if document-service is merely slow relative to the tightened
+    // read-path timeout, not actually down.
+    httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+    for (let i = 0; i < 10; i++) {
+      await expect(
+        service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500, false),
+      ).rejects.toThrow(GatewayTimeoutException);
+    }
+    // None of those touched the breaker at all, so it never had a chance to
+    // trip open from this traffic.
+    expect(mockCbInstance.fire).not.toHaveBeenCalled();
+
+    // An authoritative call (default useCircuitBreaker: true, as approve()/
+    // createCycle() use it) right after must still go through normally —
+    // proof the breaker was never poisoned by the calls above.
+    httpService.get.mockReturnValue(
+      of({ data: { id: 'typology-1', reviewCycleEnabled: true } } as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(true);
+    expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
+  });
+
   // ── circuit breaker ──────────────────────────────────────────────────────
 
   it('throws ServiceUnavailableException when document-service circuit is open', async () => {

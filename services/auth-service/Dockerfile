@@ -10,6 +10,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/common/package.json ./packages/common/
 COPY services/auth-service/package*.json ./services/auth-service/
+COPY patches ./patches
 
 # Install all workspace dependencies
 RUN npm ci
@@ -44,6 +45,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 COPY packages/common/package.json ./packages/common/
 COPY services/auth-service/package*.json ./services/auth-service/
+COPY patches ./patches
 
 # Only production dependencies
 RUN npm ci --omit=dev
