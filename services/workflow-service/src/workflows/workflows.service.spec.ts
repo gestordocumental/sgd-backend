@@ -461,13 +461,38 @@ describe('WorkflowsService', () => {
         expect(documentClientService.isReviewCycleEnabledForTypology).toHaveBeenCalledWith(
           'org-1',
           'typ-1',
+          expect.any(Number),
         );
         expect(result.reviewCycleEnabled).toBe(true);
         expect(workflowRepo.update).toHaveBeenCalledWith('wf-1', { reviewCycleEnabled: true });
       },
     );
 
-    it('does not call document-service or persist when the live value matches the stored snapshot', async () => {
+    it('passes a tighter timeout than the shared default so a slow-but-alive document-service can\'t stall the whole read', async () => {
+      const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
+        buildService();
+      const wf = makeWorkflow({
+        status: WorkflowStatus.PENDING_REVIEW_CYCLE,
+        typologyId: 'typ-1',
+        reviewCycleEnabled: false,
+        approvalSteps: [],
+        attachments: [],
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+      actionRepo.find.mockResolvedValue([]);
+      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
+      documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(true);
+
+      await service.findOne('wf-1', makeUser());
+
+      const [, , timeoutMs] = documentClientService.isReviewCycleEnabledForTypology.mock.calls[0];
+      // Default DOCUMENT_SERVICE_TIMEOUT_MS is 5000ms — this must be noticeably
+      // shorter, since it only guards a best-effort UI refresh, not an
+      // authoritative decision.
+      expect(timeoutMs).toBeLessThan(5_000);
+    });
+
+    it('does not persist when the live value matches the stored snapshot', async () => {
       const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
         buildService();
       const wf = makeWorkflow({

@@ -287,20 +287,6 @@ describe('WorkflowAdminCycleService', () => {
       );
     });
 
-    it('does not touch reviewCycleEnabled when the preliminary lookup finds nothing (already covered by the not-found test above)', async () => {
-      const { service, cycleRepo, workflowRepo, dataSource } = buildService();
-      workflowRepo.findOne.mockResolvedValue(null);
-      mockLookups(dataSource, makeWorkflow({ reviewCycleEnabled: false }), null);
-      cycleRepo.findOneOrFail.mockResolvedValue(makeCycle());
-
-      await service.createCycle('wf-1', 'final-user-1', 'org-1', validDto);
-
-      const updateCall = (dataSource._manager.update as jest.Mock).mock.calls.find(
-        (c: [unknown, unknown, unknown]) => c[0] === Workflow,
-      );
-      expect(updateCall?.[2]).not.toHaveProperty('reviewCycleEnabled');
-    });
-
     it('also works when workflow is AVAILABLE_FOR_FINAL_USERS', async () => {
       const { service, cycleRepo, dataSource } = buildService();
       mockLookups(dataSource, makeWorkflow({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }), null);

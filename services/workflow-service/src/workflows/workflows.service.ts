@@ -35,6 +35,15 @@ import { UserClientService } from '../common/clients/user-client.service';
 
 @Injectable()
 export class WorkflowsService {
+  // Bounds how long a single workflow detail read can be blocked by the
+  // best-effort reviewCycleEnabled refresh in findOneOrFail — much shorter
+  // than the shared DOCUMENT_SERVICE_TIMEOUT_MS used by approve()/
+  // createCycle(), where waiting the full timeout for an authoritative
+  // decision is worth it. Here a slow-but-alive document-service should just
+  // fall back to the stale snapshot (via the try/catch around the call)
+  // sooner rather than stall the whole read.
+  private static readonly REVIEW_CYCLE_REFRESH_TIMEOUT_MS = 1_500;
+
   constructor(
     @InjectRepository(Workflow)
     private readonly workflowRepo: Repository<Workflow>,
@@ -781,6 +790,7 @@ export class WorkflowsService {
         const liveReviewCycleEnabled = await this.documentClientService.isReviewCycleEnabledForTypology(
           workflow.orgId,
           workflow.typologyId,
+          WorkflowsService.REVIEW_CYCLE_REFRESH_TIMEOUT_MS,
         );
         if (liveReviewCycleEnabled !== workflow.reviewCycleEnabled) {
           workflow.reviewCycleEnabled = liveReviewCycleEnabled;

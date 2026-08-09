@@ -207,10 +207,22 @@ export class DocumentClientService {
    * surfaces a 503/500 and the client can retry once document-service is
    * back, same as every other method on this class.
    *
+   * `timeoutMs` defaults to the shared `this.timeoutMs`, but callers on a
+   * best-effort/display-only path (e.g. WorkflowsService.findOneOrFail's
+   * opportunistic snapshot refresh) may pass a tighter one: unlike
+   * approve()/createCycle(), where a false/error here is authoritative and
+   * worth waiting the full timeout for, a slow-but-alive document-service on
+   * a read path should fall back to the stale snapshot sooner instead of
+   * stalling the whole request.
+   *
    * Endpoint requerido en document-service:
    *   GET /internal/typologies/:id/review-cycle-enabled?orgId=:orgId
    */
-  async isReviewCycleEnabledForTypology(orgId: string, typologyId: string): Promise<boolean> {
+  async isReviewCycleEnabledForTypology(
+    orgId: string,
+    typologyId: string,
+    timeoutMs: number = this.timeoutMs,
+  ): Promise<boolean> {
     const correlationId = getCorrelationId();
     const url = `${this.documentServiceUrl}/internal/typologies/${typologyId}/review-cycle-enabled?orgId=${encodeURIComponent(orgId)}`;
 
@@ -228,7 +240,7 @@ export class DocumentClientService {
                 [CORRELATION_ID_HEADER]: correlationId,
               },
             })
-            .pipe(timeout(this.timeoutMs)),
+            .pipe(timeout(timeoutMs)),
         );
         const reviewCycleEnabled = response.data?.reviewCycleEnabled;
         if (typeof reviewCycleEnabled !== 'boolean') {

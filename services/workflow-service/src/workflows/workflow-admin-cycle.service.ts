@@ -886,7 +886,7 @@ export class WorkflowAdminCycleService {
       await manager.save(WorkflowNote, {
         workflowId,
         createdBy: userId,
-        content:   dto.reason,
+        content:   dto.reason.trim(),
       });
 
       await manager.update(Workflow, workflowId, {

@@ -24,6 +24,12 @@ import mongoose from 'mongoose';
  * schema defaults on insert), so it's excluded from the filter and left alone. Safe to
  * run on every boot (see start.sh) or by hand any number of times.
  *
+ * start.sh runs this before starting the server but does NOT let a failure here block
+ * startup: this is a data-correctness nicety, not a schema requirement — the app runs
+ * fine without it (the schema's own `default: false` already applies), so a transient
+ * Mongo hiccup during this step must not take the whole service down. A failed run just
+ * means the backfill is retried on the next boot.
+ *
  * Run manually with: npm run backfill:review-cycle-enabled
  * (or, compiled: node dist/scripts/backfill-review-cycle-enabled.js — what start.sh does on every boot)
  */
