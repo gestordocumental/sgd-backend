@@ -43,7 +43,6 @@ const makeOrg = (overrides: Partial<Org> = {}): Org => ({
   updatedAt: new Date('2026-01-02T00:00:00.000Z'),
   deletedAt: null,
   ...overrides,
-  reviewCycleEnabled: overrides.reviewCycleEnabled ?? true,
 });
 
 describe('OrgsService', () => {
@@ -126,38 +125,9 @@ describe('OrgsService', () => {
       address: 'Main St',
       phone: '5551234',
       status: OrgStatus.ACTIVE,
-      reviewCycleEnabled: true,
       createdBy: 'user-1',
     });
     expect(result).toBe(created);
-  });
-
-  it('defaults reviewCycleEnabled to true when not provided on create', async () => {
-    const dto = { name: 'Acme' };
-    const created = makeOrg();
-    repo.findOne!.mockResolvedValue(null);
-    repo.create!.mockReturnValue(created);
-    repo.save!.mockResolvedValue(created);
-
-    await service.create(dto, 'user-1');
-
-    expect(repo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ reviewCycleEnabled: true }),
-    );
-  });
-
-  it('honors an explicit reviewCycleEnabled: false on create', async () => {
-    const dto = { name: 'Acme', reviewCycleEnabled: false };
-    const created = makeOrg({ reviewCycleEnabled: false });
-    repo.findOne!.mockResolvedValue(null);
-    repo.create!.mockReturnValue(created);
-    repo.save!.mockResolvedValue(created);
-
-    await service.create(dto, 'user-1');
-
-    expect(repo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ reviewCycleEnabled: false }),
-    );
   });
 
   it('throws ConflictException when creating a duplicated organization name', async () => {
@@ -238,22 +208,6 @@ describe('OrgsService', () => {
 
     expect(repo.save).toHaveBeenCalledWith(
       expect.objectContaining({ id: org.id, name: 'New Name', phone: '999', address: 'Main St' }),
-    );
-    expect(result).toBe(saved);
-  });
-
-  it('toggles reviewCycleEnabled on update without touching other fields', async () => {
-    const org = makeOrg({ reviewCycleEnabled: true });
-    const saved = makeOrg({ reviewCycleEnabled: false });
-    repo.findOne!
-      .mockResolvedValueOnce(org)
-      .mockResolvedValueOnce(null);
-    repo.save!.mockResolvedValue(saved);
-
-    const result = await service.update(org.id, { reviewCycleEnabled: false });
-
-    expect(repo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ id: org.id, name: org.name, reviewCycleEnabled: false }),
     );
     expect(result).toBe(saved);
   });

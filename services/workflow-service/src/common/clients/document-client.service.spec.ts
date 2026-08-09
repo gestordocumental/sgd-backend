@@ -1,10 +1,11 @@
 import { BadRequestException, GatewayTimeoutException, InternalServerErrorException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { of, throwError, TimeoutError } from 'rxjs';
+import { NEVER, of, throwError, TimeoutError } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import {
   DocumentClientService,
+  ReviewCycleEnabledResult,
   TypologyPublicInfo,
   ValidateDocumentResult,
 } from './document-client.service';
@@ -73,6 +74,7 @@ describe('DocumentClientService', () => {
         cargoId: null,
         cargoNombre: null,
       },
+      reviewCycleEnabled: false,
     };
     httpService.get.mockReturnValue(of({ data: typology } as AxiosResponse<TypologyPublicInfo>));
 
@@ -152,6 +154,179 @@ describe('DocumentClientService', () => {
     await expect(service.validateDocument('typology-1', 'doc-1')).rejects.toThrow(
       InternalServerErrorException,
     );
+  });
+
+  // ── isReviewCycleEnabledForTypology ──────────────────────────────────────
+
+  it('returns reviewCycleEnabled from document-service', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: true };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(true);
+
+    expect(httpService.get).toHaveBeenCalledWith(
+      `${documentServiceUrl}/internal/typologies/typology-1/review-cycle-enabled?orgId=org-1`,
+      {
+        headers: {
+          'x-internal-token': internalToken,
+          [CORRELATION_ID_HEADER]: 'no-correlation-id',
+        },
+      },
+    );
+  });
+
+  it('returns reviewCycleEnabled: false from document-service as-is (a genuine, validated answer)', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: false };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(false);
+  });
+
+  it('throws InternalServerErrorException instead of defaulting to false when reviewCycleEnabled is missing from the response', async () => {
+    httpService.get.mockReturnValue(
+      of({ data: { id: 'typology-1' } } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
+
+  it('throws InternalServerErrorException instead of defaulting to false when reviewCycleEnabled is not a boolean', async () => {
+    httpService.get.mockReturnValue(
+      of({
+        data: { id: 'typology-1', reviewCycleEnabled: null },
+      } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
+
+  it('rejects a malformed response from inside the function handed to the circuit breaker, so it counts toward the breaker\'s own failure tracking', async () => {
+    httpService.get.mockReturnValue(
+      of({
+        data: { id: 'typology-1', reviewCycleEnabled: 'not-a-boolean' },
+      } as unknown as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow();
+
+    expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
+    const firedFn = mockCbInstance.fire.mock.calls[0][0] as () => Promise<unknown>;
+    await expect(firedFn()).rejects.toThrow('Invalid reviewCycleEnabled response from document-service');
+  });
+
+  it('throws InternalServerErrorException instead of defaulting to false when document-service errors', async () => {
+    httpService.get.mockReturnValue(throwError(() => new Error('network down')));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
+
+  it('throws GatewayTimeoutException instead of defaulting to false on a timeout', async () => {
+    httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      GatewayTimeoutException,
+    );
+  });
+
+  it('logs the effective (overridden) timeout, not the shared default, on a timeout with a tightened timeoutMs', async () => {
+    httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+
+    await expect(
+      service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500, false),
+    ).rejects.toThrow(GatewayTimeoutException);
+
+    expect(logger.http).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('timed out after 1500ms') }),
+    );
+  });
+
+  it('actually applies the overridden timeoutMs to the request, not just to the log message', async () => {
+    // NEVER: the request never resolves on its own, so a rejection can only
+    // come from the RxJS `timeout(timeoutMs)` operator itself — proving it's
+    // really wired to the 200ms override. The override must be well below
+    // the shared default this suite mocks ConfigService.get() to return
+    // (1000ms, see beforeEach) — otherwise advancing fake timers past the
+    // override value could also already be past the shared default, and the
+    // assertion would pass even if the code silently fell back to
+    // `this.timeoutMs` instead of the passed-in `timeoutMs` (verified this
+    // was a real false-positive risk, not hypothetical, while writing this
+    // test).
+    httpService.get.mockReturnValue(NEVER);
+    jest.useFakeTimers();
+
+    try {
+      const promise = service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 200, false);
+      const assertion = expect(promise).rejects.toThrow(GatewayTimeoutException);
+
+      await jest.advanceTimersByTimeAsync(200);
+
+      await assertion;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('throws ServiceUnavailableException instead of defaulting to false when the circuit breaker is open', async () => {
+    mockCbInstance.fire.mockRejectedValueOnce(
+      Object.assign(new Error('Breaker is open'), { code: 'EOPENBREAKER' }),
+    );
+
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).rejects.toThrow(
+      ServiceUnavailableException,
+    );
+  });
+
+  // ── isReviewCycleEnabledForTypology — breaker isolation ──────────────────
+
+  it('routes through the shared circuit breaker by default (useCircuitBreaker defaults to true)', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: true };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500);
+
+    expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
+  });
+
+  it('bypasses the shared circuit breaker entirely when useCircuitBreaker is false, calling document-service directly', async () => {
+    const result: ReviewCycleEnabledResult = { id: 'typology-1', reviewCycleEnabled: true };
+    httpService.get.mockReturnValue(of({ data: result } as AxiosResponse<ReviewCycleEnabledResult>));
+
+    await expect(
+      service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500, false),
+    ).resolves.toBe(true);
+
+    expect(mockCbInstance.fire).not.toHaveBeenCalled();
+    expect(httpService.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let repeated bypassed-breaker failures poison the breaker shared with approve()/createCycle()', async () => {
+    // Best-effort calls (useCircuitBreaker: false) fail repeatedly — as would
+    // happen if document-service is merely slow relative to the tightened
+    // read-path timeout, not actually down.
+    httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+    for (let i = 0; i < 10; i++) {
+      await expect(
+        service.isReviewCycleEnabledForTypology('org-1', 'typology-1', 1_500, false),
+      ).rejects.toThrow(GatewayTimeoutException);
+    }
+    // None of those touched the breaker at all, so it never had a chance to
+    // trip open from this traffic.
+    expect(mockCbInstance.fire).not.toHaveBeenCalled();
+
+    // An authoritative call (default useCircuitBreaker: true, as approve()/
+    // createCycle() use it) right after must still go through normally —
+    // proof the breaker was never poisoned by the calls above.
+    httpService.get.mockReturnValue(
+      of({ data: { id: 'typology-1', reviewCycleEnabled: true } } as AxiosResponse<ReviewCycleEnabledResult>),
+    );
+    await expect(service.isReviewCycleEnabledForTypology('org-1', 'typology-1')).resolves.toBe(true);
+    expect(mockCbInstance.fire).toHaveBeenCalledTimes(1);
   });
 
   // ── circuit breaker ──────────────────────────────────────────────────────

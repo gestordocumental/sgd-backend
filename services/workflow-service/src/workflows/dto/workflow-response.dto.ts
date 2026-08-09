@@ -242,6 +242,13 @@ export class WorkflowResponseDto {
   @ApiProperty() typologyCode!: string;
   @ApiProperty() typologyVersion!: string;
   @ApiProperty() typologyName!: string;
+  // Snapshot denormalizado — ver comentario en la entidad Workflow. El
+  // chequeo autoritativo siempre es en vivo contra document-service
+  // (approve()/createCycle()); este campo es solo para mostrar/ocultar el
+  // botón. En respuestas de UN SOLO workflow (nunca listas/paginadas) se
+  // refresca en vivo en WorkflowsService.findOneOrFail cuando el estado lo
+  // amerita, así que ahí siempre coincide con la disponibilidad real.
+  @ApiProperty() reviewCycleEnabled!: boolean;
   @ApiPropertyOptional() mainDocumentId: string | null = null;
   @ApiProperty() mainDocumentValidated!: boolean;
   @ApiPropertyOptional() mainDocumentMetadata: Record<string, unknown> | null = null;
@@ -289,6 +296,7 @@ export class WorkflowResponseDto {
       typologyCode:             workflow.typologyCode,
       typologyVersion:          workflow.typologyVersion,
       typologyName:             workflow.typologyName,
+      reviewCycleEnabled:       workflow.reviewCycleEnabled,
       mainDocumentId:           workflow.mainDocumentId,
       mainDocumentValidated:    workflow.mainDocumentValidated,
       mainDocumentMetadata:     workflow.mainDocumentMetadata,

@@ -3,7 +3,6 @@ import {
   IsNotEmpty,
   MaxLength,
   IsOptional,
-  IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -31,12 +30,4 @@ export class CreateOrgDto {
   @IsString()
   @MaxLength(50)
   phone?: string;
-
-  @ApiPropertyOptional({
-    default: true,
-    description: 'Whether workflows in this org go through the admin review cycle step',
-  })
-  @IsOptional()
-  @IsBoolean()
-  reviewCycleEnabled?: boolean;
 }

@@ -79,7 +79,6 @@ export class OrgsService {
       address:   dto.address   ?? null,
       phone:     dto.phone     ?? null,
       status:    OrgStatus.ACTIVE,
-      reviewCycleEnabled: dto.reviewCycleEnabled ?? true,
       createdBy,
     });
 
@@ -158,7 +157,6 @@ export class OrgsService {
       ...(dto.address !== undefined && { address: dto.address }),
       ...(dto.phone   !== undefined && { phone:   dto.phone }),
       ...(dto.status  !== undefined && { status:  dto.status }),
-      ...(dto.reviewCycleEnabled !== undefined && { reviewCycleEnabled: dto.reviewCycleEnabled }),
     });
 
     const updated = await this.orgRepo.save(org);

@@ -20,11 +20,6 @@ export class OrgResponseDto {
   @ApiProperty({ enum: OrgStatus })
   status!: OrgStatus;
 
-  @ApiProperty({
-    description: 'Whether workflows in this org go through the admin review cycle step',
-  })
-  reviewCycleEnabled!: boolean;
-
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   createdBy!: string | null;
 
@@ -45,7 +40,6 @@ export class OrgResponseDto {
     dto.address = org.address;
     dto.phone = org.phone;
     dto.status = org.status;
-    dto.reviewCycleEnabled = org.reviewCycleEnabled;
     dto.createdBy = org.createdBy;
     dto.createdAt = org.createdAt;
     dto.updatedAt = org.updatedAt;

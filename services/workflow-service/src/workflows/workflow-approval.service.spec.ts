@@ -17,7 +17,7 @@ import {
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { AppLogger, KafkaProducerService } from '@sgd/common';
 import { UserClientService } from '../common/clients/user-client.service';
-import { OrgClientService } from '../common/clients/org-client.service';
+import { DocumentClientService } from '../common/clients/document-client.service';
 
 // ── Factories ─────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,7 @@ function makeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
   return {
     id: 'wf-1',
     orgId: 'org-1',
+    typologyId: 'typ-1',
     title: 'Test WF',
     status: WorkflowStatus.DRAFT,
     createdBy: 'creator-1',
@@ -94,9 +95,9 @@ function buildService() {
     getUsersByPosition: jest.fn().mockResolvedValue({ users: [{ id: 'final-user-1' }] }),
   } as unknown as jest.Mocked<UserClientService>;
 
-  const orgClientService: jest.Mocked<OrgClientService> = {
-    isReviewCycleEnabled: jest.fn().mockResolvedValue(true),
-  } as unknown as jest.Mocked<OrgClientService>;
+  const documentClientService: jest.Mocked<DocumentClientService> = {
+    isReviewCycleEnabledForTypology: jest.fn().mockResolvedValue(true),
+  } as unknown as jest.Mocked<DocumentClientService>;
 
   const logger: jest.Mocked<AppLogger> = {
     log: jest.fn(),
@@ -112,7 +113,7 @@ function buildService() {
     timelineService,
     kafkaProducer,
     userClientService,
-    orgClientService,
+    documentClientService,
     logger,
   );
 
@@ -125,7 +126,7 @@ function buildService() {
     timelineService,
     kafkaProducer,
     userClientService,
-    orgClientService,
+    documentClientService,
   };
 }
 
@@ -243,13 +244,16 @@ describe('WorkflowApprovalService', () => {
       expect(dataSource._manager.update).toHaveBeenCalledWith(
         Workflow,
         'wf-1',
-        expect.objectContaining({ status: WorkflowStatus.PENDING_REVIEW_CYCLE }),
+        expect.objectContaining({
+          status: WorkflowStatus.PENDING_REVIEW_CYCLE,
+          reviewCycleEnabled: true,
+        }),
       );
     });
 
-    it('skips PENDING_REVIEW_CYCLE and goes straight to AVAILABLE_FOR_FINAL_USERS when the org has the review cycle disabled', async () => {
-      const { service, workflowRepo, dataSource, orgClientService } = buildService();
-      orgClientService.isReviewCycleEnabled.mockResolvedValue(false);
+    it('skips PENDING_REVIEW_CYCLE and goes straight to AVAILABLE_FOR_FINAL_USERS when the typology has the review cycle disabled', async () => {
+      const { service, workflowRepo, dataSource, documentClientService } = buildService();
+      documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(false);
       const wf = pendingWorkflow({
         mainDocumentMetadata: {
           typologyOrgStructure: { cargoId: 'cargo-1' },
@@ -260,25 +264,53 @@ describe('WorkflowApprovalService', () => {
 
       await service.approve('wf-1', 'approver-1', {});
 
-      expect(orgClientService.isReviewCycleEnabled).toHaveBeenCalledWith('org-1');
+      expect(documentClientService.isReviewCycleEnabledForTypology).toHaveBeenCalledWith('org-1', 'typ-1');
       expect(dataSource._manager.update).toHaveBeenCalledWith(
         Workflow,
         'wf-1',
-        expect.objectContaining({ status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS }),
+        expect.objectContaining({
+          status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+          reviewCycleEnabled: false,
+        }),
       );
     });
 
-    it('does not call org-service when there are more approval steps left', async () => {
+    it('propagates the error and leaves the workflow untouched when the review-cycle lookup fails on the last step', async () => {
+      const { service, workflowRepo, dataSource, documentClientService } = buildService();
+      documentClientService.isReviewCycleEnabledForTypology.mockRejectedValue(
+        new InternalServerErrorException('document-service unavailable'),
+      );
+      const wf = pendingWorkflow({
+        mainDocumentMetadata: {
+          typologyOrgStructure: { cargoId: 'cargo-1' },
+        } as unknown as Record<string, unknown>,
+      });
+      workflowRepo.findOne.mockResolvedValue(wf);
+
+      await expect(service.approve('wf-1', 'approver-1', {})).rejects.toThrow(
+        InternalServerErrorException,
+      );
+
+      // Called before the transaction opens (see approve()'s comment), so a
+      // failed lookup must leave no trace: no approval action recorded, no
+      // step marked approved, and — the concern this guards against — no
+      // silent transition to AVAILABLE_FOR_FINAL_USERS that would skip a
+      // review cycle the typology actually has enabled.
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(dataSource._manager.update).not.toHaveBeenCalled();
+    });
+
+    it('does not call document-service when there are more approval steps left', async () => {
       const step1 = makeStep({ id: 'step-1', stepOrder: 1, status: ApprovalStepStatus.PENDING });
       const step2 = makeStep({ id: 'step-2', stepOrder: 2, status: ApprovalStepStatus.WAITING, userId: 'approver-2' });
       const wf = pendingWorkflow({ approvalSteps: [step1, step2] });
-      const { service, workflowRepo, orgClientService } = buildService();
+      const { service, workflowRepo, documentClientService } = buildService();
       workflowRepo.findOne.mockResolvedValue(wf);
       workflowRepo.findOneOrFail.mockResolvedValue(wf);
 
       await service.approve('wf-1', 'approver-1', {});
 
-      expect(orgClientService.isReviewCycleEnabled).not.toHaveBeenCalled();
+      expect(documentClientService.isReviewCycleEnabledForTypology).not.toHaveBeenCalled();
     });
 
     it('resolves final users from workflow when already set', async () => {
