@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Departamento } from './entities/departamento.entity';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
@@ -21,6 +21,8 @@ export class DepartamentosService {
     private readonly areaRepo: Repository<Area>,
     @InjectRepository(Cargo)
     private readonly cargoRepo: Repository<Cargo>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
@@ -84,6 +86,32 @@ export class DepartamentosService {
     return departamento;
   }
 
+  /**
+   * Locks & returns the departamento row (`SELECT ... FOR SHARE`) using the
+   * caller's transaction manager. Meant to be called from AreasService.create()
+   * and CargosService.create() (dept-level cargos) before inserting a child
+   * row, so the insert can't land in the gap between remove()'s dependency
+   * count and its soft-delete: remove() takes the exclusive (FOR UPDATE)
+   * counterpart on the same row below, so whichever transaction gets there
+   * first — this shared lock or that exclusive one — is fully committed or
+   * rolled back before the other proceeds. Multiple concurrent creates can
+   * hold the shared lock together; only remove()'s exclusive lock waits.
+   */
+  async findOneLocked(manager: EntityManager, orgId: string, id: string): Promise<Departamento> {
+    const departamento = await manager.getRepository(Departamento).findOne({
+      where: { id, orgId },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!departamento) {
+      throw new NotFoundException({
+        message: `Departamento ${id} not found`,
+        errorCode: 'DEPARTMENT_NOT_FOUND',
+        params: { id },
+      });
+    }
+    return departamento;
+  }
+
   async update(orgId: string, id: string, dto: UpdateDepartamentoDto, actorId?: string): Promise<Departamento> {
     const departamento = await this.findOne(orgId, id);
 
@@ -119,33 +147,54 @@ export class DepartamentosService {
   }
 
   async remove(orgId: string, id: string, actorId?: string): Promise<void> {
-    const departamento = await this.findOne(orgId, id);
+    await this.findOne(orgId, id); // fast 404 without opening a transaction when it plainly doesn't exist
 
-    // Guards against orphaning areas/cargos: the entities declare onDelete:
-    // 'RESTRICT' on this relation, but that's a DB-level FK constraint that
-    // only fires on a real SQL DELETE — softRemove() issues an UPDATE
-    // (deleted_at = now()), which never trips it. Without this explicit
-    // check, deleting a departamento silently orphans its areas and cargos:
-    // they still exist but become unreachable, since every read path here
-    // resolves the parent departamento with a plain (non-withDeleted)
-    // findOne first.
-    const [areasCount, cargosCount] = await Promise.all([
-      this.areaRepo.count({ where: { departamentoId: id } }),
+    let removedName = '';
+    await this.dataSource.transaction(async (manager) => {
+      // Exclusive lock (SELECT ... FOR UPDATE): blocks until any concurrent
+      // AreasService.create() / CargosService.create() holding the shared
+      // lock from findOneLocked() above commits or rolls back, and blocks
+      // any new one from starting until this transaction is done. That's
+      // what makes the dependency recount below race-proof — see
+      // findOneLocked() for the other half of this pairing.
+      const departamento = await manager.getRepository(Departamento).findOne({
+        where: { id, orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!departamento) {
+        throw new NotFoundException({
+          message: `Departamento ${id} not found`,
+          errorCode: 'DEPARTMENT_NOT_FOUND',
+          params: { id },
+        });
+      }
+
+      // Guards against orphaning areas/cargos: the entities declare onDelete:
+      // 'RESTRICT' on this relation, but that's a DB-level FK constraint that
+      // only fires on a real SQL DELETE — softRemove() issues an UPDATE
+      // (deleted_at = now()), which never trips it. Without this explicit
+      // check, deleting a departamento silently orphans its areas and cargos:
+      // they still exist but become unreachable, since every read path here
+      // resolves the parent departamento with a plain (non-withDeleted)
+      // findOne first.
+      const areasCount = await manager.getRepository(Area).count({ where: { departamentoId: id } });
       // Covers both area-scoped and department-level (areaId: null) cargos —
       // departamentoId is always set on Cargo regardless of areaId.
-      this.cargoRepo.count({ where: { departamentoId: id } }),
-    ]);
-    if (areasCount > 0 || cargosCount > 0) {
-      throw new ConflictException({
-        message: `Cannot delete departamento "${departamento.name}": it still has ${areasCount} area(s) and ${cargosCount} cargo(s) associated`,
-        errorCode: 'DEPARTMENT_HAS_DEPENDENCIES',
-        params: { id, areasCount, cargosCount },
-      });
-    }
+      const cargosCount = await manager.getRepository(Cargo).count({ where: { departamentoId: id } });
+      if (areasCount > 0 || cargosCount > 0) {
+        throw new ConflictException({
+          message: `Cannot delete departamento "${departamento.name}": it still has ${areasCount} area(s) and ${cargosCount} cargo(s) associated`,
+          errorCode: 'DEPARTMENT_HAS_DEPENDENCIES',
+          params: { id, areasCount, cargosCount },
+        });
+      }
 
-    await this.repo.softRemove(departamento);
+      await manager.getRepository(Departamento).softRemove(departamento);
+      removedName = departamento.name;
+    });
+
     if (actorId) {
-      this.emitAuditLog({ actorId, orgId, action: 'DEPARTAMENTO_DELETED', resourceId: id, resourceName: departamento.name });
+      this.emitAuditLog({ actorId, orgId, action: 'DEPARTAMENTO_DELETED', resourceId: id, resourceName: removedName });
     }
   }
 

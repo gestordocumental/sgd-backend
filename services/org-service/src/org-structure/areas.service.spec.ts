@@ -1,7 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AreasService } from './areas.service';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
@@ -28,7 +28,7 @@ describe('AreasService', () => {
   let service: AreasService;
   let repo: MockRepo<Area>;
   let cargoRepo: MockRepo<Cargo>;
-  let departamentosService: { findOne: jest.Mock };
+  let departamentosService: { findOne: jest.Mock; findOneLocked: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -42,13 +42,32 @@ describe('AreasService', () => {
     // Defaults to "no dependent cargos" so every remove()/restore() test not
     // specifically about the dependency guard doesn't have to opt in.
     cargoRepo = { count: jest.fn().mockResolvedValue(0) };
-    departamentosService = { findOne: jest.fn().mockResolvedValue({ id: 'dep-1' }) };
+    departamentosService = {
+      findOne: jest.fn().mockResolvedValue({ id: 'dep-1' }),
+      findOneLocked: jest.fn().mockResolvedValue({ id: 'dep-1' }),
+    };
+    // create()/remove() run inside a transaction now (race-condition fix);
+    // this fakes .transaction() by handing the callback a manager whose
+    // getRepository() resolves back to the same mocks above, so existing
+    // assertions on repo/cargoRepo keep working unchanged.
+    const dataSource = {
+      transaction: jest.fn((cb: (manager: EntityManager) => unknown) =>
+        cb({
+          getRepository: (entity: unknown) => {
+            if (entity === Area) return repo;
+            if (entity === Cargo) return cargoRepo;
+            throw new Error('unexpected entity in mock transaction manager');
+          },
+        } as unknown as EntityManager),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AreasService,
         { provide: getRepositoryToken(Area), useValue: repo },
         { provide: getRepositoryToken(Cargo), useValue: cargoRepo },
+        { provide: DataSource, useValue: dataSource },
         { provide: DepartamentosService, useValue: departamentosService },
         { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
@@ -65,7 +84,11 @@ describe('AreasService', () => {
 
     const result = await service.create(area.orgId, area.departamentoId, { name: area.name });
 
-    expect(departamentosService.findOne).toHaveBeenCalledWith(area.orgId, area.departamentoId);
+    expect(departamentosService.findOneLocked).toHaveBeenCalledWith(
+      expect.anything(),
+      area.orgId,
+      area.departamentoId,
+    );
     expect(repo.findOne).toHaveBeenCalledWith({
       where: { departamentoId: area.departamentoId, name: area.name },
     });
@@ -181,5 +204,36 @@ describe('AreasService', () => {
     await expect(service.restore(deleted.orgId, deleted.departamentoId, deleted.id)).rejects.toThrow(
       ConflictException,
     );
+  });
+
+  describe('findOneLocked()', () => {
+    // Used by CargosService.create() to take a shared lock on the area row
+    // inside its own transaction, so a cargo insert can't land in the gap
+    // between remove()'s dependency count and its soft-delete. Tested here
+    // in isolation with a fake manager rather than through remove()'s real
+    // transaction.
+    const fakeManager = { getRepository: () => repo } as unknown as EntityManager;
+
+    it('locks & returns the area row', async () => {
+      const area = makeArea();
+      repo.findOne!.mockResolvedValue(area);
+
+      await expect(
+        service.findOneLocked(fakeManager, area.orgId, area.departamentoId, area.id),
+      ).resolves.toBe(area);
+      expect(departamentosService.findOne).toHaveBeenCalledWith(area.orgId, area.departamentoId);
+      expect(repo.findOne).toHaveBeenCalledWith({
+        where: { id: area.id, orgId: area.orgId, departamentoId: area.departamentoId },
+        lock: { mode: 'pessimistic_read' },
+      });
+    });
+
+    it('throws NotFoundException when the area is missing', async () => {
+      repo.findOne!.mockResolvedValue(null);
+
+      await expect(
+        service.findOneLocked(fakeManager, 'org-1', 'dep-1', 'area-1'),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 });

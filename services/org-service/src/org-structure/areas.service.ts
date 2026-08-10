@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
 import { CreateAreaDto } from './dto/create-area.dto';
@@ -18,6 +18,8 @@ export class AreasService {
     // already depends on this service to validate its own parent chain.
     @InjectRepository(Cargo)
     private readonly cargoRepo: Repository<Cargo>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
     private readonly departamentosService: DepartamentosService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
@@ -45,29 +47,36 @@ export class AreasService {
   }
 
   async create(orgId: string, departamentoId: string, dto: CreateAreaDto, actorId?: string): Promise<Area> {
-    // Validate parent exists in the same org
-    await this.departamentosService.findOne(orgId, departamentoId);
+    return this.dataSource.transaction(async (manager) => {
+      // Shared lock on the departamento: serializes this insert against
+      // DepartamentosService.remove()'s exclusive lock + dependency count on
+      // the same row (see DepartamentosService.findOneLocked()), so an area
+      // can never be created in the gap after remove() has already counted
+      // zero dependents but before its soft-delete commits.
+      await this.departamentosService.findOneLocked(manager, orgId, departamentoId);
 
-    const existing = await this.repo.findOne({ where: { departamentoId, name: dto.name } });
-    if (existing) {
-      throw new ConflictException({
-        message: `Area "${dto.name}" already exists in this departamento`,
-        errorCode: 'AREA_ALREADY_EXISTS',
-        params: { name: dto.name },
+      const areaRepo = manager.getRepository(Area);
+      const existing = await areaRepo.findOne({ where: { departamentoId, name: dto.name } });
+      if (existing) {
+        throw new ConflictException({
+          message: `Area "${dto.name}" already exists in this departamento`,
+          errorCode: 'AREA_ALREADY_EXISTS',
+          params: { name: dto.name },
+        });
+      }
+
+      const area = areaRepo.create({
+        orgId,
+        departamentoId,
+        name: dto.name,
+        description: dto.description ?? null,
       });
-    }
-
-    const area = this.repo.create({
-      orgId,
-      departamentoId,
-      name: dto.name,
-      description: dto.description ?? null,
+      const saved = await areaRepo.save(area);
+      if (actorId) {
+        this.emitAuditLog({ actorId, orgId, action: 'AREA_CREATED', resourceId: saved.id, resourceName: saved.name, metadata: { departamentoId } });
+      }
+      return saved;
     });
-    const saved = await this.repo.save(area);
-    if (actorId) {
-      this.emitAuditLog({ actorId, orgId, action: 'AREA_CREATED', resourceId: saved.id, resourceName: saved.name, metadata: { departamentoId } });
-    }
-    return saved;
   }
 
   async findAll(orgId: string, departamentoId: string): Promise<Area[]> {
@@ -82,6 +91,25 @@ export class AreasService {
   async findOne(orgId: string, departamentoId: string, id: string): Promise<Area> {
     await this.departamentosService.findOne(orgId, departamentoId);
     const area = await this.repo.findOne({ where: { id, orgId, departamentoId } });
+    if (!area) {
+      throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND', params: { id } });
+    }
+    return area;
+  }
+
+  /**
+   * Locks & returns the area row (`SELECT ... FOR SHARE`) using the caller's
+   * transaction manager. Meant to be called from CargosService.create()
+   * before inserting a cargo under this area — see
+   * DepartamentosService.findOneLocked() for the full reasoning; this is the
+   * same pairing one level down, against this service's own remove().
+   */
+  async findOneLocked(manager: EntityManager, orgId: string, departamentoId: string, id: string): Promise<Area> {
+    await this.departamentosService.findOne(orgId, departamentoId);
+    const area = await manager.getRepository(Area).findOne({
+      where: { id, orgId, departamentoId },
+      lock: { mode: 'pessimistic_read' },
+    });
     if (!area) {
       throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND', params: { id } });
     }
@@ -123,25 +151,43 @@ export class AreasService {
   }
 
   async remove(orgId: string, departamentoId: string, id: string, actorId?: string): Promise<void> {
-    const area = await this.findOne(orgId, departamentoId, id);
+    await this.findOne(orgId, departamentoId, id); // fast 404 without opening a transaction when it plainly doesn't exist
 
-    // Same reasoning as DepartamentosService.remove(): onDelete: 'RESTRICT'
-    // is a DB-level FK constraint that never fires on softRemove()'s UPDATE,
-    // so without this check an area with cargos gets silently soft-deleted,
-    // orphaning those cargos (still in the DB, but unreachable through the
-    // normal nested findOne(orgId, departamentoId, areaId, id) read path).
-    const cargosCount = await this.cargoRepo.count({ where: { areaId: id } });
-    if (cargosCount > 0) {
-      throw new ConflictException({
-        message: `Cannot delete area "${area.name}": it still has ${cargosCount} cargo(s) associated`,
-        errorCode: 'AREA_HAS_DEPENDENCIES',
-        params: { id, cargosCount },
+    let removedName = '';
+    await this.dataSource.transaction(async (manager) => {
+      // Exclusive lock (SELECT ... FOR UPDATE): blocks until any concurrent
+      // CargosService.create() holding the shared lock from findOneLocked()
+      // above commits or rolls back, and blocks any new one from starting
+      // until this transaction is done — see findOneLocked() for the other
+      // half of this pairing.
+      const area = await manager.getRepository(Area).findOne({
+        where: { id, orgId, departamentoId },
+        lock: { mode: 'pessimistic_write' },
       });
-    }
+      if (!area) {
+        throw new NotFoundException({ message: `Area ${id} not found`, errorCode: 'AREA_NOT_FOUND', params: { id } });
+      }
 
-    await this.repo.softRemove(area);
+      // Same reasoning as DepartamentosService.remove(): onDelete: 'RESTRICT'
+      // is a DB-level FK constraint that never fires on softRemove()'s UPDATE,
+      // so without this check an area with cargos gets silently soft-deleted,
+      // orphaning those cargos (still in the DB, but unreachable through the
+      // normal nested findOne(orgId, departamentoId, areaId, id) read path).
+      const cargosCount = await manager.getRepository(Cargo).count({ where: { areaId: id } });
+      if (cargosCount > 0) {
+        throw new ConflictException({
+          message: `Cannot delete area "${area.name}": it still has ${cargosCount} cargo(s) associated`,
+          errorCode: 'AREA_HAS_DEPENDENCIES',
+          params: { id, cargosCount },
+        });
+      }
+
+      await manager.getRepository(Area).softRemove(area);
+      removedName = area.name;
+    });
+
     if (actorId) {
-      this.emitAuditLog({ actorId, orgId, action: 'AREA_DELETED', resourceId: id, resourceName: area.name, metadata: { departamentoId } });
+      this.emitAuditLog({ actorId, orgId, action: 'AREA_DELETED', resourceId: id, resourceName: removedName, metadata: { departamentoId } });
     }
   }
 

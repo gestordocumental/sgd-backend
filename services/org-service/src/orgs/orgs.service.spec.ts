@@ -2,7 +2,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { OrgsService } from './orgs.service';
 import { Org, OrgStatus } from './entities/org.entity';
 import { KafkaProducerService } from '@sgd/common';
@@ -29,6 +29,13 @@ function makeQbMock(rows: Org[]) {
   });
   qb['getMany'] = jest.fn().mockResolvedValue(rows);
   return qb;
+}
+
+/** A Postgres unique-violation as TypeORM surfaces it from a failed save(). */
+function makeUniqueViolationError(): QueryFailedError {
+  return new QueryFailedError('INSERT ...', undefined, Object.assign(new Error('duplicate key value'), {
+    code: '23505',
+  }));
 }
 
 const makeOrg = (overrides: Partial<Org> = {}): Org => ({
@@ -155,6 +162,36 @@ describe('OrgsService', () => {
     }
   });
 
+  it('translates a DB unique-violation on save into ConflictException (concurrent create race)', async () => {
+    // Regression: the findOne pre-check above only narrows the common case —
+    // two concurrent creates for the same name can both pass it before
+    // either commits, so the unique index on Org.name is the real guard.
+    // Without this, the loser got a raw 500 with Postgres driver internals
+    // instead of the same 409 shape the pre-check throws.
+    repo.findOne!.mockResolvedValue(null);
+    repo.create!.mockReturnValue(makeOrg());
+    repo.save!.mockRejectedValue(makeUniqueViolationError());
+
+    try {
+      await service.create({ name: 'Acme' }, 'user-1');
+      fail('expected service.create to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        errorCode: 'COMPANY_ALREADY_EXISTS',
+        params: { name: 'Acme' },
+      });
+    }
+  });
+
+  it('rethrows a save() failure unrelated to a unique violation', async () => {
+    repo.findOne!.mockResolvedValue(null);
+    repo.create!.mockReturnValue(makeOrg());
+    repo.save!.mockRejectedValue(new Error('connection reset'));
+
+    await expect(service.create({ name: 'Acme' }, 'user-1')).rejects.toThrow('connection reset');
+  });
+
   it('returns paginated organizations with cursor pagination', async () => {
     const orgs = [makeOrg(), makeOrg({ id: 'a66cf75e-49d0-4c12-b3e3-af941da7f8f1', name: 'Beta' })];
     const qb = makeQbMock(orgs);
@@ -255,6 +292,35 @@ describe('OrgsService', () => {
         params: { name: 'Taken' },
       });
     }
+  });
+
+  it('translates a DB unique-violation on save into ConflictException (concurrent rename race)', async () => {
+    const org = makeOrg();
+    repo.findOne!
+      .mockResolvedValueOnce(org)
+      .mockResolvedValueOnce(null); // pre-check: name looks free...
+    repo.save!.mockRejectedValue(makeUniqueViolationError()); // ...but a concurrent rename won the race
+
+    try {
+      await service.update(org.id, { name: 'Taken' });
+      fail('expected service.update to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        errorCode: 'COMPANY_ALREADY_EXISTS',
+        params: { name: 'Taken' },
+      });
+    }
+  });
+
+  it('rethrows a unique-violation from save() when name was not part of the update', async () => {
+    // A unique violation here can't be a name collision since name didn't
+    // change — don't mislabel whatever this actually is as COMPANY_ALREADY_EXISTS.
+    const org = makeOrg();
+    repo.findOne!.mockResolvedValueOnce(org);
+    repo.save!.mockRejectedValue(makeUniqueViolationError());
+
+    await expect(service.update(org.id, { phone: '999' })).rejects.toThrow(QueryFailedError);
   });
 
   it('soft deletes an organization', async () => {

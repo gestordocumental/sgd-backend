@@ -591,6 +591,9 @@ describe('BulkStructureService', () => {
       ).rejects.toMatchObject({
         response: { message: expect.stringContaining("'Auditor'") },
       });
+      expect(cargoRepo.findOne).toHaveBeenNthCalledWith(2, {
+        where: { orgId: ORG_ID, id: misplacedCargo.id },
+      });
     });
 
     it("shows the cargo's actual name for a department-level cargo (no area) that doesn't belong to the selected department", async () => {
@@ -609,6 +612,9 @@ describe('BulkStructureService', () => {
         }),
       ).rejects.toMatchObject({
         response: { message: expect.stringContaining("'Auditor'") },
+      });
+      expect(cargoRepo.findOne).toHaveBeenNthCalledWith(2, {
+        where: { orgId: ORG_ID, id: misplacedCargo.id },
       });
     });
   });

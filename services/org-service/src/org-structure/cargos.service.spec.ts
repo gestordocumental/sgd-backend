@@ -1,7 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { CargosService } from './cargos.service';
 import { Cargo } from './entities/cargo.entity';
 import { AreasService } from './areas.service';
@@ -27,7 +27,7 @@ const makeCargo = (overrides: Partial<Cargo> = {}): Cargo => ({
 describe('CargosService', () => {
   let service: CargosService;
   let repo: MockRepo<Cargo>;
-  let areasService: { findOne: jest.Mock };
+  let areasService: { findOne: jest.Mock; findOneLocked: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -38,14 +38,30 @@ describe('CargosService', () => {
       softRemove: jest.fn(),
       restore: jest.fn(),
     };
-    areasService = { findOne: jest.fn().mockResolvedValue({ id: 'area-1' }) };
+    areasService = {
+      findOne: jest.fn().mockResolvedValue({ id: 'area-1' }),
+      findOneLocked: jest.fn().mockResolvedValue({ id: 'area-1' }),
+    };
+    // create() runs inside a transaction now (race-condition fix); this
+    // fakes .transaction() by handing the callback a manager whose
+    // getRepository() resolves back to the same repo mock above, so
+    // existing assertions on repo keep working unchanged.
+    const dataSource = {
+      transaction: jest.fn((cb: (manager: EntityManager) => unknown) =>
+        cb({ getRepository: () => repo } as unknown as EntityManager),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CargosService,
         { provide: getRepositoryToken(Cargo), useValue: repo },
+        { provide: DataSource, useValue: dataSource },
         { provide: AreasService, useValue: areasService },
-        { provide: DepartamentosService, useValue: { findOne: jest.fn() } },
+        {
+          provide: DepartamentosService,
+          useValue: { findOne: jest.fn(), findOneLocked: jest.fn().mockResolvedValue({ id: 'dep-1' }) },
+        },
         { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
     }).compile();
@@ -63,7 +79,12 @@ describe('CargosService', () => {
       name: cargo.name,
     });
 
-    expect(areasService.findOne).toHaveBeenCalledWith(cargo.orgId, cargo.departamentoId, cargo.areaId);
+    expect(areasService.findOneLocked).toHaveBeenCalledWith(
+      expect.anything(),
+      cargo.orgId,
+      cargo.departamentoId,
+      cargo.areaId,
+    );
     expect(repo.findOne).toHaveBeenCalledWith({ where: { areaId: cargo.areaId, name: cargo.name } });
     expect(result).toBe(cargo);
   });
