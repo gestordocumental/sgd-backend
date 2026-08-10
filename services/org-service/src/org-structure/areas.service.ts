@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Area } from './entities/area.entity';
+import { Cargo } from './entities/cargo.entity';
 import { CreateAreaDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 import { DepartamentosService } from './departamentos.service';
@@ -12,6 +13,11 @@ export class AreasService {
   constructor(
     @InjectRepository(Area)
     private readonly repo: Repository<Area>,
+    // Read-only, count-only access to check for dependent cargos before
+    // deleting — injected directly rather than via CargosService, which
+    // already depends on this service to validate its own parent chain.
+    @InjectRepository(Cargo)
+    private readonly cargoRepo: Repository<Cargo>,
     private readonly departamentosService: DepartamentosService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
@@ -118,6 +124,21 @@ export class AreasService {
 
   async remove(orgId: string, departamentoId: string, id: string, actorId?: string): Promise<void> {
     const area = await this.findOne(orgId, departamentoId, id);
+
+    // Same reasoning as DepartamentosService.remove(): onDelete: 'RESTRICT'
+    // is a DB-level FK constraint that never fires on softRemove()'s UPDATE,
+    // so without this check an area with cargos gets silently soft-deleted,
+    // orphaning those cargos (still in the DB, but unreachable through the
+    // normal nested findOne(orgId, departamentoId, areaId, id) read path).
+    const cargosCount = await this.cargoRepo.count({ where: { areaId: id } });
+    if (cargosCount > 0) {
+      throw new ConflictException({
+        message: `Cannot delete area "${area.name}": it still has ${cargosCount} cargo(s) associated`,
+        errorCode: 'AREA_HAS_DEPENDENCIES',
+        params: { id, cargosCount },
+      });
+    }
+
     await this.repo.softRemove(area);
     if (actorId) {
       this.emitAuditLog({ actorId, orgId, action: 'AREA_DELETED', resourceId: id, resourceName: area.name, metadata: { departamentoId } });

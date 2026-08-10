@@ -92,6 +92,7 @@ export class RolesService {
     const permissions = dto.permissionIds?.length
       ? await this.resolvePermissions(dto.permissionIds)
       : [];
+    RolePolicy.validatePermissionSet(permissions);
 
     const role = this.rolesRepository.create({
       name: dto.name,
@@ -146,6 +147,7 @@ export class RolesService {
     RolePolicy.canManagePermissions(role, orgId);
 
     const permissions = await this.resolvePermissions(dto.permissionIds);
+    RolePolicy.validatePermissionSet(permissions);
 
     role.permissions = permissions;
     const saved = await this.rolesRepository.save(role);
@@ -168,7 +170,10 @@ export class RolesService {
     const role = await this.findOne(roleId, orgId);
     RolePolicy.canManagePermissions(role, orgId);
 
-    role.permissions = role.permissions.filter((p) => p.id !== permissionId);
+    const remaining = role.permissions.filter((p) => p.id !== permissionId);
+    RolePolicy.validatePermissionSet(remaining);
+
+    role.permissions = remaining;
     const saved = await this.rolesRepository.save(role);
     await this.notifyPermissionsChanged(roleId, orgId);
     return saved;

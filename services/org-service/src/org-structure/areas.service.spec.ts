@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AreasService } from './areas.service';
 import { Area } from './entities/area.entity';
+import { Cargo } from './entities/cargo.entity';
 import { DepartamentosService } from './departamentos.service';
 import { KafkaProducerService } from '@sgd/common';
 
@@ -26,6 +27,7 @@ const makeArea = (overrides: Partial<Area> = {}): Area => ({
 describe('AreasService', () => {
   let service: AreasService;
   let repo: MockRepo<Area>;
+  let cargoRepo: MockRepo<Cargo>;
   let departamentosService: { findOne: jest.Mock };
 
   beforeEach(async () => {
@@ -37,12 +39,16 @@ describe('AreasService', () => {
       softRemove: jest.fn(),
       restore: jest.fn(),
     };
+    // Defaults to "no dependent cargos" so every remove()/restore() test not
+    // specifically about the dependency guard doesn't have to opt in.
+    cargoRepo = { count: jest.fn().mockResolvedValue(0) };
     departamentosService = { findOne: jest.fn().mockResolvedValue({ id: 'dep-1' }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AreasService,
         { provide: getRepositoryToken(Area), useValue: repo },
+        { provide: getRepositoryToken(Cargo), useValue: cargoRepo },
         { provide: DepartamentosService, useValue: departamentosService },
         { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
@@ -125,13 +131,29 @@ describe('AreasService', () => {
     );
   });
 
-  it('soft deletes an area', async () => {
+  it('soft deletes an area with no cargos', async () => {
     const area = makeArea();
     repo.findOne!.mockResolvedValue(area);
 
     await service.remove(area.orgId, area.departamentoId, area.id);
 
+    expect(cargoRepo.count).toHaveBeenCalledWith({ where: { areaId: area.id } });
     expect(repo.softRemove).toHaveBeenCalledWith(area);
+  });
+
+  it('throws ConflictException instead of deleting an area that still has cargos', async () => {
+    // Regression: softRemove() issues an UPDATE, so the entity's
+    // onDelete: 'RESTRICT' FK constraint (which only fires on a real SQL
+    // DELETE) never protected against this — deletion used to silently
+    // succeed and orphan the cargos.
+    const area = makeArea();
+    repo.findOne!.mockResolvedValue(area);
+    cargoRepo.count!.mockResolvedValue(3);
+
+    await expect(service.remove(area.orgId, area.departamentoId, area.id)).rejects.toMatchObject({
+      response: { errorCode: 'AREA_HAS_DEPENDENCIES' },
+    });
+    expect(repo.softRemove).not.toHaveBeenCalled();
   });
 
   it('restores a deleted area', async () => {

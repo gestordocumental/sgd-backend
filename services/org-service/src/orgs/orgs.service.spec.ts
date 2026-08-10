@@ -136,6 +136,25 @@ describe('OrgsService', () => {
     await expect(service.create({ name: 'Acme' }, 'user-1')).rejects.toThrow(ConflictException);
   });
 
+  it('includes the COMPANY_ALREADY_EXISTS errorCode so the frontend can show a translated warning', async () => {
+    // Regression: this used to throw a plain string with no errorCode — the
+    // frontend's create-company mutation also had no onError handler, so
+    // creating a company with an already-registered name failed completely
+    // silently. The errorCode here is the half of the fix that lets the
+    // (now-fixed) frontend surface a translated message.
+    repo.findOne!.mockResolvedValue(makeOrg({ name: 'Acme' }));
+
+    try {
+      await service.create({ name: 'Acme' }, 'user-1');
+      fail('expected service.create to throw');
+    } catch (err) {
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        errorCode: 'COMPANY_ALREADY_EXISTS',
+        params: { name: 'Acme' },
+      });
+    }
+  });
+
   it('returns paginated organizations with cursor pagination', async () => {
     const orgs = [makeOrg(), makeOrg({ id: 'a66cf75e-49d0-4c12-b3e3-af941da7f8f1', name: 'Beta' })];
     const qb = makeQbMock(orgs);
@@ -219,6 +238,23 @@ describe('OrgsService', () => {
       .mockResolvedValueOnce(makeOrg({ id: 'other-org' }));
 
     await expect(service.update(org.id, { name: 'Taken' })).rejects.toThrow(ConflictException);
+  });
+
+  it('includes the COMPANY_ALREADY_EXISTS errorCode when renaming to an existing name', async () => {
+    const org = makeOrg();
+    repo.findOne!
+      .mockResolvedValueOnce(org)
+      .mockResolvedValueOnce(makeOrg({ id: 'other-org', name: 'Taken' }));
+
+    try {
+      await service.update(org.id, { name: 'Taken' });
+      fail('expected service.update to throw');
+    } catch (err) {
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        errorCode: 'COMPANY_ALREADY_EXISTS',
+        params: { name: 'Taken' },
+      });
+    }
   });
 
   it('soft deletes an organization', async () => {

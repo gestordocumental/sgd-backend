@@ -544,11 +544,14 @@ describe('BulkStructureService', () => {
       });
     });
 
-    it('throws BadRequestException when cargo is not found', async () => {
+    it('throws BadRequestException with the raw ID when the cargo does not exist anywhere in the org', async () => {
       const dept = makeDept();
       const area = makeArea();
       deptRepo.findOne.mockResolvedValue(dept);
       areaRepo.findOne.mockResolvedValue(area);
+      // Both the scoped lookup and the unscoped fallback lookup come back
+      // empty — there is genuinely no name to show, so the message falls
+      // back to the raw ID.
       cargoRepo.findOne.mockResolvedValue(null);
 
       await expect(
@@ -558,7 +561,55 @@ describe('BulkStructureService', () => {
           areaId: area.id,
           cargoId: 'missing-cargo',
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({
+        response: { message: expect.stringContaining("'missing-cargo'") },
+      });
+    });
+
+    it("shows the cargo's actual name — not its UUID — when it exists but doesn't belong to the selected area", async () => {
+      // Regression: the frontend's cargo dropdown can hold a value that no
+      // longer matches the area (e.g. the user changed the area after
+      // picking a cargo). The old message surfaced the raw cargoId UUID,
+      // which is meaningless to the user — this looks the cargo up again
+      // without the area scope to report its real name instead.
+      const dept = makeDept();
+      const area = makeArea();
+      const misplacedCargo = makeCargo({ id: 'cargo-elsewhere', name: 'Auditor' });
+      deptRepo.findOne.mockResolvedValue(dept);
+      areaRepo.findOne.mockResolvedValue(area);
+      cargoRepo.findOne
+        .mockResolvedValueOnce(null) // scoped to the selected area: not found
+        .mockResolvedValueOnce(misplacedCargo); // unscoped fallback: found elsewhere
+
+      await expect(
+        service.resolveStructureById({
+          orgId: ORG_ID,
+          departamentoId: dept.id,
+          areaId: area.id,
+          cargoId: misplacedCargo.id,
+        }),
+      ).rejects.toMatchObject({
+        response: { message: expect.stringContaining("'Auditor'") },
+      });
+    });
+
+    it("shows the cargo's actual name for a department-level cargo (no area) that doesn't belong to the selected department", async () => {
+      const dept = makeDept();
+      const misplacedCargo = makeCargo({ id: 'cargo-elsewhere', name: 'Auditor', areaId: null });
+      deptRepo.findOne.mockResolvedValue(dept);
+      cargoRepo.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(misplacedCargo);
+
+      await expect(
+        service.resolveStructureById({
+          orgId: ORG_ID,
+          departamentoId: dept.id,
+          cargoId: misplacedCargo.id,
+        }),
+      ).rejects.toMatchObject({
+        response: { message: expect.stringContaining("'Auditor'") },
+      });
     });
   });
 });

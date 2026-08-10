@@ -255,7 +255,7 @@ export class BulkStructureService {
       });
       if (!cargo) {
         throw new BadRequestException(
-          `Cargo '${dto.cargoId}' no encontrado a nivel de departamento '${dept.name}'`,
+          `Cargo ${await this.cargoErrorLabel(dto.orgId, dto.cargoId)} no encontrado a nivel de departamento '${dept.name}'`,
         );
       }
       return {
@@ -286,7 +286,7 @@ export class BulkStructureService {
         });
         if (!cargo) {
           throw new BadRequestException(
-            `Cargo '${dto.cargoId}' no encontrado en el área '${area.name}'`,
+            `Cargo ${await this.cargoErrorLabel(dto.orgId, dto.cargoId)} no encontrado en el área '${area.name}'`,
           );
         }
         cargoId = cargo.id;
@@ -305,6 +305,22 @@ export class BulkStructureService {
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Best-effort human-readable label for a cargoId that failed its
+   * scoped (department/area) lookup — e.g. the frontend's cargo dropdown
+   * held a value that no longer belongs to the area the user just selected
+   * (stale selection, or the area was changed after picking the cargo).
+   * Looked up again without the department/area scope: if the cargo still
+   * exists somewhere in the org, showing its name lets the user recognize
+   * *which* cargo doesn't belong there instead of a bare UUID they can't
+   * interpret. Falls back to the raw ID only when the cargo doesn't exist
+   * anywhere in the org either.
+   */
+  private async cargoErrorLabel(orgId: string, cargoId: string): Promise<string> {
+    const misplaced = await this.cargoRepo.findOne({ where: { orgId, id: cargoId } });
+    return misplaced ? `'${misplaced.name}'` : `'${cargoId}'`;
+  }
 
   private async upsertDepartment(
     orgId: string,

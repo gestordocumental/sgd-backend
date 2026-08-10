@@ -70,7 +70,11 @@ export class OrgsService {
   async create(dto: CreateOrgDto, createdBy: string): Promise<Org> {
     const existing = await this.orgRepo.findOne({ where: { name: dto.name } });
     if (existing) {
-      throw new ConflictException(`Organization with name "${dto.name}" already exists`);
+      throw new ConflictException({
+        message: `Organization with name "${dto.name}" already exists`,
+        errorCode: 'COMPANY_ALREADY_EXISTS',
+        params: { name: dto.name },
+      });
     }
 
     const org = this.orgRepo.create({
@@ -144,7 +148,11 @@ export class OrgsService {
     if (dto.name && dto.name !== org.name) {
       const existing = await this.orgRepo.findOne({ where: { name: dto.name } });
       if (existing) {
-        throw new ConflictException(`Organization with name "${dto.name}" already exists`);
+        throw new ConflictException({
+          message: `Organization with name "${dto.name}" already exists`,
+          errorCode: 'COMPANY_ALREADY_EXISTS',
+          params: { name: dto.name },
+        });
       }
     }
 

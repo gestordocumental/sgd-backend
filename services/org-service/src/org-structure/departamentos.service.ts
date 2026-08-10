@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Departamento } from './entities/departamento.entity';
+import { Area } from './entities/area.entity';
+import { Cargo } from './entities/cargo.entity';
 import { CreateDepartamentoDto } from './dto/create-departamento.dto';
 import { UpdateDepartamentoDto } from './dto/update-departamento.dto';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
@@ -11,6 +13,14 @@ export class DepartamentosService {
   constructor(
     @InjectRepository(Departamento)
     private readonly repo: Repository<Departamento>,
+    // Read-only, count-only access to check for dependents before deleting —
+    // injected directly (not via AreasService/CargosService) to avoid a
+    // circular dependency, since both of those already depend on this
+    // service to validate their own parent chain.
+    @InjectRepository(Area)
+    private readonly areaRepo: Repository<Area>,
+    @InjectRepository(Cargo)
+    private readonly cargoRepo: Repository<Cargo>,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
@@ -110,6 +120,29 @@ export class DepartamentosService {
 
   async remove(orgId: string, id: string, actorId?: string): Promise<void> {
     const departamento = await this.findOne(orgId, id);
+
+    // Guards against orphaning areas/cargos: the entities declare onDelete:
+    // 'RESTRICT' on this relation, but that's a DB-level FK constraint that
+    // only fires on a real SQL DELETE — softRemove() issues an UPDATE
+    // (deleted_at = now()), which never trips it. Without this explicit
+    // check, deleting a departamento silently orphans its areas and cargos:
+    // they still exist but become unreachable, since every read path here
+    // resolves the parent departamento with a plain (non-withDeleted)
+    // findOne first.
+    const [areasCount, cargosCount] = await Promise.all([
+      this.areaRepo.count({ where: { departamentoId: id } }),
+      // Covers both area-scoped and department-level (areaId: null) cargos —
+      // departamentoId is always set on Cargo regardless of areaId.
+      this.cargoRepo.count({ where: { departamentoId: id } }),
+    ]);
+    if (areasCount > 0 || cargosCount > 0) {
+      throw new ConflictException({
+        message: `Cannot delete departamento "${departamento.name}": it still has ${areasCount} area(s) and ${cargosCount} cargo(s) associated`,
+        errorCode: 'DEPARTMENT_HAS_DEPENDENCIES',
+        params: { id, areasCount, cargosCount },
+      });
+    }
+
     await this.repo.softRemove(departamento);
     if (actorId) {
       this.emitAuditLog({ actorId, orgId, action: 'DEPARTAMENTO_DELETED', resourceId: id, resourceName: departamento.name });
