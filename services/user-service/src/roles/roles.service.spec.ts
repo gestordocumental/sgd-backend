@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { KafkaProducerService } from '@sgd/common';
 import { RolesService } from './roles.service';
@@ -183,6 +183,17 @@ describe('RolesService', () => {
 
       await expect(service.create(dto, ORG_ID)).rejects.toThrow(NotFoundException);
     });
+
+    it('throws BadRequestException when creating a role with an action permission but no READ for the same module', async () => {
+      const writePerm = makePermission({ id: 'perm-write', action: PermissionAction.WRITE });
+      const dto = { name: 'Broken Role', permissionIds: [writePerm.id] };
+
+      rolesRepo.findOne.mockResolvedValue(null);
+      permissionsRepo.findBy.mockResolvedValue([writePerm]);
+
+      await expect(service.create(dto, ORG_ID)).rejects.toThrow(BadRequestException);
+      expect(rolesRepo.save).not.toHaveBeenCalled();
+    });
   });
 
   // ─── update ───────────────────────────────────────────────────────────────
@@ -324,6 +335,24 @@ describe('RolesService', () => {
       );
     });
 
+    it('throws BadRequestException when replacing the permission set with an action permission but no READ for the same module', async () => {
+      const role = makeRole();
+      const approvePerm = makePermission({
+        id: 'perm-approve',
+        module: PermissionModule.WORKFLOWS,
+        action: PermissionAction.APPROVE,
+      });
+      const dto = { permissionIds: [approvePerm.id] };
+
+      rolesRepo.findOne.mockResolvedValue(role);
+      permissionsRepo.findBy.mockResolvedValue([approvePerm]);
+
+      await expect(service.assignPermissions(role.id, dto, ORG_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(rolesRepo.save).not.toHaveBeenCalled();
+    });
+
     it('invalidates the permission cache and emits USER_PERMISSIONS_CHANGED for every currently-assigned user', async () => {
       const role = makeRole();
       const perm = makePermission();
@@ -397,18 +426,41 @@ describe('RolesService', () => {
 
   describe('removePermission', () => {
     it('filters out the specified permission and saves', async () => {
+      // perm1 stays (READ) so the remaining set is still valid — removing
+      // perm2 (WRITE) doesn't orphan anything.
       const perm1 = makePermission({ id: 'perm-1' });
       const perm2 = makePermission({ id: 'perm-2', action: PermissionAction.WRITE });
       const role = makeRole({ permissions: [perm1, perm2] });
 
       rolesRepo.findOne.mockResolvedValue(role);
-      rolesRepo.save.mockResolvedValue({ ...role, permissions: [perm2] });
+      rolesRepo.save.mockResolvedValue({ ...role, permissions: [perm1] });
 
-      const result = await service.removePermission(role.id, perm1.id, ORG_ID);
+      const result = await service.removePermission(role.id, perm2.id, ORG_ID);
 
-      expect(role.permissions).not.toContain(perm1);
+      expect(role.permissions).not.toContain(perm2);
       expect(rolesRepo.save).toHaveBeenCalledWith(role);
-      expect(result.permissions).toEqual([perm2]);
+      expect(result.permissions).toEqual([perm1]);
+    });
+
+    it('throws BadRequestException when removing READ would orphan an action permission on the same module', async () => {
+      // Regression: this is the exact scenario the reported bug describes —
+      // removing "Ver" (READ) while an action permission (APPROVE) for the
+      // same module is still assigned must be rejected, not silently allowed.
+      const readPerm = makePermission({ id: 'perm-read', module: PermissionModule.WORKFLOWS });
+      const approvePerm = makePermission({
+        id: 'perm-approve',
+        module: PermissionModule.WORKFLOWS,
+        action: PermissionAction.APPROVE,
+      });
+      const role = makeRole({ permissions: [readPerm, approvePerm] });
+      rolesRepo.findOne.mockResolvedValue(role);
+
+      await expect(service.removePermission(role.id, readPerm.id, ORG_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(rolesRepo.save).not.toHaveBeenCalled();
+      // The in-memory role.permissions must be untouched by the failed attempt.
+      expect(role.permissions).toEqual([readPerm, approvePerm]);
     });
 
     it('throws ForbiddenException when trying to remove permissions from a system role', async () => {
@@ -426,10 +478,11 @@ describe('RolesService', () => {
       const role = makeRole({ permissions: [perm1, perm2] });
 
       rolesRepo.findOne.mockResolvedValue(role);
-      rolesRepo.save.mockResolvedValue({ ...role, permissions: [perm2] });
+      rolesRepo.save.mockResolvedValue({ ...role, permissions: [perm1] });
       uorRepo.find.mockResolvedValue([{ userId: 'user-1' }] as UserOrgRole[]);
 
-      await service.removePermission(role.id, perm1.id, ORG_ID);
+      // Removing perm2 (WRITE) leaves perm1 (READ) — a valid remaining set.
+      await service.removePermission(role.id, perm2.id, ORG_ID);
 
       expect(redis.del).toHaveBeenCalledWith(`perms:user-1:${ORG_ID}`);
       expect(kafkaProducer.emitSafe).toHaveBeenCalledWith('user.permissions-changed', {

@@ -2,11 +2,11 @@
   "GHSA-45rx-2jwx-cxfr": {
     "active": true,
     "expiry": "2026-10-30",
-    "notes": "@opentelemetry/propagator-jaeger DoS via malformed header. Only fix requires @opentelemetry/sdk-node@0.221.0, a breaking bump. See MGESTDOC-56."
+    "notes": "@opentelemetry/propagator-jaeger DoS via malformed header. Only fix requires @opentelemetry/sdk-node@0.221.0, a breaking bump. See MGESTDOC-56. (Its sibling GHSA-mh99-v99m-4gvg — brace-expansion DoS — was resolved by a non-breaking `npm audit fix` at the workspace root, bumping brace-expansion to 1.1.18/2.1.4/5.0.9 and fast-uri to 3.1.5; removed here since better-npm-audit now flags it as unused.)"
   },
-  "GHSA-mh99-v99m-4gvg": {
+  "GHSA-pm4m-ph32-ghv5": {
     "active": true,
     "expiry": "2026-10-30",
-    "notes": "brace-expansion DoS (unbounded expansion / OOM). Only fix requires eslint@10.x, a breaking bump. See MGESTDOC-56. Present in both dev tooling (eslint/jest) and production deps (typeorm, @opentelemetry/resource-detector-gcp, archiver/zip-stream/readdir-glob) — verified not exploitable here though: typeorm's glob pattern is the hardcoded string '__dirname + /migrations/*{.ts,.js}' (data-source.ts), never user input; workflow-files.service.ts's archive.append() passes user filenames only as the literal `name` field, never as a glob pattern for archiver/readdir-glob to parse. (Its sibling GHSA-3jxr-9vmj-r5cp and the js-yaml/fast-uri exceptions that used to live here were resolved by the lockfile modernization in MGESTDOC-56 — removed since better-npm-audit now flags them as unused.)"
+    "notes": "js-yaml exponential-time DoS in flow collections (5.0.0-5.2.1, fixed in 5.2.2), nested inside @nestjs/swagger@11.4.6's own bundled js-yaml@5.2.1 (node_modules/@nestjs/swagger/node_modules/js-yaml) — @nestjs/swagger pins js-yaml to an exact version in its own package.json. npm's `overrides` cannot reach it: confirmed a real, unresolved npm bug (npm/cli#4834, #4205, #7660), not a syntax issue — tested bare-name override, version-pinned parent key, and a from-scratch reinstall with the overrides mirror manually added to the lockfile, none worked. MITIGATED as of MGESTDOC-56: patches/@nestjs+swagger++js-yaml+5.2.3.patch (applied via root postinstall: patch-package) replaces the nested copy on disk with the real, integrity-verified js-yaml@5.2.3 — the vulnerable code no longer runs. This entry stays anyway because npm audit/better-npm-audit only reads package-lock.json's declared resolution (still 5.2.1 — the patch runs after npm's own bookkeeping and does not touch the lockfile), so it cannot see the fix and will keep flagging this regardless. Remove once @nestjs/swagger ships a release depending on a patched js-yaml (then drop the patch too), or once the upstream npm overrides bug is fixed."
   }
 }

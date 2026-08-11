@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/common/package.json ./packages/common/
 COPY services/user-service/package*.json ./services/user-service/
+COPY patches ./patches
 RUN npm ci
 
 COPY packages/common/tsconfig.json ./packages/common/
@@ -28,6 +29,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 COPY packages/common/package.json ./packages/common/
 COPY services/user-service/package*.json ./services/user-service/
+COPY patches ./patches
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/packages/common/dist ./packages/common/dist

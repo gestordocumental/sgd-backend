@@ -85,6 +85,7 @@ describe('Workflow response DTO mappers', () => {
       typologyCode: 'TYP',
       typologyVersion: '1',
       typologyName: 'Typology',
+      reviewCycleEnabled: true,
       mainDocumentId: 'doc-1',
       mainDocumentValidated: true,
       mainDocumentMetadata: { ok: true },
@@ -117,6 +118,39 @@ describe('Workflow response DTO mappers', () => {
           mimeType: 'application/pdf',
           fileSizeBytes: null,
           attachmentType: AttachmentType.SUPPORTING,
+          noteId: null,
+          createdAt,
+        },
+        {
+          id: 'att-2',
+          workflowId: 'wf-1',
+          uploadedBy: 'final-1',
+          storageKey: 'workflow/managed.pdf',
+          originalName: 'managed.pdf',
+          mimeType: 'application/pdf',
+          fileSizeBytes: 50,
+          attachmentType: AttachmentType.MANAGEMENT,
+          noteId: 'note-workflow-1',
+          createdAt,
+        },
+      ],
+      notes: [
+        {
+          id: 'note-workflow-1',
+          workflowId: 'wf-1',
+          cycleId: null,
+          adminStepId: null,
+          createdBy: 'final-1',
+          content: 'Managed comment',
+          createdAt: updatedAt,
+        },
+        {
+          id: 'note-cycle-1',
+          workflowId: 'wf-1',
+          cycleId: 'cycle-1',
+          adminStepId: 'admin-step-1',
+          createdBy: 'reviewer-1',
+          content: 'Cycle-scoped, must not appear in dto.notes',
           createdAt,
         },
       ],
@@ -149,5 +183,86 @@ describe('Workflow response DTO mappers', () => {
     expect(dto.attachments[0].attachmentType).toBe(AttachmentType.SUPPORTING);
     expect(dto.activeAdminCycle?.steps[0].notes[0].content).toBe('Looks good');
     expect(dto.adminCycles).toHaveLength(1);
+    expect(dto.reviewCycleEnabled).toBe(true);
+  });
+
+  it('exposes noteId on attachments added via "Gestionar" (attachmentType MANAGEMENT)', () => {
+    const workflow = { id: 'wf-1', attachments: [
+      {
+        id: 'att-2',
+        workflowId: 'wf-1',
+        uploadedBy: 'final-1',
+        storageKey: 'workflow/managed.pdf',
+        originalName: 'managed.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 50,
+        attachmentType: AttachmentType.MANAGEMENT,
+        noteId: 'note-workflow-1',
+        createdAt,
+      },
+    ] };
+
+    const dto = WorkflowResponseDto.from(workflow as any);
+
+    expect(dto.attachments[0]).toEqual(
+      expect.objectContaining({ attachmentType: AttachmentType.MANAGEMENT, noteId: 'note-workflow-1' }),
+    );
+  });
+
+  it('only exposes workflow-level notes (cycleId null) in dto.notes, excluding cycle-scoped ones', () => {
+    const workflow = {
+      id: 'wf-1',
+      attachments: [],
+      notes: [
+        {
+          id: 'note-workflow-1',
+          workflowId: 'wf-1',
+          cycleId: null,
+          adminStepId: null,
+          createdBy: 'final-1',
+          content: 'Managed comment',
+          createdAt: updatedAt,
+        },
+        {
+          id: 'note-cycle-1',
+          workflowId: 'wf-1',
+          cycleId: 'cycle-1',
+          adminStepId: 'admin-step-1',
+          createdBy: 'reviewer-1',
+          content: 'Cycle-scoped, must not appear',
+          createdAt,
+        },
+      ],
+    };
+
+    const dto = WorkflowResponseDto.from(workflow as any);
+
+    expect(dto.notes).toHaveLength(1);
+    expect(dto.notes[0]).toEqual(
+      expect.objectContaining({ id: 'note-workflow-1', content: 'Managed comment' }),
+    );
+  });
+
+  it('sorts dto.notes by createdAt ascending', () => {
+    const earlier = new Date('2026-01-01T00:00:00.000Z');
+    const later = new Date('2026-01-05T00:00:00.000Z');
+    const workflow = {
+      id: 'wf-1',
+      attachments: [],
+      notes: [
+        { id: 'note-b', workflowId: 'wf-1', cycleId: null, adminStepId: null, createdBy: 'u1', content: 'second', createdAt: later },
+        { id: 'note-a', workflowId: 'wf-1', cycleId: null, adminStepId: null, createdBy: 'u1', content: 'first', createdAt: earlier },
+      ],
+    };
+
+    const dto = WorkflowResponseDto.from(workflow as any);
+
+    expect(dto.notes.map((n) => n.id)).toEqual(['note-a', 'note-b']);
+  });
+
+  it('defaults notes to an empty array when the workflow has none', () => {
+    const dto = WorkflowResponseDto.from({ id: 'wf-1', attachments: [] } as any);
+
+    expect(dto.notes).toEqual([]);
   });
 });

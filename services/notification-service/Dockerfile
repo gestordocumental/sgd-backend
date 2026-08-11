@@ -9,6 +9,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/common/package.json ./packages/common/
 COPY services/notification-service/package*.json ./services/notification-service/
+COPY patches ./patches
 
 RUN npm ci
 
@@ -39,6 +40,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 COPY packages/common/package.json ./packages/common/
 COPY services/notification-service/package*.json ./services/notification-service/
+COPY patches ./patches
 
 RUN npm ci --omit=dev
 

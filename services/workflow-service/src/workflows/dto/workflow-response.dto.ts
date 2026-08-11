@@ -3,6 +3,7 @@ import { Workflow } from '../entities/workflow.entity';
 import { WorkflowApprovalStep } from '../entities/workflow-approval-step.entity';
 import { WorkflowApprovalAction, ApprovalAttachment } from '../entities/workflow-approval-action.entity';
 import { WorkflowAttachment } from '../entities/workflow-attachment.entity';
+import { WorkflowNote } from '../entities/workflow-note.entity';
 import { WorkflowTimeline } from '../entities/workflow-timeline.entity';
 import { WorkflowAdminCycle } from '../entities/workflow-admin-cycle.entity';
 import {
@@ -191,6 +192,9 @@ export class AttachmentResponseDto {
   @ApiProperty() mimeType!: string;
   @ApiPropertyOptional() fileSizeBytes: number | null = null;
   @ApiProperty({ enum: AttachmentType }) attachmentType!: AttachmentType;
+  // Solo para attachmentType MANAGEMENT — la nota (ver WorkflowNoteResponseDto)
+  // que este adjunto acompaña, si hay una.
+  @ApiPropertyOptional() noteId: string | null = null;
   @ApiProperty() createdAt!: Date;
 
   static from(att: WorkflowAttachment): AttachmentResponseDto {
@@ -203,7 +207,26 @@ export class AttachmentResponseDto {
       mimeType:       att.mimeType,
       fileSizeBytes:  att.fileSizeBytes,
       attachmentType: att.attachmentType,
+      noteId:         att.noteId ?? null,
       createdAt:      att.createdAt,
+    };
+  }
+}
+
+// ── Workflow-level note ("Gestionar") ─────────────────────────────────────────
+
+export class WorkflowNoteResponseDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() content!: string;
+  @ApiProperty() createdBy!: string;
+  @ApiProperty() createdAt!: Date;
+
+  static from(note: WorkflowNote): WorkflowNoteResponseDto {
+    return {
+      id:        note.id,
+      content:   note.content,
+      createdBy: note.createdBy,
+      createdAt: note.createdAt,
     };
   }
 }
@@ -219,6 +242,13 @@ export class WorkflowResponseDto {
   @ApiProperty() typologyCode!: string;
   @ApiProperty() typologyVersion!: string;
   @ApiProperty() typologyName!: string;
+  // Snapshot denormalizado — ver comentario en la entidad Workflow. El
+  // chequeo autoritativo siempre es en vivo contra document-service
+  // (approve()/createCycle()); este campo es solo para mostrar/ocultar el
+  // botón. En respuestas de UN SOLO workflow (nunca listas/paginadas) se
+  // refresca en vivo en WorkflowsService.findOneOrFail cuando el estado lo
+  // amerita, así que ahí siempre coincide con la disponibilidad real.
+  @ApiProperty() reviewCycleEnabled!: boolean;
   @ApiPropertyOptional() mainDocumentId: string | null = null;
   @ApiProperty() mainDocumentValidated!: boolean;
   @ApiPropertyOptional() mainDocumentMetadata: Record<string, unknown> | null = null;
@@ -234,6 +264,10 @@ export class WorkflowResponseDto {
   @ApiProperty({ type: [ApprovalStepResponseDto] }) approvalSteps!: ApprovalStepResponseDto[];
   @ApiProperty({ type: [ApprovalActionResponseDto] }) approvalActions!: ApprovalActionResponseDto[];
   @ApiProperty({ type: [AttachmentResponseDto] }) attachments!: AttachmentResponseDto[];
+  // Comentarios agregados vía "Gestionar" (o al cerrar) — notas de workflow sin
+  // cycleId/adminStepId; excluye las de un ciclo administrativo, que van dentro
+  // de activeAdminCycle/adminCycles[].steps[].notes.
+  @ApiProperty({ type: [WorkflowNoteResponseDto] }) notes!: WorkflowNoteResponseDto[];
   @ApiPropertyOptional({ type: AdminCycleResponseDto }) activeAdminCycle: AdminCycleResponseDto | null = null;
   @ApiProperty({ type: [AdminCycleResponseDto] }) adminCycles!: AdminCycleResponseDto[];
   @ApiProperty() createdAt!: Date;
@@ -262,6 +296,7 @@ export class WorkflowResponseDto {
       typologyCode:             workflow.typologyCode,
       typologyVersion:          workflow.typologyVersion,
       typologyName:             workflow.typologyName,
+      reviewCycleEnabled:       workflow.reviewCycleEnabled,
       mainDocumentId:           workflow.mainDocumentId,
       mainDocumentValidated:    workflow.mainDocumentValidated,
       mainDocumentMetadata:     workflow.mainDocumentMetadata,
@@ -277,6 +312,10 @@ export class WorkflowResponseDto {
       approvalSteps:            (workflow.approvalSteps ?? []).map(ApprovalStepResponseDto.from),
       approvalActions:          actions.map(ApprovalActionResponseDto.from),
       attachments:              (workflow.attachments ?? []).map(AttachmentResponseDto.from),
+      notes: (workflow.notes ?? [])
+        .filter((n) => n.cycleId === null)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map(WorkflowNoteResponseDto.from),
       activeAdminCycle:         activeAdminCycle ? AdminCycleResponseDto.from(activeAdminCycle) : null,
       adminCycles:              allAdminCycles.map(AdminCycleResponseDto.from),
       createdAt:                workflow.createdAt,

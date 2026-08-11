@@ -25,6 +25,12 @@ export interface TypologyPublicInfo {
     cargoId: string | null;
     cargoNombre: string | null;
   };
+  reviewCycleEnabled: boolean;
+}
+
+export interface ReviewCycleEnabledResult {
+  id: string;
+  reviewCycleEnabled: boolean;
 }
 
 export interface DocumentDiscrepancy {
@@ -189,6 +195,79 @@ export class DocumentClientService {
     }
   }
 
+  /**
+   * Whether workflows created against this typology should go through the
+   * admin review cycle step. `false` is only ever a genuine, validated answer
+   * from document-service — never a stand-in for "couldn't tell". Both
+   * callers (approve()'s final-approval branch and createCycle()'s RN-17
+   * guard) treat `false` as authoritative and act on it immediately (skip
+   * the review cycle / reject creating one), so silently defaulting to
+   * `false` on a document-service outage would silently skip a review cycle
+   * that was actually enabled. Propagate failures instead — the caller
+   * surfaces a 503/500 and the client can retry once document-service is
+   * back, same as every other method on this class.
+   *
+   * `timeoutMs` defaults to the shared `this.timeoutMs`, but callers on a
+   * best-effort/display-only path (e.g. WorkflowsService.findOneOrFail's
+   * opportunistic snapshot refresh) may pass a tighter one: unlike
+   * approve()/createCycle(), where a false/error here is authoritative and
+   * worth waiting the full timeout for, a slow-but-alive document-service on
+   * a read path should fall back to the stale snapshot sooner instead of
+   * stalling the whole request.
+   *
+   * `useCircuitBreaker` (default `true`) gates whether this call's outcome
+   * feeds the circuit breaker shared with getTypologyInfo()/validateDocument().
+   * A tightened `timeoutMs` deliberately makes timeouts more likely — routing
+   * those through the shared breaker would let a burst of best-effort detail
+   * reads (document-service merely slow, not down) trip it open, and then
+   * approve()/createCycle() would get EOPENBREAKER even though a real
+   * document-service call within their full timeout would have succeeded.
+   * Callers passing a tightened timeout should pass `false` here too, so
+   * their failures stay local instead of poisoning the breaker for the
+   * authoritative call sites.
+   *
+   * Endpoint requerido en document-service:
+   *   GET /internal/typologies/:id/review-cycle-enabled?orgId=:orgId
+   */
+  async isReviewCycleEnabledForTypology(
+    orgId: string,
+    typologyId: string,
+    timeoutMs: number = this.timeoutMs,
+    useCircuitBreaker: boolean = true,
+  ): Promise<boolean> {
+    const correlationId = getCorrelationId();
+    const url = `${this.documentServiceUrl}/internal/typologies/${typologyId}/review-cycle-enabled?orgId=${encodeURIComponent(orgId)}`;
+
+    // Validation lives inside this closure (not after it resolves) so a
+    // malformed 200 counts as a failure for the circuit breaker too, when the
+    // breaker is in play — otherwise document-service could return garbage on
+    // every call and the breaker would never see it as unhealthy.
+    const fetchAndValidate = async (): Promise<boolean> => {
+      const response = await firstValueFrom(
+        this.httpService
+          .get<ReviewCycleEnabledResult>(url, {
+            headers: {
+              'x-internal-token':      this.internalToken,
+              [CORRELATION_ID_HEADER]: correlationId,
+            },
+          })
+          .pipe(timeout(timeoutMs)),
+      );
+      const reviewCycleEnabled = response.data?.reviewCycleEnabled;
+      if (typeof reviewCycleEnabled !== 'boolean') {
+        throw new Error('Invalid reviewCycleEnabled response from document-service');
+      }
+      return reviewCycleEnabled;
+    };
+
+    try {
+      return await (useCircuitBreaker ? this.fireWithCb(fetchAndValidate) : fetchAndValidate());
+    } catch (error: unknown) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      return this.handleError(error, 'document-service', url, correlationId, timeoutMs);
+    }
+  }
+
   private async fireWithCb<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await this.cb.fire(fn) as T;
@@ -205,6 +284,7 @@ export class DocumentClientService {
     target: string,
     url: string,
     correlationId: string,
+    timeoutMs: number = this.timeoutMs,
   ): never {
     if (error instanceof TimeoutError) {
       this.logger.http({
@@ -212,7 +292,7 @@ export class DocumentClientService {
         target,
         statusCode: 504,
         correlationId,
-        message: `← [${target}] ${url} 504: timed out after ${this.timeoutMs}ms`,
+        message: `← [${target}] ${url} 504: timed out after ${timeoutMs}ms`,
       });
       throw new GatewayTimeoutException(`${target} did not respond in time`);
     }

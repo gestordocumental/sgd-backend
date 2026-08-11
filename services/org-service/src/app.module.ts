@@ -45,6 +45,14 @@ import { CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
             idleTimeoutMillis: 60000,       // drop idle connections after 60s; pool will reconnect on next query
             connectionTimeoutMillis: 10000, // fail fast if can't acquire connection within 10s
             max: poolSize,
+            // Postgres has no default lock_timeout, so a SELECT ... FOR UPDATE/FOR
+            // SHARE (see AreasService/DepartamentosService/CargosService's
+            // race-condition locking) would otherwise wait indefinitely if it
+            // collides with another transaction's lock on the same row — hanging
+            // the request instead of failing fast with a clear error (Postgres
+            // 55P03). Passed as a libpq startup option, applied to every
+            // connection the pool opens.
+            options: '-c lock_timeout=5000',
           },
         };
       },
