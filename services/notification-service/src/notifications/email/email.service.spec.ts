@@ -42,6 +42,7 @@ describe('getNotificationTitle', () => {
     ['ADMIN_CYCLE_TASK',        'Nueva tarea administrativa pendiente'],
     ['ADMIN_CYCLE_COMPLETED',   'Ciclo administrativo completado'],
     ['WORKFLOW_CLOSED',         'Workflow cerrado'],
+    ['WORKFLOW_CANCELLED',      'Workflow cancelado'],
     ['NO_FINAL_USER_ALERT',     'Alerta: tipología sin usuarios asignados'],
   ];
 

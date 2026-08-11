@@ -6,12 +6,25 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, QueryFailedError, Repository } from 'typeorm';
 import { Org, OrgStatus } from './entities/org.entity';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 import { UserClientService } from '../common/user-client/user-client.service';
+
+// Postgres error code for a unique-constraint violation.
+const PG_UNIQUE_VIOLATION = '23505';
+
+// Org.name has a unique index (see entities/org.entity.ts), but the findOne
+// pre-checks in create()/update() below only narrow the common case — two
+// concurrent requests for the same name can both pass the check before
+// either commits, and only the DB constraint stops the second save(). This
+// recognizes that raw QueryFailedError so callers can translate it into the
+// same ConflictException shape the pre-check already throws.
+function isUniqueNameViolation(err: unknown): boolean {
+  return err instanceof QueryFailedError && (err.driverError as { code?: string })?.code === PG_UNIQUE_VIOLATION;
+}
 
 function encodeCursor(createdAt: Date, id: string): string {
   return Buffer.from(JSON.stringify({ at: createdAt.toISOString(), id })).toString('base64url');
@@ -70,7 +83,11 @@ export class OrgsService {
   async create(dto: CreateOrgDto, createdBy: string): Promise<Org> {
     const existing = await this.orgRepo.findOne({ where: { name: dto.name } });
     if (existing) {
-      throw new ConflictException(`Organization with name "${dto.name}" already exists`);
+      throw new ConflictException({
+        message: `Organization with name "${dto.name}" already exists`,
+        errorCode: 'COMPANY_ALREADY_EXISTS',
+        params: { name: dto.name },
+      });
     }
 
     const org = this.orgRepo.create({
@@ -82,7 +99,20 @@ export class OrgsService {
       createdBy,
     });
 
-    const saved = await this.orgRepo.save(org);
+    let saved: Org;
+    try {
+      saved = await this.orgRepo.save(org);
+    } catch (err) {
+      if (isUniqueNameViolation(err)) {
+        throw new ConflictException({
+          message: `Organization with name "${dto.name}" already exists`,
+          errorCode: 'COMPANY_ALREADY_EXISTS',
+          params: { name: dto.name },
+        });
+      }
+      throw err;
+    }
+
     this.emitAuditLog('COMPANY_CREATED', saved, createdBy);
     return saved;
   }
@@ -144,7 +174,11 @@ export class OrgsService {
     if (dto.name && dto.name !== org.name) {
       const existing = await this.orgRepo.findOne({ where: { name: dto.name } });
       if (existing) {
-        throw new ConflictException(`Organization with name "${dto.name}" already exists`);
+        throw new ConflictException({
+          message: `Organization with name "${dto.name}" already exists`,
+          errorCode: 'COMPANY_ALREADY_EXISTS',
+          params: { name: dto.name },
+        });
       }
     }
 
@@ -159,7 +193,22 @@ export class OrgsService {
       ...(dto.status  !== undefined && { status:  dto.status }),
     });
 
-    const updated = await this.orgRepo.save(org);
+    let updated: Org;
+    try {
+      updated = await this.orgRepo.save(org);
+    } catch (err) {
+      // Only the name is unique, and it only changes when dto.name is set —
+      // if it isn't, this couldn't be a name collision, so don't mislabel
+      // some other failure as one.
+      if (dto.name && isUniqueNameViolation(err)) {
+        throw new ConflictException({
+          message: `Organization with name "${dto.name}" already exists`,
+          errorCode: 'COMPANY_ALREADY_EXISTS',
+          params: { name: dto.name },
+        });
+      }
+      throw err;
+    }
 
     if (actorId) {
       const changes: Record<string, { from: unknown; to: unknown }> = {};

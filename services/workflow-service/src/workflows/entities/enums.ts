@@ -41,6 +41,9 @@ export enum AdminStepStatus {
 export enum AttachmentType {
   MAIN_DOCUMENT = 'MAIN_DOCUMENT',
   SUPPORTING    = 'SUPPORTING',
+  // Adjuntado por el usuario final vía "Gestionar" mientras el workflow está
+  // AVAILABLE_FOR_FINAL_USERS — no está atado a un ciclo administrativo.
+  MANAGEMENT    = 'MANAGEMENT',
 }
 
 export enum TimelineEventType {

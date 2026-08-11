@@ -46,6 +46,8 @@ import { RejectWorkflowDto } from './dto/reject-workflow.dto';
 import { CreateAdminCycleDto } from './dto/create-admin-cycle.dto';
 import { CompleteAdminStepDto } from './dto/complete-admin-step.dto';
 import { CloseWorkflowDto } from './dto/close-workflow.dto';
+import { CancelWorkflowDto } from './dto/cancel-workflow.dto';
+import { AddWorkflowNoteDto } from './dto/add-workflow-note.dto';
 import { ForwardAdminStepDto } from './dto/forward-admin-step.dto';
 import { ListWorkflowsDto } from './dto/list-workflows.dto';
 import {
@@ -125,7 +127,7 @@ export class WorkflowsController {
   @Get('my-available')
   @OrgMember()
   @RequirePermission('WORKFLOWS', 'READ')
-  @ApiOperation({ summary: 'Workflows disponibles para el usuario como usuario final' })
+  @ApiOperation({ summary: 'Historial de workflows en los que el usuario ha participado (usuario final, revisor, aprobador o creador), en cualquier desenlace' })
   @ApiResponse({ status: 200, type: [WorkflowResponseDto] })
   getMyAvailable(@JwtPayloadParam() user: JwtPayload): Promise<WorkflowResponseDto[]> {
     return this.workflowsService.getMyAvailable(user);
@@ -326,7 +328,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<AdminCycleResponseDto> {
     return this.withIdempotency(idempotencyKey, user.sub!, async () => {
-      const cycle = await this.adminCycleService.createCycle(id, user.sub!, dto);
+      const cycle = await this.adminCycleService.createCycle(id, user.sub!, user.companyId!, dto);
       return AdminCycleResponseDto.from(cycle);
     });
   }
@@ -352,7 +354,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ) {
     return this.withIdempotency(idempotencyKey, user.sub!, () =>
-      this.adminCycleService.completeStep(id, cycleId, stepId, user.sub!, dto),
+      this.adminCycleService.completeStep(id, cycleId, stepId, user.sub!, user.companyId!, dto),
     );
   }
 
@@ -377,7 +379,7 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ) {
     return this.withIdempotency(idempotencyKey, user.sub!, () =>
-      this.adminCycleService.forwardStep(id, cycleId, stepId, user.sub!, dto),
+      this.adminCycleService.forwardStep(id, cycleId, stepId, user.sub!, user.companyId!, dto),
     );
   }
 
@@ -412,7 +414,32 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
     return this.withIdempotency(idempotencyKey, user.sub!, async () => {
-      await this.adminCycleService.skipReviewCycle(id, user.sub!);
+      await this.adminCycleService.skipReviewCycle(id, user.sub!, user.companyId!);
+      return this.workflowsService.findOne(id, user);
+    });
+  }
+
+  // ── Gestionar (comentario/adjuntos repetibles, sin ciclo administrativo) ──────
+
+  @Post(':id/notes')
+  @OrgMember()
+  @RequirePermission('WORKFLOWS', 'APPROVE')
+  @ApiOperation({ summary: 'Agregar comentario y/o adjuntos al workflow disponible (usuario final) — repetible' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: AddWorkflowNoteDto })
+  @ApiResponse({ status: 201, type: WorkflowResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields, or neither content nor attachments provided' })
+  @ApiResponse({ status: 409, description: 'Workflow no está disponible para usuarios finales' })
+  @HttpCode(HttpStatus.CREATED)
+  async addNote(
+    @Headers('Idempotency-Key') idempotencyKey: string | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddWorkflowNoteDto,
+    @JwtPayloadParam() user: JwtPayload,
+  ): Promise<WorkflowResponseDto> {
+    return this.withIdempotency(idempotencyKey, user.sub!, async () => {
+      await this.adminCycleService.addNote(id, user.sub!, user.companyId!, dto);
       return this.workflowsService.findOne(id, user);
     });
   }
@@ -436,7 +463,29 @@ export class WorkflowsController {
     @JwtPayloadParam() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
     return this.withIdempotency(idempotencyKey, user.sub!, async () => {
-      await this.adminCycleService.closeWorkflow(id, user.sub!, dto);
+      await this.adminCycleService.closeWorkflow(id, user.sub!, user.companyId!, dto);
+      return this.workflowsService.findOne(id, user);
+    });
+  }
+
+  @Post(':id/cancel')
+  @OrgMember()
+  @RequirePermission('WORKFLOWS', 'APPROVE')
+  @ApiOperation({ summary: 'Cancelar el workflow (usuario final, motivo obligatorio)' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiHeader(IDEMPOTENCY_HEADER)
+  @ApiBody({ type: CancelWorkflowDto })
+  @ApiResponse({ status: 200, type: WorkflowResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error — invalid DTO fields' })
+  @ApiResponse({ status: 409, description: 'Workflow no puede cancelarse en su estado actual' })
+  async cancel(
+    @Headers('Idempotency-Key') idempotencyKey: string | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelWorkflowDto,
+    @JwtPayloadParam() user: JwtPayload,
+  ): Promise<WorkflowResponseDto> {
+    return this.withIdempotency(idempotencyKey, user.sub!, async () => {
+      await this.adminCycleService.cancelWorkflow(id, user.sub!, user.companyId!, dto);
       return this.workflowsService.findOne(id, user);
     });
   }

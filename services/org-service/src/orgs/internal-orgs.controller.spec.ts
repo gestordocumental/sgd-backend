@@ -53,4 +53,5 @@ describe('InternalOrgsController', () => {
       await expect(controller.getStatus('x')).rejects.toThrow(NotFoundException);
     });
   });
+
 });

@@ -163,6 +163,7 @@ export class TypologiesService implements OnModuleInit {
         fuente:  source === CreationSource.BULK_IMPORT ? DataSource.EXCEL : DataSource.MANUAL,
       },
       fuenteCreacion: source,
+      reviewCycleEnabled: dto.reviewCycleEnabled ?? false,
     });
 
     try {
@@ -236,6 +237,7 @@ export class TypologiesService implements OnModuleInit {
     if (dto.nombre  !== undefined) doc.datosDeclarados.nombre  = dto.nombre;
     if (dto.codigo  !== undefined) doc.datosDeclarados.codigo  = dto.codigo;
     if (dto.version !== undefined) doc.datosDeclarados.version = dto.version;
+    if (dto.reviewCycleEnabled !== undefined) doc.reviewCycleEnabled = dto.reviewCycleEnabled;
 
     if (structureNames) {
       doc.estructuraOrg.departamentoId     = structureNames.departamentoId;

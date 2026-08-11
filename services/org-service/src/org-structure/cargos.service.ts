@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { Cargo } from './entities/cargo.entity';
 import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
@@ -13,6 +13,8 @@ export class CargosService {
   constructor(
     @InjectRepository(Cargo)
     private readonly repo: Repository<Cargo>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
     private readonly areasService: AreasService,
     private readonly departamentosService: DepartamentosService,
     private readonly kafkaProducer: KafkaProducerService,
@@ -53,38 +55,54 @@ export class CargosService {
     dto: CreateCargoDto,
     actorId?: string,
   ): Promise<Cargo> {
-    if (areaId) {
-      await this.areasService.findOne(orgId, departamentoId, areaId);
-      const existing = await this.repo.findOne({ where: { areaId, name: dto.name } });
-      if (existing) {
-        throw new ConflictException({
-          message: `Cargo "${dto.name}" already exists in this area`,
-          errorCode: 'CARGO_ALREADY_EXISTS_IN_AREA',
-          params: { name: dto.name },
-        });
-      }
-    } else {
-      await this.departamentosService.findOne(orgId, departamentoId);
-      const existing = await this.repo.findOne({
-        where: { departamentoId, name: dto.name, areaId: IsNull() },
-      });
-      if (existing) {
-        throw new ConflictException({
-          message: `Cargo "${dto.name}" already exists in this department`,
-          errorCode: 'CARGO_ALREADY_EXISTS_IN_DEPARTMENT',
-          params: { name: dto.name },
-        });
-      }
-    }
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const cargoRepo = manager.getRepository(Cargo);
 
-    const cargo = this.repo.create({
-      orgId,
-      areaId:        areaId ?? null,
-      departamentoId,
-      name:          dto.name,
-      description:   dto.description ?? null,
+      if (areaId) {
+        // Shared lock on the area: serializes this insert against
+        // AreasService.remove()'s exclusive lock + dependency count on the
+        // same row (see AreasService.findOneLocked()), so a cargo can never
+        // be created in the gap after remove() has already counted zero
+        // dependents but before its soft-delete commits.
+        await this.areasService.findOneLocked(manager, orgId, departamentoId, areaId);
+        const existing = await cargoRepo.findOne({ where: { areaId, name: dto.name } });
+        if (existing) {
+          throw new ConflictException({
+            message: `Cargo "${dto.name}" already exists in this area`,
+            errorCode: 'CARGO_ALREADY_EXISTS_IN_AREA',
+            params: { name: dto.name },
+          });
+        }
+      } else {
+        // Same reasoning, one level up: department-level cargos race against
+        // DepartamentosService.remove() instead of AreasService.remove().
+        await this.departamentosService.findOneLocked(manager, orgId, departamentoId);
+        const existing = await cargoRepo.findOne({
+          where: { departamentoId, name: dto.name, areaId: IsNull() },
+        });
+        if (existing) {
+          throw new ConflictException({
+            message: `Cargo "${dto.name}" already exists in this department`,
+            errorCode: 'CARGO_ALREADY_EXISTS_IN_DEPARTMENT',
+            params: { name: dto.name },
+          });
+        }
+      }
+
+      const cargo = cargoRepo.create({
+        orgId,
+        areaId:        areaId ?? null,
+        departamentoId,
+        name:          dto.name,
+        description:   dto.description ?? null,
+      });
+      return cargoRepo.save(cargo);
     });
-    const saved = await this.repo.save(cargo);
+
+    // Emitted after the transaction commits (same ordering as remove()) — an
+    // event published mid-transaction would reach Kafka even if the commit
+    // later failed, and emitSafe doesn't participate in the transaction to
+    // roll back with it.
     this.emitAuditLog({
       actorId, orgId, action: 'CARGO_CREATED', resourceId: saved.id,
       resourceName: saved.name, metadata: { areaId, departamentoId },

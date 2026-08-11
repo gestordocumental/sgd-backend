@@ -17,6 +17,7 @@ import { NotifyNoFinalUsersDto } from './notify-no-final-users.dto';
 import { AdminStepInputDto, CreateAdminCycleDto } from './create-admin-cycle.dto';
 import { AdminStepAttachmentDto, CompleteAdminStepDto } from './complete-admin-step.dto';
 import { ForwardAdminStepDto } from './forward-admin-step.dto';
+import { AddWorkflowNoteDto, WorkflowNoteAttachmentDto } from './add-workflow-note.dto';
 import { WorkflowStatus } from '../entities/enums';
 
 const UUID = '11111111-1111-4111-8111-111111111111';
@@ -214,5 +215,56 @@ describe('Workflow input DTOs', () => {
     const dto = plainToInstance(ForwardAdminStepDto, { optionalReviewerId: 'not-a-uuid' });
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  // ─── AddWorkflowNoteDto ──────────────────────────────────────────────────
+
+  it('transforms and validates add-workflow-note with content and attachments', async () => {
+    const dto = plainToInstance(AddWorkflowNoteDto, {
+      content: '  following up with the client  ',
+      attachments: [{
+        storageKey: 'files/context.pdf',
+        originalName: 'context.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: '1024',
+      }],
+    });
+    expect(dto.content).toBe('following up with the client');
+    expect(dto.attachments?.[0]).toBeInstanceOf(WorkflowNoteAttachmentDto);
+    expect(dto.attachments?.[0].fileSizeBytes).toBe(1024);
+    await expect(validate(dto)).resolves.toHaveLength(0);
+  });
+
+  it('validates add-workflow-note with no content or attachments (both optional)', async () => {
+    const dto = plainToInstance(AddWorkflowNoteDto, {});
+    await expect(validate(dto)).resolves.toHaveLength(0);
+  });
+
+  it('fails add-workflow-note validation when an attachment fileSizeBytes is fractional', async () => {
+    const dto = plainToInstance(AddWorkflowNoteDto, {
+      attachments: [{
+        storageKey: 'files/context.pdf',
+        originalName: 'context.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 10.5,
+      }],
+    });
+    const errors = await validate(dto);
+    expect(errors[0].property).toBe('attachments');
+    expect(errors[0].children?.[0].children?.[0].constraints).toHaveProperty('isInt');
+  });
+
+  it('fails add-workflow-note validation when an attachment fileSizeBytes is negative', async () => {
+    const dto = plainToInstance(AddWorkflowNoteDto, {
+      attachments: [{
+        storageKey: 'files/context.pdf',
+        originalName: 'context.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: -1,
+      }],
+    });
+    const errors = await validate(dto);
+    expect(errors[0].property).toBe('attachments');
+    expect(errors[0].children?.[0].children?.[0].constraints).toHaveProperty('min');
   });
 });
