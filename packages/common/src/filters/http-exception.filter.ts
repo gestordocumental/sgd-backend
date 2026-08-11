@@ -17,15 +17,18 @@ const IS_PROD = process.env['NODE_ENV'] === 'production';
 // Postgres error code for "lock_not_available" — a SELECT ... FOR UPDATE/FOR
 // SHARE that couldn't acquire its lock within lock_timeout (see org-service's
 // app.module.ts, which sets one to fail fast instead of hanging forever under
-// lock contention). Detected structurally on `driverError.code` instead of
-// importing TypeORM's QueryFailedError class, since this package is shared by
-// services that don't depend on TypeORM at all.
+// lock contention). Detected structurally instead of importing TypeORM's
+// QueryFailedError class, since this package is shared by services that
+// don't depend on TypeORM at all. Checks both shapes the error can arrive
+// in: TypeORM's QueryFailedError wraps the raw driver error in
+// `.driverError.code`, while node-postgres's own DatabaseError (surfaced
+// directly by services that talk to `pg` without an ORM) exposes `.code` on
+// the instance itself.
 const PG_LOCK_TIMEOUT = '55P03';
 
 function isPgLockTimeout(exception: unknown): boolean {
-  const driverError = (exception as { driverError?: { code?: string } } | null | undefined)
-    ?.driverError;
-  return driverError?.code === PG_LOCK_TIMEOUT;
+  const err = exception as { code?: string; driverError?: { code?: string } } | null | undefined;
+  return err?.code === PG_LOCK_TIMEOUT || err?.driverError?.code === PG_LOCK_TIMEOUT;
 }
 
 /**
