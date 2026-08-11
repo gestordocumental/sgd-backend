@@ -85,6 +85,53 @@ describe('HttpExceptionFilter', () => {
     );
   });
 
+  it('translates a Postgres lock-timeout error (55P03) into a retryable 503', () => {
+    // Regression: org-service sets a Postgres lock_timeout (see
+    // app.module.ts) so a SELECT ... FOR UPDATE/FOR SHARE that can't get its
+    // lock fails fast instead of hanging the request — but the raw
+    // QueryFailedError used to fall through to the generic "non-HTTP
+    // exception" branch below and come back as an opaque 500. Detected via
+    // driverError.code (not `instanceof QueryFailedError`) since this filter
+    // is shared by services that don't depend on TypeORM.
+    const { host, mockStatus, mockJson } = makeHost(
+      'DELETE',
+      '/api/org-structure/areas/1',
+      '/api/org-structure/areas/1',
+    );
+    const exception = Object.assign(new Error('canceling statement due to lock timeout'), {
+      driverError: { code: '55P03' },
+    });
+
+    filter.catch(exception, host);
+
+    expect(mockStatus).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+        errorCode: 'DB_LOCK_TIMEOUT',
+      }),
+    );
+  });
+
+  it('logs a lock-timeout error as a warning, not an unhandled exception', () => {
+    const { host } = makeHost(
+      'DELETE',
+      '/api/org-structure/areas/1',
+      '/api/org-structure/areas/1',
+    );
+    const exception = Object.assign(new Error('canceling statement due to lock timeout'), {
+      driverError: { code: '55P03' },
+    });
+
+    filter.catch(exception, host);
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('503'),
+      'HttpExceptionFilter',
+    );
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
   it('logs error for 5xx exceptions', () => {
     const { host } = makeHost('DELETE', '/api/orgs/1', '/api/orgs/1');
     const exception = new HttpException('Server error', HttpStatus.INTERNAL_SERVER_ERROR);
