@@ -1,6 +1,7 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, BadRequestException } from '@nestjs/common';
 import { RolePolicy } from './role.policy';
 import { Role, RoleScope } from '../entities/role.entity';
+import { Permission, PermissionModule, PermissionAction } from '../entities/permission.entity';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,15 @@ const makeRole = (overrides: Partial<Role> = {}): Role => ({
   permissions: [],
   userOrgRoles: [],
   createdAt: new Date('2024-01-01'),
+  ...overrides,
+});
+
+const makePermission = (overrides: Partial<Permission> = {}): Permission => ({
+  id: 'perm-uuid-1',
+  module: PermissionModule.DOCUMENTS,
+  action: PermissionAction.READ,
+  description: null,
+  roles: [],
   ...overrides,
 });
 
@@ -127,6 +137,74 @@ describe('RolePolicy', () => {
       } catch (err) {
         expect((err as ForbiddenException).getResponse()).toMatchObject({
           errorCode: 'SYSTEM_ROLE_NOT_MODIFIABLE',
+        });
+      }
+    });
+  });
+
+  // ─── validatePermissionSet ────────────────────────────────────────────────
+
+  describe('validatePermissionSet', () => {
+    it('allows an empty permission set', () => {
+      expect(() => RolePolicy.validatePermissionSet([])).not.toThrow();
+    });
+
+    it('allows a module with only READ', () => {
+      const permissions = [makePermission({ action: PermissionAction.READ })];
+      expect(() => RolePolicy.validatePermissionSet(permissions)).not.toThrow();
+    });
+
+    it('allows a module with READ plus action permissions', () => {
+      const permissions = [
+        makePermission({ id: 'p1', action: PermissionAction.READ }),
+        makePermission({ id: 'p2', action: PermissionAction.WRITE }),
+        makePermission({ id: 'p3', action: PermissionAction.DELETE }),
+      ];
+      expect(() => RolePolicy.validatePermissionSet(permissions)).not.toThrow();
+    });
+
+    it('allows independent modules that each carry their own READ', () => {
+      const permissions = [
+        makePermission({ id: 'p1', module: PermissionModule.DOCUMENTS, action: PermissionAction.READ }),
+        makePermission({ id: 'p2', module: PermissionModule.WORKFLOWS, action: PermissionAction.READ }),
+        makePermission({ id: 'p3', module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE }),
+      ];
+      expect(() => RolePolicy.validatePermissionSet(permissions)).not.toThrow();
+    });
+
+    it('throws BadRequestException when a module has an action permission but no READ', () => {
+      const permissions = [makePermission({ action: PermissionAction.WRITE })];
+      expect(() => RolePolicy.validatePermissionSet(permissions)).toThrow(BadRequestException);
+    });
+
+    it('throws when one module is missing READ even if another module is correctly configured', () => {
+      const permissions = [
+        makePermission({ id: 'p1', module: PermissionModule.DOCUMENTS, action: PermissionAction.READ }),
+        makePermission({ id: 'p2', module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE }),
+        makePermission({ id: 'p3', module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE }),
+      ];
+      try {
+        RolePolicy.validatePermissionSet(permissions);
+        fail('expected RolePolicy.validatePermissionSet to throw');
+      } catch (err) {
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          errorCode: 'MODULE_ACTION_PERMISSION_REQUIRES_READ',
+          params: { modules: [PermissionModule.WORKFLOWS] },
+        });
+      }
+    });
+
+    it('includes every offending module in the error params', () => {
+      const permissions = [
+        makePermission({ id: 'p1', module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE }),
+        makePermission({ id: 'p2', module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE }),
+      ];
+      try {
+        RolePolicy.validatePermissionSet(permissions);
+        fail('expected RolePolicy.validatePermissionSet to throw');
+      } catch (err) {
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          params: { modules: expect.arrayContaining([PermissionModule.DOCUMENTS, PermissionModule.WORKFLOWS]) },
         });
       }
     });
