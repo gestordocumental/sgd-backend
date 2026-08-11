@@ -47,7 +47,7 @@ export class AreasService {
   }
 
   async create(orgId: string, departamentoId: string, dto: CreateAreaDto, actorId?: string): Promise<Area> {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       // Shared lock on the departamento: serializes this insert against
       // DepartamentosService.remove()'s exclusive lock + dependency count on
       // the same row (see DepartamentosService.findOneLocked()), so an area
@@ -71,12 +71,17 @@ export class AreasService {
         name: dto.name,
         description: dto.description ?? null,
       });
-      const saved = await areaRepo.save(area);
-      if (actorId) {
-        this.emitAuditLog({ actorId, orgId, action: 'AREA_CREATED', resourceId: saved.id, resourceName: saved.name, metadata: { departamentoId } });
-      }
-      return saved;
+      return areaRepo.save(area);
     });
+
+    // Emitted after the transaction commits (same ordering as remove()) — an
+    // event published mid-transaction would reach Kafka even if the commit
+    // later failed, and emitSafe doesn't participate in the transaction to
+    // roll back with it.
+    if (actorId) {
+      this.emitAuditLog({ actorId, orgId, action: 'AREA_CREATED', resourceId: saved.id, resourceName: saved.name, metadata: { departamentoId } });
+    }
+    return saved;
   }
 
   async findAll(orgId: string, departamentoId: string): Promise<Area[]> {

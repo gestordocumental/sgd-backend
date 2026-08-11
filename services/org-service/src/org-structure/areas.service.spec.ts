@@ -29,6 +29,8 @@ describe('AreasService', () => {
   let repo: MockRepo<Area>;
   let cargoRepo: MockRepo<Cargo>;
   let departamentosService: { findOne: jest.Mock; findOneLocked: jest.Mock };
+  let dataSource: { transaction: jest.Mock };
+  let kafkaProducer: { emitSafe: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -49,18 +51,24 @@ describe('AreasService', () => {
     // create()/remove() run inside a transaction now (race-condition fix);
     // this fakes .transaction() by handing the callback a manager whose
     // getRepository() resolves back to the same mocks above, so existing
-    // assertions on repo/cargoRepo keep working unchanged.
-    const dataSource = {
-      transaction: jest.fn((cb: (manager: EntityManager) => unknown) =>
-        cb({
+    // assertions on repo/cargoRepo keep working unchanged. Wrapped in an
+    // extra microtask (async/await) rather than resolving synchronously, so
+    // ordering regressions (an audit log emitted from inside the callback,
+    // before "commit") are actually observable by tests below.
+    dataSource = {
+      transaction: jest.fn(async (cb: (manager: EntityManager) => unknown) => {
+        const result = await cb({
           getRepository: (entity: unknown) => {
             if (entity === Area) return repo;
             if (entity === Cargo) return cargoRepo;
             throw new Error('unexpected entity in mock transaction manager');
           },
-        } as unknown as EntityManager),
-      ),
+        } as unknown as EntityManager);
+        await Promise.resolve(); // simulates the commit happening after the callback returns
+        return result;
+      }),
     };
+    kafkaProducer = { emitSafe: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -69,7 +77,7 @@ describe('AreasService', () => {
         { provide: getRepositoryToken(Cargo), useValue: cargoRepo },
         { provide: DataSource, useValue: dataSource },
         { provide: DepartamentosService, useValue: departamentosService },
-        { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
+        { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
     }).compile();
 
@@ -93,6 +101,31 @@ describe('AreasService', () => {
       where: { departamentoId: area.departamentoId, name: area.name },
     });
     expect(result).toBe(area);
+  });
+
+  it('emits the AREA_CREATED audit log only after the transaction commits, not from inside it', async () => {
+    // Regression: emitAuditLog used to be called from inside the
+    // dataSource.transaction() callback — Kafka would receive the event even
+    // if the commit failed afterward, since emitSafe doesn't participate in
+    // the transaction and can't be rolled back with it.
+    const area = makeArea();
+    repo.findOne!.mockResolvedValue(null);
+    repo.create!.mockReturnValue(area);
+    repo.save!.mockResolvedValue(area);
+
+    const order: string[] = [];
+    dataSource.transaction.mockImplementation(async (cb: (manager: unknown) => unknown) => {
+      const result = await cb({
+        getRepository: (entity: unknown) => (entity === Area ? repo : cargoRepo),
+      });
+      order.push('transaction-committed');
+      return result;
+    });
+    kafkaProducer.emitSafe.mockImplementation(() => order.push('audit-log-emitted'));
+
+    await service.create(area.orgId, area.departamentoId, { name: area.name }, 'actor-1');
+
+    expect(order).toEqual(['transaction-committed', 'audit-log-emitted']);
   });
 
   it('throws ConflictException when creating a duplicated area', async () => {

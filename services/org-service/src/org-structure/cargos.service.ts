@@ -55,7 +55,7 @@ export class CargosService {
     dto: CreateCargoDto,
     actorId?: string,
   ): Promise<Cargo> {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const cargoRepo = manager.getRepository(Cargo);
 
       if (areaId) {
@@ -96,13 +96,18 @@ export class CargosService {
         name:          dto.name,
         description:   dto.description ?? null,
       });
-      const saved = await cargoRepo.save(cargo);
-      this.emitAuditLog({
-        actorId, orgId, action: 'CARGO_CREATED', resourceId: saved.id,
-        resourceName: saved.name, metadata: { areaId, departamentoId },
-      });
-      return saved;
+      return cargoRepo.save(cargo);
     });
+
+    // Emitted after the transaction commits (same ordering as remove()) — an
+    // event published mid-transaction would reach Kafka even if the commit
+    // later failed, and emitSafe doesn't participate in the transaction to
+    // roll back with it.
+    this.emitAuditLog({
+      actorId, orgId, action: 'CARGO_CREATED', resourceId: saved.id,
+      resourceName: saved.name, metadata: { areaId, departamentoId },
+    });
+    return saved;
   }
 
   async findAll(orgId: string, departamentoId: string, areaId: string): Promise<Cargo[]> {

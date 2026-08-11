@@ -28,6 +28,9 @@ describe('CargosService', () => {
   let service: CargosService;
   let repo: MockRepo<Cargo>;
   let areasService: { findOne: jest.Mock; findOneLocked: jest.Mock };
+  let departamentosService: { findOne: jest.Mock; findOneLocked: jest.Mock };
+  let dataSource: { transaction: jest.Mock };
+  let kafkaProducer: { emitSafe: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -42,15 +45,25 @@ describe('CargosService', () => {
       findOne: jest.fn().mockResolvedValue({ id: 'area-1' }),
       findOneLocked: jest.fn().mockResolvedValue({ id: 'area-1' }),
     };
+    departamentosService = {
+      findOne: jest.fn(),
+      findOneLocked: jest.fn().mockResolvedValue({ id: 'dep-1' }),
+    };
     // create() runs inside a transaction now (race-condition fix); this
     // fakes .transaction() by handing the callback a manager whose
     // getRepository() resolves back to the same repo mock above, so
-    // existing assertions on repo keep working unchanged.
-    const dataSource = {
-      transaction: jest.fn((cb: (manager: EntityManager) => unknown) =>
-        cb({ getRepository: () => repo } as unknown as EntityManager),
-      ),
+    // existing assertions on repo keep working unchanged. Wrapped in an
+    // extra microtask (async/await) rather than resolving synchronously, so
+    // ordering regressions (an audit log emitted from inside the callback,
+    // before "commit") are actually observable by tests below.
+    dataSource = {
+      transaction: jest.fn(async (cb: (manager: EntityManager) => unknown) => {
+        const result = await cb({ getRepository: () => repo } as unknown as EntityManager);
+        await Promise.resolve(); // simulates the commit happening after the callback returns
+        return result;
+      }),
     };
+    kafkaProducer = { emitSafe: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -58,11 +71,8 @@ describe('CargosService', () => {
         { provide: getRepositoryToken(Cargo), useValue: repo },
         { provide: DataSource, useValue: dataSource },
         { provide: AreasService, useValue: areasService },
-        {
-          provide: DepartamentosService,
-          useValue: { findOne: jest.fn(), findOneLocked: jest.fn().mockResolvedValue({ id: 'dep-1' }) },
-        },
-        { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
+        { provide: DepartamentosService, useValue: departamentosService },
+        { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
     }).compile();
 
@@ -87,6 +97,51 @@ describe('CargosService', () => {
     );
     expect(repo.findOne).toHaveBeenCalledWith({ where: { areaId: cargo.areaId, name: cargo.name } });
     expect(result).toBe(cargo);
+  });
+
+  it('creates a department-level cargo (areaId null) after validating the parent departamento', async () => {
+    // Department-level cargos have no area to lock, so they take the shared
+    // lock on the departamento row instead — see
+    // DepartamentosService.findOneLocked() and the areaId-present case above.
+    const cargo = makeCargo({ areaId: null });
+    repo.findOne!.mockResolvedValue(null);
+    repo.create!.mockReturnValue(cargo);
+    repo.save!.mockResolvedValue(cargo);
+
+    const result = await service.create(cargo.orgId, cargo.departamentoId, null, {
+      name: cargo.name,
+    });
+
+    expect(departamentosService.findOneLocked).toHaveBeenCalledWith(
+      expect.anything(),
+      cargo.orgId,
+      cargo.departamentoId,
+    );
+    expect(areasService.findOneLocked).not.toHaveBeenCalled();
+    expect(result).toBe(cargo);
+  });
+
+  it('emits the CARGO_CREATED audit log only after the transaction commits, not from inside it', async () => {
+    // Regression: emitAuditLog used to be called from inside the
+    // dataSource.transaction() callback — Kafka would receive the event even
+    // if the commit failed afterward, since emitSafe doesn't participate in
+    // the transaction and can't be rolled back with it.
+    const cargo = makeCargo();
+    repo.findOne!.mockResolvedValue(null);
+    repo.create!.mockReturnValue(cargo);
+    repo.save!.mockResolvedValue(cargo);
+
+    const order: string[] = [];
+    dataSource.transaction.mockImplementation(async (cb: (manager: unknown) => unknown) => {
+      const result = await cb({ getRepository: () => repo });
+      order.push('transaction-committed');
+      return result;
+    });
+    kafkaProducer.emitSafe.mockImplementation(() => order.push('audit-log-emitted'));
+
+    await service.create(cargo.orgId, cargo.departamentoId, cargo.areaId, { name: cargo.name }, 'actor-1');
+
+    expect(order).toEqual(['transaction-committed', 'audit-log-emitted']);
   });
 
   it('throws ConflictException when creating a duplicated cargo', async () => {
