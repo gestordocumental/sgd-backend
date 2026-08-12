@@ -268,21 +268,24 @@ describe('DocumentUploadService', () => {
 
     // Regression: the compensating save() that persists extractionStatus =
     // FAILED used to swallow its own failure silently (`.catch(() => {})`).
-    // If it fails, the DB is left stuck at PROCESSING while the response
-    // claims FAILED, and retryExtraction() would reject any retry attempt
-    // (it requires the persisted status to already be FAILED) — with
-    // nothing in the logs to explain why.
-    it('logs loudly when the compensating save (extractionStatus = FAILED) itself fails after a Kafka failure', async () => {
+    // If it fails, the DB is left stuck at PROCESSING — the response must
+    // not claim FAILED in that case (a status that never made it to the
+    // DB), since retryExtraction() only accepts a retry when the persisted
+    // status is already FAILED; claiming FAILED here would mislead the
+    // caller into believing a retry is possible when it isn't yet.
+    it('does not claim FAILED when the compensating save itself fails — reports the truly persisted PROCESSING status instead, and logs loudly', async () => {
       const doc = makeDoc();
       (doc.save as jest.Mock)
-        .mockResolvedValueOnce(undefined) // Step 2's normal persist
+        .mockResolvedValueOnce(undefined) // Step 2's normal persist (leaves PROCESSING durably in the DB)
         .mockRejectedValueOnce(new Error('DB down')); // the compensating save in the catch block
       const { model, storage, kafka, logger, clamav } = makeDeps(doc);
       kafka.emit.mockRejectedValue(new Error('Kafka down'));
       const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
-      await expect(service.upload('org-1', doc.id, makeFile())).resolves.toBeDefined();
+      const result = await service.upload('org-1', doc.id, makeFile());
 
+      expect(result.extractionStatus).toBe(ExtractionStatus.PROCESSING);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining(`Failed to persist extractionStatus=FAILED for typology ${doc.id}`),
         expect.any(String),
@@ -606,13 +609,14 @@ describe('DocumentUploadService', () => {
 
     // Regression: same root cause as the equivalent upload() test above —
     // the compensating save() that persists extractionStatus = FAILED used
-    // to swallow its own failure silently.
-    it('logs loudly when the compensating save (extractionStatus = FAILED) itself fails after a Kafka failure', async () => {
+    // to swallow its own failure silently. The returned DTO must not claim
+    // FAILED when that never made it to the DB.
+    it('does not claim FAILED when the compensating save itself fails — reports the truly persisted PROCESSING status instead, and logs loudly', async () => {
       const oldDoc = makeDoc();
       const newDoc = makeDoc({ id: makeId() });
       (newDoc.save as jest.Mock)
         .mockResolvedValueOnce(undefined) // Step 2: create as ACTIVE
-        .mockResolvedValueOnce(undefined) // Step 4: persist documento
+        .mockResolvedValueOnce(undefined) // Step 4: persist documento (leaves PROCESSING durably in the DB)
         .mockRejectedValueOnce(new Error('DB down')); // the compensating save in Step 5's catch block
 
       const FullModel: any = function () { return newDoc; };
@@ -624,9 +628,10 @@ describe('DocumentUploadService', () => {
       const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
-      await expect(
-        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
-      ).resolves.toBeDefined();
+      const result = await service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' });
+
+      expect(result.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
+      expect(newDoc.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
 
       const newTypologyId = (newDoc._id as { toString(): string }).toString();
       expect(logger.error).toHaveBeenCalledWith(
@@ -780,6 +785,66 @@ describe('DocumentUploadService', () => {
       const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
       await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
+    });
+
+    // ── Recovery path for a typology stuck in PROCESSING (STUCK_EXTRACTION_THRESHOLD_MS) ──
+    // Without this, a typology whose compensating write (see upload()/
+    // createNewVersion()) failed to persist FAILED after a Kafka emit
+    // failure was left permanently stuck: retryExtraction() only ever
+    // accepted FAILED, so nothing could unblock it via the API.
+
+    it('allows a retry when PROCESSING has been stuck longer than the threshold', async () => {
+      const doc = makeDoc({
+        documento: {
+          r2Key:            'org/org-1/typologies/file.pdf',
+          originalName:     'file.pdf',
+          mimeType:         PDF_MIME,
+          uploadedAt:       new Date(Date.now() - 20 * 60 * 1000), // 20 min ago > 15 min threshold
+          extractionStatus: ExtractionStatus.PROCESSING,
+        },
+      });
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      const result = await service.retryExtraction('org-1', doc.id);
+
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
+      expect(kafka.emit).toHaveBeenCalled();
+      expect(result).toEqual({ message: 'Extracción reencolada.', extractionStatus: ExtractionStatus.PROCESSING });
+    });
+
+    it('still rejects PROCESSING that has not yet crossed the stuck threshold', async () => {
+      const doc = makeDoc({
+        documento: {
+          r2Key:            'org/org-1/typologies/file.pdf',
+          originalName:     'file.pdf',
+          mimeType:         PDF_MIME,
+          uploadedAt:       new Date(Date.now() - 5 * 60 * 1000), // 5 min ago < 15 min threshold
+          extractionStatus: ExtractionStatus.PROCESSING,
+        },
+      });
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
+      expect(kafka.emit).not.toHaveBeenCalled();
+    });
+
+    it('rejects PROCESSING with no uploadedAt to measure staleness against, rather than assuming it is stuck', async () => {
+      const doc = makeDoc({
+        documento: {
+          r2Key:            'org/org-1/typologies/file.pdf',
+          originalName:     'file.pdf',
+          mimeType:         PDF_MIME,
+          uploadedAt:       null,
+          extractionStatus: ExtractionStatus.PROCESSING,
+        },
+      });
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
+      expect(kafka.emit).not.toHaveBeenCalled();
     });
   });
 

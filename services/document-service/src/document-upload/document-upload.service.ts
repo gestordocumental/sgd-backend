@@ -48,6 +48,21 @@ function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
 
 @Injectable()
 export class DocumentUploadService {
+  // Bounds how long an extraction may sit in PROCESSING before a manual
+  // retry is allowed to interrupt it. Normally extraction completes within
+  // seconds/low minutes; anything stuck longer than this is treated as
+  // abandoned — whether because Kafka never delivered the event, the
+  // extraction consumer crashed mid-run, or upload()'s/createNewVersion()'s
+  // own compensating write (meant to flip this to FAILED on a Kafka
+  // failure) itself failed to persist. That last case used to leave a
+  // typology PERMANENTLY stuck: retryExtraction() only ever accepted
+  // FAILED, so once the compensating write failed too, nothing could ever
+  // unblock it via the API. Anchored to documento.uploadedAt rather than a
+  // dedicated "extraction started at" field — good enough since
+  // retryExtraction() is a deliberate, infrequent admin action, not
+  // something that fires automatically and races itself.
+  private static readonly STUCK_EXTRACTION_THRESHOLD_MS = 15 * 60 * 1000;
+
   constructor(
     @InjectModel(Typology.name)
     private readonly model: Model<TypologyDocument>,
@@ -162,16 +177,21 @@ export class DocumentUploadService {
         'DocumentUploadService',
       );
       typology.documento.extractionStatus = ExtractionStatus.FAILED;
-      await typology.save().catch((saveErr: unknown) => {
+      const persisted = await typology.save().then(() => true).catch((saveErr: unknown) => {
         this.logger.error(
           `Failed to persist extractionStatus=FAILED for typology ${typologyId} after the Kafka emit ` +
-            'failure above — the DB still shows PROCESSING, so the response will claim FAILED while ' +
-            'retryExtraction() rejects a retry attempt (it requires the persisted status to already be ' +
-            `FAILED) until this is fixed manually. Cause: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
+            'failure above — the DB still shows PROCESSING. Blocked: retryExtraction() requires the ' +
+            `persisted status to already be FAILED. Cause: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
           saveErr instanceof Error ? saveErr.stack : undefined,
           'DocumentUploadService',
         );
+        return false;
       });
+      // Never claim a status that didn't actually make it to the DB — revert
+      // the in-memory value back to what's really persisted (PROCESSING,
+      // from Step 2's earlier successful save) so the response below and
+      // any other reader agree with reality instead of an aspiration.
+      if (!persisted) typology.documento.extractionStatus = ExtractionStatus.PROCESSING;
     }
 
     // Step 4: Delete the previous file — safe regardless of Step 3's outcome,
@@ -370,16 +390,21 @@ export class DocumentUploadService {
         'DocumentUploadService',
       );
       newDoc.documento.extractionStatus = ExtractionStatus.FAILED;
-      await newDoc.save().catch((saveErr: unknown) => {
+      const persisted = await newDoc.save().then(() => true).catch((saveErr: unknown) => {
         this.logger.error(
           `Failed to persist extractionStatus=FAILED for new typology version ${newTypologyId} after ` +
-            'the Kafka emit failure above — the DB still shows PROCESSING, so the response will claim ' +
-            'FAILED while retryExtraction() rejects a retry attempt (it requires the persisted status ' +
-            `to already be FAILED) until this is fixed manually. Cause: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
+            'the Kafka emit failure above — the DB still shows PROCESSING. Blocked: retryExtraction() ' +
+            `requires the persisted status to already be FAILED. Cause: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
           saveErr instanceof Error ? saveErr.stack : undefined,
           'DocumentUploadService',
         );
+        return false;
       });
+      // Never claim a status that didn't actually make it to the DB — revert
+      // the in-memory value back to what's really persisted (PROCESSING,
+      // from Step 4's earlier successful save) so the returned DTO agrees
+      // with reality instead of an aspiration.
+      if (!persisted) newDoc.documento.extractionStatus = ExtractionStatus.PROCESSING;
     }
 
     if (dto.actorId) {
@@ -432,9 +457,18 @@ export class DocumentUploadService {
     if (!typology.documento?.r2Key) throw new BadRequestException('Esta tipología no tiene documento cargado');
 
     if (typology.documento.extractionStatus !== ExtractionStatus.FAILED) {
-      throw new BadRequestException(
-        `Solo se puede reintentar cuando la extracción ha fallado. Estado actual: ${typology.documento.extractionStatus}`,
-      );
+      // Recovery path for a typology stuck in PROCESSING with no way back to
+      // FAILED — see STUCK_EXTRACTION_THRESHOLD_MS.
+      const stuckInProcessing =
+        typology.documento.extractionStatus === ExtractionStatus.PROCESSING &&
+        !!typology.documento.uploadedAt &&
+        Date.now() - typology.documento.uploadedAt.getTime() > DocumentUploadService.STUCK_EXTRACTION_THRESHOLD_MS;
+
+      if (!stuckInProcessing) {
+        throw new BadRequestException(
+          `Solo se puede reintentar cuando la extracción ha fallado. Estado actual: ${typology.documento.extractionStatus}`,
+        );
+      }
     }
 
     typology.documento.extractionStatus = ExtractionStatus.PROCESSING;

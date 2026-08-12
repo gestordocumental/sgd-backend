@@ -52,8 +52,15 @@ describe('StructureLeasesService', () => {
     // could then be comparing against a clock that's skewed ahead —
     // treating a still-in-flight lease as already expired and letting the
     // delete proceed exactly while the write it should block is in flight.
-    // Anchoring to Postgres's own now() removes that skew.
-    it('inserts via Postgres now() rather than this process\'s Date.now(), with a null requestedBy by default', async () => {
+    // Anchoring to Postgres's own clock removes that skew.
+    //
+    // Uses clock_timestamp(), not now(): now() is frozen at the
+    // transaction's BEGIN, but this insert runs after resolveStructureById()
+    // already waited on a FOR SHARE lock — using now() could insert a lease
+    // whose TTL is already partly (or, past 30s of cumulative wait,
+    // entirely) eaten by time that elapsed before the row even exists.
+    // clock_timestamp() reflects the actual instant this statement runs.
+    it('inserts via Postgres clock_timestamp() rather than this process\'s Date.now(), with a null requestedBy by default', async () => {
       randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.5); // above SWEEP_PROBABILITY — no sweep
 
       await service.reserve(manager, 'org-1', 'departamento', 'dept-1');
@@ -70,7 +77,7 @@ describe('StructureLeasesService', () => {
       );
       const values = managerQb.values.mock.calls[0][0] as { expiresAt: () => string };
       expect(typeof values.expiresAt).toBe('function');
-      expect(values.expiresAt()).toBe("now() + interval '30000 milliseconds'");
+      expect(values.expiresAt()).toBe("clock_timestamp() + interval '30000 milliseconds'");
       expect(managerQb.execute).toHaveBeenCalled();
     });
 
@@ -88,14 +95,14 @@ describe('StructureLeasesService', () => {
     // table only shrinks via this opportunistic sweep, so it must actually
     // fire (on the fraction of calls it's supposed to) or structure_leases
     // grows unboundedly under sustained traffic.
-    it('sweeps expired leases (via Postgres now()) when the random roll lands under SWEEP_PROBABILITY', async () => {
+    it('sweeps expired leases (via Postgres clock_timestamp()) when the random roll lands under SWEEP_PROBABILITY', async () => {
       randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.01); // 0.01 < 0.02
 
       await service.reserve(manager, 'org-1', 'area', 'area-1');
 
       expect(repo.createQueryBuilder).toHaveBeenCalledWith('lease');
       expect(repoQb.delete).toHaveBeenCalled();
-      expect(repoQb.where).toHaveBeenCalledWith('lease.expiresAt < now()');
+      expect(repoQb.where).toHaveBeenCalledWith('lease.expiresAt < clock_timestamp()');
       expect(repoQb.execute).toHaveBeenCalled();
     });
 
@@ -109,7 +116,7 @@ describe('StructureLeasesService', () => {
   });
 
   describe('countActive()', () => {
-    it('counts leases scoped to the given structureType/structureId, comparing against Postgres now()', async () => {
+    it('counts leases scoped to the given structureType/structureId, comparing against Postgres clock_timestamp()', async () => {
       repoQb.getCount.mockResolvedValue(2);
 
       const result = await service.countActive(manager, 'cargo', 'cargo-1');
@@ -118,7 +125,7 @@ describe('StructureLeasesService', () => {
       expect(repo.createQueryBuilder).toHaveBeenCalledWith('lease');
       expect(repoQb.where).toHaveBeenCalledWith('lease.structureType = :structureType', { structureType: 'cargo' });
       expect(repoQb.andWhere).toHaveBeenCalledWith('lease.structureId = :structureId', { structureId: 'cargo-1' });
-      expect(repoQb.andWhere).toHaveBeenCalledWith('lease.expiresAt > now()');
+      expect(repoQb.andWhere).toHaveBeenCalledWith('lease.expiresAt > clock_timestamp()');
     });
 
     it('returns 0 when there are no active leases', async () => {

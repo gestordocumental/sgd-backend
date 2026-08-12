@@ -33,17 +33,31 @@ export class StructureLeasesService {
    * Occasionally piggybacks a best-effort purge of expired leases — see
    * SWEEP_PROBABILITY.
    *
-   * expiresAt is computed by Postgres (`now() + interval ...`), not by this
-   * process's own clock: org-service runs as multiple instances, and
-   * countActive() below runs in whichever instance handles the delete
-   * request — a different process than the one that reserved the lease. If
-   * expiresAt were computed from this process's Date.now() and compared
-   * against another process's new Date() in countActive(), clock skew
-   * between instances could make a still-in-flight lease look expired
-   * (deleting instance's clock ahead of the reserving one) — remove()
-   * would then proceed exactly while the write it's supposed to be
-   * blocking is still in flight, defeating the whole point of the lease.
-   * Anchoring both sides to the DB's own clock removes that skew entirely.
+   * expiresAt is computed by Postgres, not by this process's own clock:
+   * org-service runs as multiple instances, and countActive() below runs in
+   * whichever instance handles the delete request — a different process
+   * than the one that reserved the lease. If expiresAt were computed from
+   * this process's Date.now() and compared against another process's new
+   * Date() in countActive(), clock skew between instances could make a
+   * still-in-flight lease look expired (deleting instance's clock ahead of
+   * the reserving one) — remove() would then proceed exactly while the
+   * write it's supposed to be blocking is still in flight, defeating the
+   * whole point of the lease. Anchoring both sides to the DB's own clock
+   * removes that skew entirely.
+   *
+   * Uses `clock_timestamp()`, not `now()`: inside a transaction, Postgres's
+   * `now()` is frozen at the transaction's BEGIN, not the moment the
+   * statement actually runs. This method's own transaction (opened by
+   * resolveStructureById()) takes `FOR SHARE` locks before reaching this
+   * insert, and remove()'s transaction takes `FOR UPDATE` before reaching
+   * countActive()/sweepExpired() — either can genuinely wait on lock
+   * contention. With `now()`, a long-enough wait would insert a lease whose
+   * TTL is already partly (or, past 30s of cumulative wait, entirely)
+   * eaten by time that already elapsed before the row even exists, and
+   * would compare countActive()'s check against a stale "now" from before
+   * the wait — letting an already-expired lease still read as active, or a
+   * freshly-inserted one read as expired. `clock_timestamp()` reflects the
+   * actual wall-clock instant each statement runs, immune to both.
    */
   async reserve(
     manager: EntityManager,
@@ -61,7 +75,7 @@ export class StructureLeasesService {
         structureType,
         structureId,
         requestedBy: requestedBy ?? null,
-        expiresAt: () => `now() + interval '${StructureLeasesService.LEASE_TTL_MS} milliseconds'`,
+        expiresAt: () => `clock_timestamp() + interval '${StructureLeasesService.LEASE_TTL_MS} milliseconds'`,
       })
       .execute();
 
@@ -77,7 +91,7 @@ export class StructureLeasesService {
       .createQueryBuilder('lease')
       .where('lease.structureType = :structureType', { structureType })
       .andWhere('lease.structureId = :structureId', { structureId })
-      .andWhere('lease.expiresAt > now()')
+      .andWhere('lease.expiresAt > clock_timestamp()')
       .getCount();
   }
 
@@ -86,7 +100,7 @@ export class StructureLeasesService {
       .getRepository(StructureLease)
       .createQueryBuilder('lease')
       .delete()
-      .where('lease.expiresAt < now()')
+      .where('lease.expiresAt < clock_timestamp()')
       .execute();
   }
 }
