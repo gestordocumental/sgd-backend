@@ -88,9 +88,20 @@ async function main() {
 
     console.log(`Found ${groups.length} (orgId, codigo) group(s) with duplicate ACTIVE typologies:\n`);
 
+    // updatedAt is preferred, but a tie (or a legacy record missing it) can't be left to
+    // resolve as an arbitrary/NaN comparison — that could pick the wrong copy to keep.
+    // Fall back to createdAt, then to _id (which is itself chronological in Mongo) so the
+    // ordering is always fully determined.
+    const rank = (d: { updatedAt: Date; createdAt: Date }): number => {
+      const updated = new Date(d.updatedAt).getTime();
+      if (!Number.isNaN(updated)) return updated;
+      const created = new Date(d.createdAt).getTime();
+      return Number.isNaN(created) ? 0 : created;
+    };
+
     for (const group of groups) {
       const sorted = [...group.docs].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        (a, b) => rank(b) - rank(a) || b._id.toString().localeCompare(a._id.toString()),
       );
       const [keep, ...rest] = sorted;
 
