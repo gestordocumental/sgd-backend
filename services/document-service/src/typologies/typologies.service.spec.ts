@@ -74,6 +74,7 @@ function makeModel(docOrNull: TypologyDocument | null = null) {
   });
   Model.find     = jest.fn().mockReturnValue({ sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue([]) });
   Model.updateOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }) });
+  Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 1 }) });
   Model.countDocuments = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(0) });
   Model.syncIndexes = jest.fn().mockResolvedValue([]);
   return { Model, instance };
@@ -150,6 +151,89 @@ describe('TypologiesService', () => {
         service.resolveDiscrepancy('org-1', instance.id, { action: ResolveAction.ADOPT_EXTRACTED }),
       ).rejects.toThrow(ServiceUnavailableException);
       expect(instance.save).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── reconcilePendingVersionTransitions (private, called from onModuleInit) ──
+  // Repairs DocumentUploadService.createNewVersion()'s archive-old/create-new
+  // sequence when a process crash left a typology ARCHIVED with a pending
+  // marker and no confirmed ACTIVE replacement — see PendingVersionTransition
+  // in typology.schema.ts.
+
+  describe('reconcilePendingVersionTransitions() (via onModuleInit)', () => {
+    it('does nothing when no typology has a pending version transition', async () => {
+      const { Model } = makeModel(); // default find() → []
+      const service = makeService(Model);
+
+      await service.onModuleInit();
+
+      expect(Model.find).toHaveBeenCalledWith({ pendingVersionTransition: { $ne: null } });
+    });
+
+    it('clears the marker without touching typologyStatus when the new version was already fully written', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      // "fully written" — findOne() with documento.r2Key: { $ne: null } finds it.
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ id: 'new-1' })) });
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) });
+
+      const service = makeService(Model);
+      await service.onModuleInit();
+
+      expect(Model.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: 'new-1', 'documento.r2Key': { $ne: null } }),
+      );
+      expect(stuckDoc.pendingVersionTransition).toBeNull();
+      expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED); // untouched — the new version really is the active one
+      expect(stuckDoc.save).toHaveBeenCalled();
+      expect(Model.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('restores old to ACTIVE and discards the partial new version when it was never fully written', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }); // never fully written
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 1 }) });
+
+      const service = makeService(Model);
+      await service.onModuleInit();
+
+      expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
+      expect(stuckDoc.pendingVersionTransition).toBeNull();
+      expect(stuckDoc.save).toHaveBeenCalled();
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+    });
+
+    it('logs and reports to Sentry instead of throwing when reconciling one typology fails, without blocking startup', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      (stuckDoc.save as jest.Mock).mockRejectedValue(new Error('DB down'));
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) });
+
+      const service = makeService(Model);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to reconcile pending version transition'),
+        expect.any(String),
+        'TypologiesService',
+      );
     });
   });
 

@@ -106,6 +106,80 @@ export class TypologiesService implements OnModuleInit {
         'TypologiesService',
       );
     }
+
+    await this.reconcilePendingVersionTransitions();
+  }
+
+  /**
+   * Repairs DocumentUploadService.createNewVersion() transitions left
+   * incomplete by a process crash between archiving the old typology and
+   * the new one being fully written — see PendingVersionTransition's
+   * docstring in typology.schema.ts for the full reasoning. Runs once at
+   * startup: no cron/scheduler infra exists anywhere in this codebase, and
+   * a crashed instance restarting is exactly the moment a stuck transition
+   * is most likely to exist, so this is the natural place for it rather
+   * than adding new infrastructure.
+   *
+   * At startup nothing has accepted traffic yet, so any marker found here
+   * cannot belong to an operation that's still legitimately in flight — its
+   * presence alone means the normal completion path (which always clears
+   * it, on both success and every rollback branch) never ran.
+   */
+  private async reconcilePendingVersionTransitions(): Promise<void> {
+    const stuck = await this.model.find({ pendingVersionTransition: { $ne: null } }).exec();
+    for (const doc of stuck) {
+      const newTypologyId = doc.pendingVersionTransition?.newTypologyId;
+      try {
+        // Fully written == documento.r2Key set — the same signal
+        // createNewVersion() itself uses to decide the transition
+        // succeeded. If true, the crash only hit the marker-clear step
+        // afterwards; the new version is real and must be left alone.
+        const newDocFullyWritten = newTypologyId
+          ? await this.model.findOne({
+              _id: newTypologyId,
+              orgId: doc.orgId,
+              deletedAt: null,
+              'documento.r2Key': { $ne: null },
+            }).exec()
+          : null;
+
+        if (newDocFullyWritten) {
+          doc.pendingVersionTransition = null;
+          await doc.save();
+          this.logger.log(
+            `Cleared a stale version-transition marker on typology ${doc.id}; new version ` +
+              `${newTypologyId} was already fully written — nothing else to do.`,
+            'TypologiesService',
+          );
+        } else {
+          doc.typologyStatus = TypologyStatus.ACTIVE;
+          doc.pendingVersionTransition = null;
+          await doc.save();
+          if (newTypologyId) {
+            await this.model.deleteOne({ _id: newTypologyId, orgId: doc.orgId }).exec().catch(() => {});
+          }
+          Sentry.captureMessage(
+            `Reconciled an interrupted typology version transition on startup: ${doc.id}`,
+            'warning',
+          );
+          this.logger.warn(
+            `Reconciled an interrupted version transition on startup — restored typology ${doc.id} to ` +
+              `ACTIVE (the pending new version ${newTypologyId ?? '(unknown)'} never finished writing). ` +
+              'If a file was uploaded to storage for the discarded attempt, it is orphaned there — ' +
+              'harmless (no longer referenced by any document) but not automatically cleaned up.',
+            'TypologiesService',
+          );
+        }
+      } catch (err) {
+        Sentry.captureException(err);
+        this.logger.error(
+          `Failed to reconcile pending version transition on typology ${doc.id}; it may still be ` +
+            'stuck ARCHIVED with no active replacement. Needs manual intervention.',
+          err instanceof Error ? err.stack : String(err),
+          'TypologiesService',
+        );
+      }
+    }
   }
 
   /**

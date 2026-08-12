@@ -90,9 +90,34 @@ function makeDoc(overrides: Record<string, any> = {}): TypologyDocument {
   } as unknown as TypologyDocument;
 }
 
+// Mirrors DocumentUploadService's own STUCK_EXTRACTION_THRESHOLD_MS (not
+// exported — this is the retry-eligibility window, not a magic number).
+const STUCK_EXTRACTION_THRESHOLD_MS = 15 * 60 * 1000;
+
 function makeDeps(doc: TypologyDocument | null = null) {
   const model: any = {
     findOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) }),
+    // Simulates retryExtraction()'s atomic conditional claim: matches (and
+    // mutates, like a real findOneAndUpdate(..., { new: true })) only when
+    // `doc` is currently retriable (FAILED, or PROCESSING stuck past the
+    // threshold) — otherwise resolves null, same as a real update matching
+    // zero documents. Mutating the same shared `doc` reference is what
+    // makes the "reject an immediate second retry" regression test work:
+    // the second call re-evaluates the first call's own mutation.
+    findOneAndUpdate: jest.fn().mockReturnValue({
+      exec: jest.fn().mockImplementation(async () => {
+        if (!doc) return null;
+        const { extractionStatus, extractionStartedAt } = doc.documento;
+        const stuck =
+          extractionStatus === ExtractionStatus.PROCESSING &&
+          !!extractionStartedAt &&
+          Date.now() - extractionStartedAt.getTime() > STUCK_EXTRACTION_THRESHOLD_MS;
+        if (extractionStatus !== ExtractionStatus.FAILED && !stuck) return null;
+        doc.documento.extractionStatus = ExtractionStatus.PROCESSING;
+        doc.documento.extractionStartedAt = new Date();
+        return doc;
+      }),
+    }),
   };
   const storage = {
     upload:              jest.fn().mockResolvedValue(undefined),
@@ -367,6 +392,70 @@ describe('DocumentUploadService', () => {
       expect(kafka.emit).toHaveBeenCalled();
     });
 
+    // ── Pending-transition marker (crash recovery — see PendingVersionTransition
+    // in typology.schema.ts and TypologiesService.reconcilePendingVersionTransitions()) ──
+    // archive-old/create-new are two separate MongoDB writes (this deployment's
+    // Mongo runs standalone, not a replica set, so no multi-document
+    // transaction is available) — the marker is what makes a process crash
+    // between them recoverable at the next service startup.
+
+    it('sets the pending-transition marker on old in the same write that archives it, naming newDoc\'s pre-generated _id', async () => {
+      const oldDoc = makeDoc();
+      const newDoc = makeDoc({ id: makeId() });
+      const saveSnapshots: Array<{ typologyStatus: TypologyStatus; pendingVersionTransition: { newTypologyId: string } | null }> = [];
+      (oldDoc.save as jest.Mock).mockImplementation(async () => {
+        saveSnapshots.push({
+          typologyStatus: oldDoc.typologyStatus,
+          pendingVersionTransition: oldDoc.pendingVersionTransition
+            ? { ...(oldDoc.pendingVersionTransition as { newTypologyId: string }) }
+            : null,
+        });
+      });
+
+      let capturedArgs: any;
+      const FullModel: any = function (args: any) {
+        capturedArgs = args;
+        return newDoc;
+      };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
+      const logger  = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' });
+
+      // First old.save() call = Step 1 — archive + marker, atomically together.
+      expect(saveSnapshots[0].typologyStatus).toBe(TypologyStatus.ARCHIVED);
+      expect(saveSnapshots[0].pendingVersionTransition?.newTypologyId).toBe(
+        (capturedArgs._id as { toString(): string }).toString(),
+      );
+      // newDoc itself was constructed with that same pre-generated _id.
+      expect(capturedArgs._id).toBeDefined();
+    });
+
+    it('clears the pending-transition marker on old once newDoc is fully written (before the Kafka emit)', async () => {
+      const oldDoc = makeDoc();
+      const newDoc = makeDoc({ id: makeId() });
+
+      const FullModel: any = function () { return newDoc; };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn().mockResolvedValue(undefined), emitSafe: jest.fn() };
+      const logger  = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' });
+
+      expect(oldDoc.pendingVersionTransition).toBeNull();
+      // archive (marker set) + clear-marker = 2 calls minimum on old.save().
+      expect((oldDoc.save as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
     it('trims nombre/version from raw multipart fields before persisting the new version', async () => {
       const oldDoc = makeDoc({
         datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
@@ -553,6 +642,10 @@ describe('DocumentUploadService', () => {
       expect(oldDoc.typologyStatus).toBe(TypologyStatus.ACTIVE); // restored
       expect(oldDoc.save).toHaveBeenCalledTimes(2); // archive, then restore
       expect(storage.upload).not.toHaveBeenCalled();
+      // restoreOldActive() must also clear the pending-transition marker set
+      // in Step 1 — otherwise a later startup reconciliation sweep would
+      // find this already-healthy typology and wrongly try to "fix" it again.
+      expect(oldDoc.pendingVersionTransition).toBeNull();
     });
 
     it('deletes newDoc and restores old to ACTIVE when the file upload fails', async () => {
@@ -633,9 +726,13 @@ describe('DocumentUploadService', () => {
       expect(result.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
       expect(newDoc.documento.extractionStatus).toBe(ExtractionStatus.PROCESSING);
 
-      const newTypologyId = (newDoc._id as { toString(): string }).toString();
+      // Not asserting the exact id here — createNewVersion() now pre-generates
+      // newDoc's _id itself (see the dedicated "threads the pre-generated _id"
+      // test below), and this fake FullModel constructor doesn't echo
+      // constructor args back onto newDoc, so newDoc._id in this test double
+      // is unrelated to what production code actually passed in.
       expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining(`Failed to persist extractionStatus=FAILED for new typology version ${newTypologyId}`),
+        expect.stringContaining('Failed to persist extractionStatus=FAILED for new typology version'),
         expect.any(String),
         'DocumentUploadService',
       );
@@ -733,9 +830,10 @@ describe('DocumentUploadService', () => {
     // retryExtraction() call also gets rejected.
     it('logs loudly when the compensating save (extractionStatus = FAILED) itself fails after a Kafka failure', async () => {
       const doc = makeFailedDoc();
-      (doc.save as jest.Mock)
-        .mockResolvedValueOnce(undefined) // sets PROCESSING before emitting
-        .mockRejectedValueOnce(new Error('DB down')); // the compensating save in the catch block
+      // The claim to PROCESSING is now the atomic findOneAndUpdate() (mocked
+      // above, doesn't call doc.save()) — the only remaining doc.save() call
+      // in this flow is the compensating revert-to-FAILED one below.
+      (doc.save as jest.Mock).mockRejectedValueOnce(new Error('DB down'));
       const { model, storage, kafka, logger, clamav } = makeDeps(doc);
       kafka.emit.mockRejectedValue(new Error('Kafka down'));
       const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
@@ -878,6 +976,31 @@ describe('DocumentUploadService', () => {
       // an immediate second call must NOT see it as stuck anymore.
       await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
       expect(kafka.emit).toHaveBeenCalledTimes(1); // no second emit
+    });
+
+    // Regression: the precondition check and the claim used to be a plain
+    // read-then-save, not atomic — two concurrent retryExtraction() calls
+    // could both load the same FAILED state, both pass the in-memory check,
+    // and both save()+emit (a genuine double-fire, distinct from the
+    // sequential-retry case above). The atomic findOneAndUpdate() filter is
+    // what actually closes this: only one of two racing calls can
+    // match-and-claim in the same operation.
+    it('when two retryExtraction() calls race on the same typology, only one succeeds and exactly one Kafka event is emitted', async () => {
+      const doc = makeFailedDoc();
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      const [first, second] = await Promise.allSettled([
+        service.retryExtraction('org-1', doc.id),
+        service.retryExtraction('org-1', doc.id),
+      ]);
+
+      const fulfilled = [first, second].filter((r) => r.status === 'fulfilled');
+      const rejected  = [first, second].filter((r) => r.status === 'rejected');
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(BadRequestException);
+      expect(kafka.emit).toHaveBeenCalledTimes(1);
     });
   });
 

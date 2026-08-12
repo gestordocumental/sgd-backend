@@ -132,6 +132,35 @@ class MetadataExtraida {
   discrepancias!: Discrepancia[];
 }
 
+/**
+ * Recovery marker for DocumentUploadService.createNewVersion()'s
+ * archive-old/create-new sequence — two separate MongoDB writes, not one
+ * atomic transaction (this deployment's MongoDB runs standalone, not as a
+ * replica set, so multi-document transactions aren't available). If the
+ * process crashes between them, `old` is left ARCHIVED with no ACTIVE
+ * replacement and nothing left running to catch it in a try/catch.
+ *
+ * Set on `old` in the SAME write that archives it (before `newDoc` exists),
+ * naming the pre-generated id `newDoc` will be created with. Cleared on
+ * `old` once `newDoc` is confirmed fully written (has `documento.r2Key`
+ * set) — or, on any rollback path, once `old` has been restored to ACTIVE.
+ * TypologiesService.reconcilePendingVersionTransitions() sweeps for any
+ * marker still present at the next service startup (no cron/scheduler
+ * infra exists in this codebase; a crashed instance restarting is exactly
+ * when a stuck transition is most likely to exist) and repairs it: if
+ * `newTypologyId` turns out to be fully written after all (crash only hit
+ * the marker-clear step), just clears the marker; otherwise restores `old`
+ * to ACTIVE and discards whatever partial `newDoc` exists.
+ */
+@Schema({ _id: false })
+class PendingVersionTransition {
+  @Prop({ required: true })
+  newTypologyId!: string;
+
+  @Prop({ required: true })
+  startedAt!: Date;
+}
+
 @Schema({ timestamps: true, collection: 'typologies' })
 export class Typology {
   /** Cross-service reference — no FK */
@@ -169,6 +198,9 @@ export class Typology {
 
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;
+
+  @Prop({ type: PendingVersionTransition, default: null })
+  pendingVersionTransition!: PendingVersionTransition | null;
 }
 
 export const TypologySchema = SchemaFactory.createForClass(Typology);

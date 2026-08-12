@@ -229,6 +229,7 @@ export class DocumentUploadService {
    */
   private async restoreOldActive(old: TypologyDocument, typologyId: string): Promise<void> {
     old.typologyStatus = TypologyStatus.ACTIVE;
+    old.pendingVersionTransition = null;
     const restored = await old.save().then(() => true).catch(() => false);
     if (!restored) {
       this.logger.error(
@@ -288,19 +289,31 @@ export class DocumentUploadService {
     const codigo  = old.datosDeclarados.codigo;
     const hasDeclaredData = !!(nombre && codigo && version);
 
+    // Pre-generated so it can be named in old's pending-transition marker
+    // (Step 1) before newDoc itself is created (Step 2) — see
+    // PendingVersionTransition's docstring for why this two-write sequence
+    // needs one at all.
+    const newTypologyObjectId = new Types.ObjectId();
+    const newTypologyId = newTypologyObjectId.toString();
+
     // Step 1: Archive old FIRST — it shares codigo with the new doc, and the
     // unique-active-codigo index (typology.schema.ts) allows only one ACTIVE
     // document per (orgId, codigo). Creating newDoc as ACTIVE (below) while
     // old was still ACTIVE used to collide with itself on every single-step
     // version bump of an already-complete typology — this was an
     // unconditional failure, not a rare race. If this save fails, nothing
-    // else has happened yet.
+    // else has happened yet. The pending-transition marker is set in this
+    // same single-document write (atomic together with the archive) so a
+    // process crash right after this line has something durable to recover
+    // from — see reconcilePendingVersionTransitions() in TypologiesService.
     old.typologyStatus = TypologyStatus.ARCHIVED;
+    old.pendingVersionTransition = { newTypologyId, startedAt: new Date() };
     await old.save();
 
     // Step 2: Create new typology — now safe to go ACTIVE. If this fails,
     // restore old to ACTIVE so the org is never left without one.
     const newDoc = new this.model({
+      _id: newTypologyObjectId,
       orgId,
       typologyStatus:  hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE,
       fuenteCreacion:  old.fuenteCreacion,
@@ -329,7 +342,6 @@ export class DocumentUploadService {
       throw err;
     }
 
-    const newTypologyId = (newDoc._id as Types.ObjectId).toString();
     const r2Key = `org/${orgId}/typologies/${newTypologyId}/${uuidv4()}.${ext}`;
 
     // Step 3: Upload file — if this fails, delete newDoc and restore old to ACTIVE.
@@ -360,6 +372,25 @@ export class DocumentUploadService {
       await this.restoreOldActive(old, typologyId);
       throw err;
     }
+
+    // newDoc is now fully written (documento.r2Key set) — the transition is
+    // logically complete regardless of Step 5's outcome below (Kafka
+    // delivery is an orthogonal, already-recoverable concern — see
+    // retryExtraction()). Clear old's pending-transition marker so a later
+    // startup reconciliation sweep doesn't need to touch this typology at
+    // all. Best-effort: if this particular save fails, the marker is simply
+    // still present at next startup, where reconcilePendingVersionTransitions()
+    // finds newDoc already fully written and just clears it then — nothing
+    // is lost, this is a pure bookkeeping cleanup, not a correctness gate.
+    old.pendingVersionTransition = null;
+    await old.save().catch((err: unknown) => {
+      this.logger.warn(
+        `Could not clear the pending-transition marker on typology ${typologyId} after new version ` +
+          `${newTypologyId} was fully created; harmless — the next service startup will clear it. ` +
+          `Cause: ${err instanceof Error ? err.message : String(err)}`,
+        'DocumentUploadService',
+      );
+    });
 
     // Step 5: Emit extraction event. Unlike steps 2-4, a failure here does NOT
     // roll back the version bump. producer.send() rejecting doesn't prove the
@@ -454,39 +485,57 @@ export class DocumentUploadService {
   ): Promise<{ message: string; extractionStatus: string }> {
     if (!Types.ObjectId.isValid(typologyId)) throw new BadRequestException('Invalid typology ID');
 
-    const typology = await this.model.findOne({ _id: typologyId, orgId, deletedAt: null }).exec();
-    if (!typology) throw new NotFoundException(`Typology ${typologyId} not found`);
-    if (!typology.documento?.r2Key) throw new BadRequestException('Esta tipología no tiene documento cargado');
+    const existing = await this.model.findOne({ _id: typologyId, orgId, deletedAt: null }).exec();
+    if (!existing) throw new NotFoundException(`Typology ${typologyId} not found`);
+    if (!existing.documento?.r2Key) throw new BadRequestException('Esta tipología no tiene documento cargado');
 
-    if (typology.documento.extractionStatus !== ExtractionStatus.FAILED) {
-      // Recovery path for a typology stuck in PROCESSING with no way back to
-      // FAILED — see STUCK_EXTRACTION_THRESHOLD_MS. Anchored to
-      // extractionStartedAt, NOT uploadedAt: uploadedAt never changes across
-      // retries, so once a file is older than the threshold every PROCESSING
-      // state — including one from a retry that started a second ago — would
-      // always look "stuck" and be re-interruptible, defeating the point of
-      // having a threshold at all. extractionStartedAt is re-claimed below
-      // every time an attempt actually begins, so this only fires for an
-      // attempt that's genuinely been running longer than the threshold.
-      const stuckInProcessing =
-        typology.documento.extractionStatus === ExtractionStatus.PROCESSING &&
-        !!typology.documento.extractionStartedAt &&
-        Date.now() - typology.documento.extractionStartedAt.getTime() > DocumentUploadService.STUCK_EXTRACTION_THRESHOLD_MS;
+    // Claims this attempt with a single atomic conditional update, not a
+    // separate read-then-save: two concurrent retryExtraction() calls could
+    // otherwise both load the same FAILED/stuck-PROCESSING state, both pass
+    // a plain in-memory precondition check, and both save()+emit — a
+    // genuine double-fire, not just a sequential-retry issue (that part was
+    // already closed by re-claiming extractionStartedAt, but only helped
+    // against a second call *after* the first one's save() had already
+    // committed, not two calls racing each other). findOneAndUpdate()'s
+    // filter re-encodes the same precondition (FAILED, or PROCESSING but
+    // stuck past the threshold — see STUCK_EXTRACTION_THRESHOLD_MS) so only
+    // one of two racing calls can match-and-update in the same operation;
+    // Mongo guarantees that atomically at the single-document level, no
+    // transaction/lock needed. `extractionStartedAt: { $ne: null, $lt }`
+    // deliberately excludes null — BSON sorts Null before Date, so a bare
+    // `$lt` would otherwise treat "never started" as "infinitely stuck".
+    const stuckThreshold = new Date(Date.now() - DocumentUploadService.STUCK_EXTRACTION_THRESHOLD_MS);
+    const typology = await this.model.findOneAndUpdate(
+      {
+        _id: typologyId,
+        orgId,
+        deletedAt: null,
+        $or: [
+          { 'documento.extractionStatus': ExtractionStatus.FAILED },
+          {
+            'documento.extractionStatus': ExtractionStatus.PROCESSING,
+            'documento.extractionStartedAt': { $ne: null, $lt: stuckThreshold },
+          },
+        ],
+      },
+      {
+        $set: {
+          'documento.extractionStatus': ExtractionStatus.PROCESSING,
+          'documento.extractionStartedAt': new Date(),
+        },
+      },
+      { new: true },
+    ).exec();
 
-      if (!stuckInProcessing) {
-        throw new BadRequestException(
-          `Solo se puede reintentar cuando la extracción ha fallado. Estado actual: ${typology.documento.extractionStatus}`,
-        );
-      }
+    if (!typology) {
+      // Either genuinely not retriable, or a concurrent call already
+      // claimed it a moment ago — both look the same from here, and both
+      // get the same "try again" message. `existing` is a best-effort,
+      // slightly-stale read only used to describe the state in the message.
+      throw new BadRequestException(
+        `Solo se puede reintentar cuando la extracción ha fallado. Estado actual: ${existing.documento.extractionStatus}`,
+      );
     }
-
-    // Claims this attempt atomically — persisted before the Kafka emit below
-    // — so an immediate second retryExtraction() call sees a fresh
-    // extractionStartedAt and correctly gets rejected instead of also
-    // passing the stuck-check above and re-emitting on top of this attempt.
-    typology.documento.extractionStatus = ExtractionStatus.PROCESSING;
-    typology.documento.extractionStartedAt = new Date();
-    await typology.save();
 
     try {
       await this.kafka.emit(TOPICS.TYPOLOGY_FILE_UPLOADED, {
