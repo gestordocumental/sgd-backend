@@ -1,5 +1,6 @@
 import {
-  Injectable, NotFoundException, ConflictException, BadRequestException, OnModuleInit,
+  Injectable, NotFoundException, ConflictException, BadRequestException,
+  ServiceUnavailableException, OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
@@ -68,6 +69,14 @@ interface OrgStructureNames {
 
 @Injectable()
 export class TypologiesService implements OnModuleInit {
+  // Flipped to false if syncIndexes() (below) can't confirm the
+  // unique-active-codigo index is actually built. assertNoActiveDuplicateCodigo()
+  // fails closed on it — see that method's docstring for why a pre-check
+  // read alone can't safely stand in for the index. No auto-recovery: the
+  // documented remediation is fixing the underlying duplicate data and
+  // restarting the service, which re-runs onModuleInit() and clears this.
+  private codigoUniquenessEnforced = true;
+
   constructor(
     @InjectModel(Typology.name)
     private readonly model: Model<TypologyDocument>,
@@ -86,14 +95,137 @@ export class TypologiesService implements OnModuleInit {
     try {
       await this.model.syncIndexes();
     } catch (err) {
+      this.codigoUniquenessEnforced = false;
       Sentry.captureException(err);
       this.logger.error(
         'Failed to sync typology indexes — the unique-active-codigo constraint may not be enforced. ' +
           'This usually means duplicate ACTIVE typologies already exist for the same (orgId, codigo); ' +
-          'find and resolve them, then restart this service.',
+          'find and resolve them, then restart this service. Blocking typology writes that would rely ' +
+          'on this constraint (create/update/resolveDiscrepancy with a codigo) until then.',
         err instanceof Error ? err.stack : String(err),
         'TypologiesService',
       );
+    }
+
+    await this.reconcilePendingVersionTransitions();
+  }
+
+  /**
+   * Repairs DocumentUploadService.createNewVersion() transitions left
+   * incomplete by a process crash between archiving the old typology and
+   * the new one being fully written — see PendingVersionTransition's
+   * docstring in typology.schema.ts for the full reasoning. Runs once at
+   * startup: no cron/scheduler infra exists anywhere in this codebase, and
+   * a crashed instance restarting is exactly the moment a stuck transition
+   * is most likely to exist, so this is the natural place for it rather
+   * than adding new infrastructure.
+   *
+   * At startup nothing has accepted traffic yet, so any marker found here
+   * cannot belong to an operation that's still legitimately in flight — its
+   * presence alone means the normal completion path (which always clears
+   * it, on both success and every rollback branch) never ran.
+   */
+  private async reconcilePendingVersionTransitions(): Promise<void> {
+    const stuck = await this.model.find({ pendingVersionTransition: { $ne: null } }).exec();
+    for (const doc of stuck) {
+      const newTypologyId = doc.pendingVersionTransition?.newTypologyId;
+      try {
+        // Fully written == documento.r2Key set — the same signal
+        // createNewVersion() itself uses to decide the transition
+        // succeeded. If true, the crash only hit the marker-clear step
+        // afterwards; the new version is real and must be left alone.
+        const newDocFullyWritten = newTypologyId
+          ? await this.model.findOne({
+              _id: newTypologyId,
+              orgId: doc.orgId,
+              deletedAt: null,
+              'documento.r2Key': { $ne: null },
+            }).exec()
+          : null;
+
+        if (newDocFullyWritten) {
+          doc.pendingVersionTransition = null;
+          await doc.save();
+          this.logger.log(
+            `Cleared a stale version-transition marker on typology ${doc.id}; new version ` +
+              `${newTypologyId} was already fully written — nothing else to do.`,
+            'TypologiesService',
+          );
+        } else {
+          doc.typologyStatus = TypologyStatus.ACTIVE;
+          doc.pendingVersionTransition = null;
+          await doc.save();
+          if (newTypologyId) {
+            await this.model.deleteOne({ _id: newTypologyId, orgId: doc.orgId }).exec().catch(() => {});
+          }
+          Sentry.captureMessage(
+            `Reconciled an interrupted typology version transition on startup: ${doc.id}`,
+            'warning',
+          );
+          this.logger.warn(
+            `Reconciled an interrupted version transition on startup — restored typology ${doc.id} to ` +
+              `ACTIVE (the pending new version ${newTypologyId ?? '(unknown)'} never finished writing). ` +
+              'If a file was uploaded to storage for the discarded attempt, it is orphaned there — ' +
+              'harmless (no longer referenced by any document) but not automatically cleaned up.',
+            'TypologiesService',
+          );
+        }
+      } catch (err) {
+        Sentry.captureException(err);
+        this.logger.error(
+          `Failed to reconcile pending version transition on typology ${doc.id}; it may still be ` +
+            'stuck ARCHIVED with no active replacement. Needs manual intervention.',
+          err instanceof Error ? err.stack : String(err),
+          'TypologiesService',
+        );
+      }
+    }
+  }
+
+  /**
+   * Explicit pre-check for "only one ACTIVE typology per (orgId, codigo)".
+   * On its own this is a plain read-then-write: two concurrent requests can
+   * both read "no duplicate" and both proceed to save, so it CANNOT
+   * guarantee the constraint by itself. The actual guarantee comes from
+   * MongoDB's own unique index, enforced atomically at write time
+   * (surfaced here as a caught 11000 error in every write path below) —
+   * this pre-check only exists to turn that into a clean ConflictException
+   * instead of a raw duplicate-key error reaching the caller. Write paths
+   * that skip this explicit check and rely solely on the 11000 catch — as
+   * update()/resolveDiscrepancy() used to — have zero protection once the
+   * index is missing: doc.save() just succeeds, silently leaving two ACTIVE
+   * typologies with the same codigo.
+   *
+   * So if syncIndexes() couldn't confirm the index is actually built
+   * (codigoUniquenessEnforced), this read can no longer be trusted as even
+   * a best-effort check — fail closed instead of silently accepting an
+   * unbounded race window.
+   */
+  private async assertNoActiveDuplicateCodigo(
+    orgId: string,
+    codigo: string | null | undefined,
+    excludeId?: Types.ObjectId,
+  ): Promise<void> {
+    if (!codigo) return;
+    if (!this.codigoUniquenessEnforced) {
+      throw new ServiceUnavailableException({
+        message: 'Typology creation/update is temporarily unavailable: the active-codigo uniqueness constraint could not be verified. Contact an administrator.',
+        errorCode: 'TYPOLOGY_UNIQUENESS_UNAVAILABLE',
+      });
+    }
+    const filter: FilterQuery<TypologyDocument> = {
+      orgId,
+      'datosDeclarados.codigo': codigo,
+      typologyStatus: TypologyStatus.ACTIVE,
+    };
+    if (excludeId) filter._id = { $ne: excludeId };
+    const existing = await this.model.findOne(filter).exec();
+    if (existing) {
+      throw new ConflictException({
+        message: `An active typology with code '${codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+        errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
+        params: { codigo },
+      });
     }
   }
 
@@ -127,21 +259,7 @@ export class TypologiesService implements OnModuleInit {
     source: CreationSource = CreationSource.MANUAL,
     actorId?: string,
   ): Promise<TypologyDocument> {
-    // Explicit pre-check: reject if an ACTIVE typology with the same codigo already exists
-    if (dto.codigo) {
-      const existing = await this.model.findOne({
-        orgId,
-        'datosDeclarados.codigo': dto.codigo,
-        typologyStatus: TypologyStatus.ACTIVE,
-      }).exec();
-      if (existing) {
-        throw new ConflictException({
-          message: `An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
-          errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
-          params: { codigo: dto.codigo },
-        });
-      }
-    }
+    await this.assertNoActiveDuplicateCodigo(orgId, dto.codigo);
 
     const hasDeclaredData = !!(dto.nombre && dto.codigo && dto.version);
 
@@ -251,6 +369,14 @@ export class TypologiesService implements OnModuleInit {
     const hasDeclaredData = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
 
+    if (hasDeclaredData) {
+      await this.assertNoActiveDuplicateCodigo(
+        orgId,
+        doc.datosDeclarados.codigo,
+        doc._id as Types.ObjectId,
+      );
+    }
+
     try {
       const saved = await doc.save();
       if (actorId) {
@@ -345,6 +471,26 @@ export class TypologiesService implements OnModuleInit {
     ).exec();
   }
 
+  /**
+   * Counts non-deleted typologies whose estructuraOrg references the given
+   * departamento/area/cargo — used by org-service to block deleting a
+   * position that a typology still points to. Counts regardless of
+   * typologyStatus (INCOMPLETE/ACTIVE/ARCHIVED all count; only soft-deleted
+   * ones don't) — deletedAt is this service's source of truth for "does this
+   * document still exist", the same convention findOne/findByIdPublic
+   * already use; typologyStatus is a lifecycle field, not an existence one.
+   */
+  countOrgStructureReferences(
+    orgId: string,
+    filters: { departamentoId?: string; areaId?: string; cargoId?: string },
+  ): Promise<number> {
+    const filter: FilterQuery<TypologyDocument> = { orgId, deletedAt: null };
+    if (filters.departamentoId) filter['estructuraOrg.departamentoId'] = filters.departamentoId;
+    if (filters.areaId)         filter['estructuraOrg.areaId']         = filters.areaId;
+    if (filters.cargoId)        filter['estructuraOrg.cargoId']        = filters.cargoId;
+    return this.model.countDocuments(filter).exec();
+  }
+
   /** Finds a typology by ID scoped to an org — used by internal service calls */
   async findByIdPublic(orgId: string, id: string): Promise<TypologyDocument> {
     if (!Types.ObjectId.isValid(id)) {
@@ -413,6 +559,24 @@ export class TypologiesService implements OnModuleInit {
 
     const hasDeclaredData = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
+
+    // Explicit pre-check (see assertNoActiveDuplicateCodigo) — without it this
+    // path had ONLY the 11000 catch below as protection. That matters
+    // specifically here: ADOPT_EXTRACTED is how a user who got blocked at
+    // creation for reusing an already-active codigo, then changed the
+    // declared codigo just to get past that check while keeping the same
+    // document, ends up re-adopting the document's real (colliding) codigo —
+    // this is the main way a duplicate-active-codigo actually gets attempted
+    // post-creation, so it must not depend solely on the DB index being
+    // built (see MGESTDOC-59 / onModuleInit's warning on silent index-sync
+    // failures).
+    if (hasDeclaredData) {
+      await this.assertNoActiveDuplicateCodigo(
+        orgId,
+        doc.datosDeclarados.codigo,
+        doc._id as Types.ObjectId,
+      );
+    }
 
     try {
       const saved = await doc.save();

@@ -4,6 +4,7 @@ import { Org } from './orgs/entities/org.entity';
 import { Departamento } from './org-structure/entities/departamento.entity';
 import { Area } from './org-structure/entities/area.entity';
 import { Cargo } from './org-structure/entities/cargo.entity';
+import { StructureLease } from './org-structure/entities/structure-lease.entity';
 
 const dbPortRaw = process.env.DB_PORT ?? '5432';
 const dbPort = Number.parseInt(dbPortRaw, 10);
@@ -18,7 +19,7 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USERNAME ?? 'postgres',
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME ?? 'org_db',
-  entities: [Org, Departamento, Area, Cargo],
+  entities: [Org, Departamento, Area, Cargo, StructureLease],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
   // 'each' envuelve cada migración en su propia transacción y permite que

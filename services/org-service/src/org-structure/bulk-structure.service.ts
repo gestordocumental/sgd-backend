@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { IsNull, Repository } from "typeorm";
+import { InjectRepository, InjectDataSource } from "@nestjs/typeorm";
+import { DataSource, EntityManager, IsNull, Repository } from "typeorm";
 import * as ExcelJS from "exceljs";
 import { Departamento } from "./entities/departamento.entity";
 import { Area } from "./entities/area.entity";
@@ -20,6 +20,7 @@ import {
 } from "./dto/resolve-structure-response.dto";
 import { AppLogger } from "@sgd/common";
 import { ResolveByIdRequestDto, ResolveByIdResponseDto } from "./dto/resolve-by-id-request.dto";
+import { StructureLeasesService } from "./structure-leases.service";
 
 const MAX_ROWS = 500;
 const MAX_RESOLVE_ITEMS = 500;
@@ -33,6 +34,9 @@ export class BulkStructureService {
     private readonly areaRepo: Repository<Area>,
     @InjectRepository(Cargo)
     private readonly cargoRepo: Repository<Cargo>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
+    private readonly structureLeases: StructureLeasesService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -231,77 +235,101 @@ export class BulkStructureService {
     return { index, departamentoId: dept.id, areaId, cargoId: null };
   }
 
+  /**
+   * Resolves departamentoId/areaId/cargoId to their current names AND, in
+   * the same transaction, claims a short-lived lease on each resolved node
+   * (see StructureLeasesService) — this is the write-side half of the
+   * cross-service TOCTOU fix: document-service/user-service call this right
+   * before persisting a new/changed typology/user reference, and
+   * Departamentos/Areas/CargosService.remove() check for these leases
+   * before soft-deleting. `FOR SHARE` locks are taken in the same
+   * departamento→area→cargo order `create()`'s `findOneLocked()` calls
+   * already use — preserving that order is what keeps this deadlock-free
+   * against concurrent creates/deletes locking the same rows.
+   */
   async resolveStructureById(
     dto: ResolveByIdRequestDto,
   ): Promise<ResolveByIdResponseDto> {
-    const dept = await this.deptRepo.findOne({
-      where: { orgId: dto.orgId, id: dto.departamentoId },
-    });
-    if (!dept) {
-      throw new BadRequestException(
-        `Departamento '${dto.departamentoId}' no encontrado en la organización`,
-      );
-    }
-
-    let areaId: string | null = null;
-    let areaNombre: string | null = null;
-    let cargoId: string | null = null;
-    let cargoNombre: string | null = null;
-
-    if (dto.cargoId && !dto.areaId) {
-      // dept-level cargo (no area)
-      const cargo = await this.cargoRepo.findOne({
-        where: { orgId: dto.orgId, departamentoId: dept.id, areaId: IsNull(), id: dto.cargoId },
+    return this.dataSource.transaction(async (manager) => {
+      const dept = await manager.getRepository(Departamento).findOne({
+        where: { orgId: dto.orgId, id: dto.departamentoId },
+        lock: { mode: 'pessimistic_read' },
       });
-      if (!cargo) {
+      if (!dept) {
         throw new BadRequestException(
-          `Cargo ${await this.cargoErrorLabel(dto.orgId, dto.cargoId)} no encontrado a nivel de departamento '${dept.name}'`,
+          `Departamento '${dto.departamentoId}' no encontrado en la organización`,
         );
       }
-      return {
-        departamentoId: dept.id,
-        departamentoNombre: dept.name,
-        areaId: null,
-        areaNombre: null,
-        cargoId: cargo.id,
-        cargoNombre: cargo.name,
-      };
-    }
 
-    if (dto.areaId) {
-      const area = await this.areaRepo.findOne({
-        where: { orgId: dto.orgId, departamentoId: dept.id, id: dto.areaId },
-      });
-      if (!area) {
-        throw new BadRequestException(
-          `Área '${dto.areaId}' no encontrada en el departamento '${dept.name}'`,
-        );
-      }
-      areaId = area.id;
-      areaNombre = area.name;
+      let areaId: string | null = null;
+      let areaNombre: string | null = null;
+      let cargoId: string | null = null;
+      let cargoNombre: string | null = null;
 
-      if (dto.cargoId) {
-        const cargo = await this.cargoRepo.findOne({
-          where: { orgId: dto.orgId, areaId: area.id, id: dto.cargoId },
+      if (dto.cargoId && !dto.areaId) {
+        // dept-level cargo (no area)
+        const cargo = await manager.getRepository(Cargo).findOne({
+          where: { orgId: dto.orgId, departamentoId: dept.id, areaId: IsNull(), id: dto.cargoId },
+          lock: { mode: 'pessimistic_read' },
         });
         if (!cargo) {
           throw new BadRequestException(
-            `Cargo ${await this.cargoErrorLabel(dto.orgId, dto.cargoId)} no encontrado en el área '${area.name}'`,
+            `Cargo ${await this.cargoErrorLabel(manager, dto.orgId, dto.cargoId)} no encontrado a nivel de departamento '${dept.name}'`,
           );
         }
-        cargoId = cargo.id;
-        cargoNombre = cargo.name;
+        await this.structureLeases.reserve(manager, dto.orgId, 'departamento', dept.id);
+        await this.structureLeases.reserve(manager, dto.orgId, 'cargo', cargo.id);
+        return {
+          departamentoId: dept.id,
+          departamentoNombre: dept.name,
+          areaId: null,
+          areaNombre: null,
+          cargoId: cargo.id,
+          cargoNombre: cargo.name,
+        };
       }
-    }
 
-    return {
-      departamentoId: dept.id,
-      departamentoNombre: dept.name,
-      areaId,
-      areaNombre,
-      cargoId,
-      cargoNombre,
-    };
+      if (dto.areaId) {
+        const area = await manager.getRepository(Area).findOne({
+          where: { orgId: dto.orgId, departamentoId: dept.id, id: dto.areaId },
+          lock: { mode: 'pessimistic_read' },
+        });
+        if (!area) {
+          throw new BadRequestException(
+            `Área '${dto.areaId}' no encontrada en el departamento '${dept.name}'`,
+          );
+        }
+        areaId = area.id;
+        areaNombre = area.name;
+
+        if (dto.cargoId) {
+          const cargo = await manager.getRepository(Cargo).findOne({
+            where: { orgId: dto.orgId, areaId: area.id, id: dto.cargoId },
+            lock: { mode: 'pessimistic_read' },
+          });
+          if (!cargo) {
+            throw new BadRequestException(
+              `Cargo ${await this.cargoErrorLabel(manager, dto.orgId, dto.cargoId)} no encontrado en el área '${area.name}'`,
+            );
+          }
+          cargoId = cargo.id;
+          cargoNombre = cargo.name;
+        }
+      }
+
+      await this.structureLeases.reserve(manager, dto.orgId, 'departamento', dept.id);
+      if (areaId) await this.structureLeases.reserve(manager, dto.orgId, 'area', areaId);
+      if (cargoId) await this.structureLeases.reserve(manager, dto.orgId, 'cargo', cargoId);
+
+      return {
+        departamentoId: dept.id,
+        departamentoNombre: dept.name,
+        areaId,
+        areaNombre,
+        cargoId,
+        cargoNombre,
+      };
+    });
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
@@ -317,8 +345,8 @@ export class BulkStructureService {
    * interpret. Falls back to the raw ID only when the cargo doesn't exist
    * anywhere in the org either.
    */
-  private async cargoErrorLabel(orgId: string, cargoId: string): Promise<string> {
-    const misplaced = await this.cargoRepo.findOne({ where: { orgId, id: cargoId } });
+  private async cargoErrorLabel(manager: EntityManager, orgId: string, cargoId: string): Promise<string> {
+    const misplaced = await manager.getRepository(Cargo).findOne({ where: { orgId, id: cargoId } });
     return misplaced ? `'${misplaced.name}'` : `'${cargoId}'`;
   }
 

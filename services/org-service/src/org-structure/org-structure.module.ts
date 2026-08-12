@@ -4,10 +4,12 @@ import { AppLogger, KafkaModule, InternalGuard } from '@sgd/common';
 import { Departamento } from './entities/departamento.entity';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
+import { StructureLease } from './entities/structure-lease.entity';
 import { DepartamentosService } from './departamentos.service';
 import { AreasService } from './areas.service';
 import { CargosService } from './cargos.service';
 import { BulkStructureService } from './bulk-structure.service';
+import { StructureLeasesService } from './structure-leases.service';
 import { DepartamentosController } from './departamentos.controller';
 import { AreasController } from './areas.controller';
 import { CargosController } from './cargos.controller';
@@ -18,9 +20,16 @@ import { BulkStructureController } from './bulk-structure.controller';
 import { InternalStructureController } from './internal-structure.controller';
 import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
+import { UserClientModule } from '../common/user-client/user-client.module';
+import { DocumentClientModule } from '../common/document-client/document-client.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Departamento, Area, Cargo]), KafkaModule],
+  imports: [
+    TypeOrmModule.forFeature([Departamento, Area, Cargo, StructureLease]),
+    KafkaModule,
+    UserClientModule,
+    DocumentClientModule,
+  ],
   controllers: [
     DepartamentosController,
     AreasController,
@@ -37,6 +46,7 @@ import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
     AreasService,
     CargosService,
     BulkStructureService,
+    StructureLeasesService,
     OrgGuard,
     OrgPermissionsGuard,
     InternalGuard,

@@ -331,6 +331,95 @@ describe('UsersService', () => {
       expect(usersRepo.save).not.toHaveBeenCalled();
     });
 
+    // ── org-structure validation on create (MGESTDOC TOCTOU fix) ────────────
+    // Regression: create() used to persist departamentoId/areaId/cargoId
+    // as-is with zero validation against org-service — unlike update(),
+    // which already called validateOrgStructure(). This also matters for
+    // the cross-service lease mechanism (see org-service's StructureLease):
+    // every write path that persists a new org-structure reference must
+    // call resolve-by-ids first, or a concurrent departamento/area/cargo
+    // deletion can't detect it.
+
+    it('does not call orgClientService.validateOrgStructure when no org-structure fields are provided', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
+    });
+
+    it('calls orgClientService.validateOrgStructure with dto.orgId when departamentoId is provided', async () => {
+      const dto = {
+        email: 'new@example.com', position: 'Developer',
+        orgId: 'org-uuid-1', departamentoId: 'dept-uuid', areaId: 'area-uuid', cargoId: 'cargo-uuid',
+      };
+      const user = makeUser({ email: dto.email });
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(orgClient.validateOrgStructure).toHaveBeenCalledWith(
+        'org-uuid-1', 'dept-uuid', 'area-uuid', 'cargo-uuid',
+      );
+      expect(usersRepo.save).toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException — without persisting the user — when areaId is provided without departamentoId', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1', areaId: 'area-uuid' };
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+      expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
+      expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException — without persisting the user — when departamentoId is provided without dto.orgId or the caller-org param', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', departamentoId: 'dept-uuid' };
+      usersRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+      expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
+      expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
+    // Regression: a regular (non-super-admin) caller's request body doesn't
+    // necessarily echo dto.orgId back — the caller's own org is already
+    // available via the orgId param (e.g. UsersController passes
+    // caller.companyId). Requiring dto.orgId specifically would reject a
+    // perfectly valid create just because the org came from the caller's
+    // context instead of being repeated in the body.
+    it('falls back to the caller-org param when dto.orgId is not set', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', departamentoId: 'dept-uuid', areaId: 'area-uuid' };
+      const user = makeUser({ email: dto.email });
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto, undefined, 'caller-org-uuid');
+
+      expect(orgClient.validateOrgStructure).toHaveBeenCalledWith(
+        'caller-org-uuid', 'dept-uuid', 'area-uuid', undefined,
+      );
+      expect(usersRepo.save).toHaveBeenCalled();
+    });
+
+    it('propagates the rejection from validateOrgStructure and does not persist the user', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1', departamentoId: 'dept-uuid' };
+      usersRepo.findOne.mockResolvedValue(null);
+      orgClient.validateOrgStructure.mockRejectedValue(new BadRequestException('Departamento not found'));
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+      expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
     it('resends invitation when pending user has an active membership in the calling org', async () => {
       const dto = { email: 'pending@example.com', position: 'Dev' };
       const pendingUser = makeUser({
@@ -1893,6 +1982,59 @@ describe('UsersService', () => {
     it('returns empty array when no users match', async () => {
       makeUsersQb([]);
       expect(await service.findByPosition('org-uuid-1', {})).toEqual([]);
+    });
+  });
+
+  // ─── countByPosition ──────────────────────────────────────────────────────
+
+  describe('countByPosition', () => {
+    // Regression coverage: this is what makes countByPosition safe for
+    // org-service's delete-blocking check, unlike findByPosition above —
+    // no inner join to user_org_roles, no is_active filter.
+    function makeCountQb(count: number) {
+      const qb: Record<string, jest.Mock> = {
+        where:    jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(count),
+      };
+      usersRepo.createQueryBuilder.mockReturnValue(qb as any);
+      return qb;
+    }
+
+    it('counts by cargoId without joining user_org_roles or filtering is_active', async () => {
+      // Regression guard: a user with cargo_id set but no active role
+      // assignment (the exact case findByPosition's inner join would miss)
+      // must still be counted — asserting no join/is_active call is the
+      // right level to test that at, since this is a mocked query builder,
+      // not a real DB.
+      const qb = makeCountQb(1);
+
+      const result = await service.countByPosition({ cargoId: 'cargo-uuid' });
+
+      expect(result).toBe(1);
+      expect(qb.where).toHaveBeenCalledWith('u.deleted_at IS NULL');
+      expect(qb.andWhere).toHaveBeenCalledWith('u.cargo_id = :cargoId', { cargoId: 'cargo-uuid' });
+      expect(qb.andWhere).not.toHaveBeenCalledWith(expect.stringContaining('is_active'), expect.anything());
+      expect(qb.andWhere).not.toHaveBeenCalledWith(expect.stringContaining('user_org_roles'), expect.anything());
+      // The mock query builder above doesn't even define innerJoin — calling
+      // it would throw and fail this test, which is the point.
+    });
+
+    it('counts by areaId', async () => {
+      const qb = makeCountQb(2);
+      await service.countByPosition({ areaId: 'area-uuid' });
+      expect(qb.andWhere).toHaveBeenCalledWith('u.area_id = :areaId', { areaId: 'area-uuid' });
+    });
+
+    it('counts by departamentoId', async () => {
+      const qb = makeCountQb(3);
+      await service.countByPosition({ departamentoId: 'dept-uuid' });
+      expect(qb.andWhere).toHaveBeenCalledWith('u.departamento_id = :departamentoId', { departamentoId: 'dept-uuid' });
+    });
+
+    it('returns 0 when nothing matches', async () => {
+      makeCountQb(0);
+      expect(await service.countByPosition({ cargoId: 'missing' })).toBe(0);
     });
   });
 });

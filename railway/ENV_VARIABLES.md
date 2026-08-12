@@ -111,11 +111,13 @@ en Railway para cada entorno (dev / test / prod).
 | `JWT_SECRET_PREV` | *(vacío)* | *(vacío)* | *(vacío)* | Manual |
 | `JWT_SECRET_PREV_KID` | *(vacío)* | *(vacío)* | *(vacío)* | Manual |
 | `INTERNAL_TOKEN_ORG_USER` | `<generar>` | `<generar>` | `<generar>` | Manual |
+| `INTERNAL_TOKEN_ORG_DOC` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `INTERNAL_TOKEN_NOTIF_ORG` | mismo que notification-service | idem | idem | Manual |
 | `INTERNAL_TOKEN_DOC_ORG` | mismo que document-service | idem | idem | Manual |
 | `INTERNAL_TOKEN_USER_ORG` | mismo que user-service | idem | idem | Manual |
 | `INTERNAL_ALLOWED_CIDRS` | `100.64.0.0/10` | `100.64.0.0/10` | `100.64.0.0/10` | Manual |
 | `USER_SERVICE_URL` | `http://user-service.railway.internal:3000` | idem | idem | Manual |
+| `DOCUMENT_SERVICE_URL` | `http://document-service.railway.internal:3000` | idem | idem | Manual |
 | `KAFKA_BROKER` | `kafka.railway.internal:9092` | idem | idem | Manual |
 | `KAFKA_CLIENT_ID` | `org-service` | idem | idem | Manual |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(vacío)* (opc) | *(vacío)* | *(vacío)* | Manual |
@@ -144,6 +146,7 @@ en Railway para cada entorno (dev / test / prod).
 | `INTERNAL_TOKEN_DOC_ORG` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `INTERNAL_TOKEN` | `<generar>` | `<generar>` | `<generar>` | Manual |
 | `INTERNAL_TOKEN_WORKFLOW_DOC` | mismo que workflow-service | idem | idem | Manual |
+| `INTERNAL_TOKEN_ORG_DOC` | mismo que org-service | idem | idem | Manual |
 | `INTERNAL_ALLOWED_CIDRS` | `100.64.0.0/10` | `100.64.0.0/10` | `100.64.0.0/10` | Manual |
 | `METADATA_EXTRACTOR_URL` | `http://metadata-extractor-service.railway.internal:3000` | idem | idem | Manual |
 | `JWT_SECRET` | mismo que auth-service | idem | idem | Manual |
@@ -302,6 +305,9 @@ en Railway para cada entorno (dev / test / prod).
      con el mismo valor. No tiene relación con el siguiente.
    - `INTERNAL_TOKEN_ORG_USER` (org→user): generado en org-service, copiado en user-service
      con el mismo valor. Son secretos distintos; nunca deben tener el mismo valor.
+   - `INTERNAL_TOKEN_ORG_DOC` (org→document): generado en org-service, copiado en
+     document-service con el mismo valor. Independiente de `INTERNAL_TOKEN_DOC_ORG`
+     (document→org, ya existente) — nunca deben tener el mismo valor.
 
 3. **`JWT_SECRET` compartido**: todos los servicios que validan tokens JWT deben tener el mismo
    `JWT_SECRET` (y `JWT_SECRET_KID`) que el auth-service del mismo entorno.

@@ -196,35 +196,33 @@ export class DocumentClientService {
   }
 
   /**
-   * Whether workflows created against this typology should go through the
-   * admin review cycle step. `false` is only ever a genuine, validated answer
-   * from document-service — never a stand-in for "couldn't tell". Both
-   * callers (approve()'s final-approval branch and createCycle()'s RN-17
-   * guard) treat `false` as authoritative and act on it immediately (skip
-   * the review cycle / reject creating one), so silently defaulting to
-   * `false` on a document-service outage would silently skip a review cycle
-   * that was actually enabled. Propagate failures instead — the caller
-   * surfaces a 503/500 and the client can retry once document-service is
-   * back, same as every other method on this class.
+   * Whether workflows against this typology should go through the admin
+   * review cycle step. Called only once per workflow, from approve()'s
+   * final-approval branch, to decide the reviewCycleEnabled snapshot stored
+   * on that workflow at the moment it leaves the approval flow — that
+   * snapshot then travels with the workflow for its whole lifetime and is
+   * never re-checked live again (see MGESTDOC-58). Note the boundary this
+   * draws: it's the workflow's *final-approval* moment that matters, not
+   * its creation moment — a workflow created before the typology's flag
+   * changes but still mid-approval when it changes picks up the new value
+   * at approval time, same as one created after the change. Only workflows
+   * that have *already completed* final approval are insulated from a
+   * later flag change.
    *
-   * `timeoutMs` defaults to the shared `this.timeoutMs`, but callers on a
-   * best-effort/display-only path (e.g. WorkflowsService.findOneOrFail's
-   * opportunistic snapshot refresh) may pass a tighter one: unlike
-   * approve()/createCycle(), where a false/error here is authoritative and
-   * worth waiting the full timeout for, a slow-but-alive document-service on
-   * a read path should fall back to the stale snapshot sooner instead of
-   * stalling the whole request.
+   * `false` is only ever a genuine, validated answer from document-service —
+   * never a stand-in for "couldn't tell". The caller treats `false` as
+   * authoritative and acts on it immediately (skips the review cycle), so
+   * silently defaulting to `false` on a document-service outage would
+   * silently skip a review cycle that was actually enabled. Propagate
+   * failures instead — the caller surfaces a 503/500 and the client can
+   * retry once document-service is back, same as every other method on this
+   * class.
    *
-   * `useCircuitBreaker` (default `true`) gates whether this call's outcome
-   * feeds the circuit breaker shared with getTypologyInfo()/validateDocument().
-   * A tightened `timeoutMs` deliberately makes timeouts more likely — routing
-   * those through the shared breaker would let a burst of best-effort detail
-   * reads (document-service merely slow, not down) trip it open, and then
-   * approve()/createCycle() would get EOPENBREAKER even though a real
-   * document-service call within their full timeout would have succeeded.
-   * Callers passing a tightened timeout should pass `false` here too, so
-   * their failures stay local instead of poisoning the breaker for the
-   * authoritative call sites.
+   * `timeoutMs`/`useCircuitBreaker` exist for callers that want to opt out of
+   * the shared defaults (e.g. a best-effort/display-only read that shouldn't
+   * wait the full timeout or poison the breaker shared with
+   * getTypologyInfo()/validateDocument()) — the current caller doesn't need
+   * that and uses the defaults.
    *
    * Endpoint requerido en document-service:
    *   GET /internal/typologies/:id/review-cycle-enabled?orgId=:orgId

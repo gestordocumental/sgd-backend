@@ -29,7 +29,6 @@ import { CancelWorkflowDto } from './dto/cancel-workflow.dto';
 import { AddWorkflowNoteDto } from './dto/add-workflow-note.dto';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, TOPICS, AppLogger } from '@sgd/common';
-import { DocumentClientService } from '../common/clients/document-client.service';
 
 @Injectable()
 export class WorkflowAdminCycleService {
@@ -47,7 +46,6 @@ export class WorkflowAdminCycleService {
     private readonly dataSource: DataSource,
     private readonly timelineService: WorkflowTimelineService,
     private readonly kafkaProducer: KafkaProducerService,
-    private readonly documentClientService: DocumentClientService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -59,47 +57,6 @@ export class WorkflowAdminCycleService {
     orgId: string,
     dto: CreateAdminCycleDto,
   ): Promise<WorkflowAdminCycle> {
-    // [RN-17] Defensa en profundidad: el ciclo de revisión debe estar habilitado
-    // para la tipología de este workflow. El frontend ya oculta el botón cuando
-    // está deshabilitado, y approve() ya evita llegar a PENDING_REVIEW_CYCLE en
-    // ese caso — esto solo cubre una llamada directa al endpoint. Es una llamada
-    // externa así que se hace antes de abrir la transacción para no retener el
-    // lock de fila durante un round-trip de red — de ahí esta lectura preliminar
-    // sin lock, solo para conocer la tipología. Si el workflow no existe, la
-    // lectura con lock dentro de la transacción abajo lo reportará como tal.
-    //
-    // Riesgo residual aceptado (TOCTOU): entre esta consulta en vivo y el commit
-    // de la transacción de más abajo solo corre validación síncrona en memoria
-    // (sin I/O), así que la ventana ya es del orden de microsegundos — no hay
-    // margen real para acortarla sin violar la convención de este codebase de
-    // no hacer llamadas HTTP dentro de una transacción de DB (ver comentarios
-    // equivalentes en workflow-approval.service.ts y workflows.service.ts).
-    // Cerrarla del todo requeriría un contrato de consistencia atómica entre
-    // el Postgres de workflow-service y el MongoDB de document-service
-    // (versionado optimista o saga) — cambio de arquitectura cross-servicio,
-    // desproporcionado frente al impacto real: en el peor caso se crea un
-    // ciclo administrativo para una tipología deshabilitada en el instante
-    // exacto de esta llamada, recuperable manualmente y sin implicaciones de
-    // seguridad o integridad de datos. Se acepta este riesgo residual.
-    const preliminaryWorkflow = await this.workflowRepo.findOne({
-      where: { id: workflowId, orgId },
-      select: ['typologyId'],
-    });
-    // Solo llega aquí como `true` — el `false` lanza abajo — así que sirve de
-    // paso para refrescar la instantánea desactualizada más adelante, ya que
-    // el costo de la llamada en vivo ya se pagó.
-    let liveReviewCycleEnabled: true | undefined;
-    if (preliminaryWorkflow) {
-      const reviewCycleEnabled = await this.documentClientService.isReviewCycleEnabledForTypology(
-        orgId,
-        preliminaryWorkflow.typologyId,
-      );
-      if (!reviewCycleEnabled) {
-        throw new ForbiddenException('The review cycle is disabled for this typology');
-      }
-      liveReviewCycleEnabled = true;
-    }
-
     // Validar que los stepOrders sean únicos y consecutivos
     const orders = dto.steps.map((s) => s.stepOrder).sort((a, b) => a - b);
     const hasGap = orders.some((o, i) => i > 0 && o !== orders[i - 1] + 1);
@@ -135,6 +92,20 @@ export class WorkflowAdminCycleService {
 
       // [RN-11] Solo si el workflow está en PENDING_REVIEW_CYCLE o AVAILABLE_FOR_FINAL_USERS
       assertValidTransition(workflow.status, WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS);
+
+      // [RN-17] Defensa en profundidad: el ciclo de revisión debe estar
+      // habilitado para este workflow. reviewCycleEnabled es una instantánea
+      // fijada al crear el workflow, y sobrescrita una última vez en
+      // approve() al completar la aprobación final — ese valor final es el
+      // que queda — se valida contra esa instantánea propia del workflow,
+      // no contra el flag en vivo de la tipología en document-service: un
+      // cambio posterior al flag de la tipología solo afecta a los
+      // workflows que aún no completaron su aprobación final, sin importar
+      // cuándo se crearon — los que ya la completaron quedan fijos (ver
+      // MGESTDOC-58).
+      if (!workflow.reviewCycleEnabled) {
+        throw new ForbiddenException('The review cycle is disabled for this workflow');
+      }
 
       // [RN-12] No puede haber un ciclo activo
       if (workflow.activeAdminCycleId) {
@@ -185,7 +156,6 @@ export class WorkflowAdminCycleService {
         status:              WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
         activeAdminCycleId:  savedCycle.id,
         currentAssignedUserId: firstStep.userId,
-        ...(liveReviewCycleEnabled !== undefined && { reviewCycleEnabled: liveReviewCycleEnabled }),
       });
 
       await this.timelineService.record({

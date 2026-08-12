@@ -8,6 +8,7 @@ import { Org } from './orgs/entities/org.entity';
 import { Departamento } from './org-structure/entities/departamento.entity';
 import { Area } from './org-structure/entities/area.entity';
 import { Cargo } from './org-structure/entities/cargo.entity';
+import { StructureLease } from './org-structure/entities/structure-lease.entity';
 import { CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
 
 
@@ -35,7 +36,7 @@ import { CorrelationMiddleware, AppLogger, MetricsModule } from '@sgd/common';
           username: config.get<string>('DB_USERNAME'),
           password: config.get<string>('DB_PASSWORD'),
           database: config.get<string>('DB_NAME'),
-          entities: [Org, Departamento, Area, Cargo],
+          entities: [Org, Departamento, Area, Cargo, StructureLease],
           synchronize: false,
           retryAttempts: 5,
           retryDelay: 3000,

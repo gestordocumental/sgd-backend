@@ -6,6 +6,9 @@ import { Cargo } from './entities/cargo.entity';
 import { CreateAreaDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 import { DepartamentosService } from './departamentos.service';
+import { DocumentClientService } from '../common/document-client/document-client.service';
+import { UserClientService } from '../common/user-client/user-client.service';
+import { StructureLeasesService } from './structure-leases.service';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
@@ -21,6 +24,9 @@ export class AreasService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly departamentosService: DepartamentosService,
+    private readonly documentClient: DocumentClientService,
+    private readonly userClient: UserClientService,
+    private readonly structureLeases: StructureLeasesService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
@@ -156,7 +162,28 @@ export class AreasService {
   }
 
   async remove(orgId: string, departamentoId: string, id: string, actorId?: string): Promise<void> {
-    await this.findOne(orgId, departamentoId, id); // fast 404 without opening a transaction when it plainly doesn't exist
+    const area = await this.findOne(orgId, departamentoId, id); // fast 404 without opening a transaction when it plainly doesn't exist
+
+    // Blocks deletion while a typology or user still references this area
+    // directly (department+area scoped, no cargo) — otherwise their record
+    // is left pointing at an areaId that no longer exists. Runs before the
+    // transaction below: holding its pessimistic_write lock across two
+    // outbound HTTP calls (~5s timeout ceiling each) would turn any
+    // document-service/user-service slowdown into a long-held lock on a hot
+    // row. Deliberately NOT wrapped in try/catch — see
+    // CargosService.assertNoExternalReferences() for the fail-closed
+    // reasoning, identical here.
+    const [typologiesCount, usersCount] = await Promise.all([
+      this.documentClient.countOrgStructureReferences(orgId, { areaId: id }),
+      this.userClient.countOrgStructureReferences({ areaId: id }),
+    ]);
+    if (typologiesCount > 0 || usersCount > 0) {
+      throw new ConflictException({
+        message: `Cannot delete area "${area.name}": it is still referenced by ${typologiesCount} typology(ies) and ${usersCount} user(s)`,
+        errorCode: 'AREA_HAS_EXTERNAL_REFERENCES',
+        params: { id, typologiesCount, usersCount },
+      });
+    }
 
     let removedName = '';
     await this.dataSource.transaction(async (manager) => {
@@ -184,6 +211,17 @@ export class AreasService {
           message: `Cannot delete area "${area.name}": it still has ${cargosCount} cargo(s) associated`,
           errorCode: 'AREA_HAS_DEPENDENCIES',
           params: { id, cargosCount },
+        });
+      }
+
+      // Closes the cross-service TOCTOU gap — see the identical check in
+      // DepartamentosService.remove() for the full reasoning.
+      const leasesCount = await this.structureLeases.countActive(manager, 'area', id);
+      if (leasesCount > 0) {
+        throw new ConflictException({
+          message: `Cannot delete area "${area.name}": a typology or user assignment referencing it is currently being created`,
+          errorCode: 'AREA_HAS_PENDING_OPERATION',
+          params: { id },
         });
       }
 
