@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   GatewayTimeoutException,
   ServiceUnavailableException,
+  HttpException,
   Logger,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
@@ -123,6 +124,58 @@ export class UserClientService {
       ),
     );
     return response.data.userIds;
+  }
+
+  /**
+   * Counts non-deleted users whose profile references the given
+   * departamento/area/cargo — used to block deleting a position in
+   * org-service that a user still points to (see CargosService/AreasService/
+   * DepartamentosService.remove()). Exactly one of the filter fields must be
+   * set — this mirrors the id being deleted at the caller's level.
+   */
+  async countOrgStructureReferences(
+    filters: { departamentoId?: string; areaId?: string; cargoId?: string },
+  ): Promise<number> {
+    const correlationId = getCorrelationId();
+    const params = new URLSearchParams();
+    if (filters.departamentoId) params.set('departamentoId', filters.departamentoId);
+    if (filters.areaId)         params.set('areaId', filters.areaId);
+    if (filters.cargoId)        params.set('cargoId', filters.cargoId);
+    const url = `${this.userServiceUrl}/internal/users/org-structure-references?${params.toString()}`;
+
+    try {
+      const response = await this.fireWithCb(() =>
+        firstValueFrom(
+          this.httpService
+            .get<{ count: number }>(url, {
+              headers: {
+                'x-internal-token':      this.internalToken,
+                [CORRELATION_ID_HEADER]: correlationId,
+              },
+            })
+            .pipe(timeout(this.timeoutMs)),
+        ),
+      );
+      return response.data.count;
+    } catch (error: any) {
+      if (error instanceof ServiceUnavailableException) throw error;
+
+      if (error instanceof TimeoutError) {
+        this.logger.error(`Timeout checking org-structure references in user-service`);
+        throw new GatewayTimeoutException('user-service did not respond in time');
+      }
+
+      const status  = error?.response?.status;
+      const message = error?.response?.data?.message ?? error?.message ?? 'Unknown error';
+
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        throw new HttpException(message, status);
+      }
+      this.logger.error(`Failed to check org-structure references in user-service: HTTP ${status ?? 'N/A'}`);
+      throw new InternalServerErrorException(
+        `Could not check user references from user-service: ${message}`,
+      );
+    }
   }
 
   protected sleep(ms: number): Promise<void> {

@@ -151,4 +151,80 @@ describe('UserClientService', () => {
       await expect(service.getActiveUserIds('org-1')).rejects.toBeDefined();
     });
   });
+
+  // ── countOrgStructureReferences ────────────────────────────────────────────
+
+  describe('countOrgStructureReferences', () => {
+    it('calls the user-service GET endpoint with the correct URL, query params, and token', async () => {
+      httpService.get.mockReturnValue(of({ status: 200, data: { count: 2 } }));
+
+      await expect(
+        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+      ).resolves.toBe(2);
+
+      expect(httpService.get).toHaveBeenCalledWith(
+        'http://localhost:3001/internal/users/org-structure-references?cargoId=cargo-1',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'x-internal-token': 'test-token' }),
+        }),
+      );
+    });
+
+    it('builds the query string for an areaId filter', async () => {
+      httpService.get.mockReturnValue(of({ status: 200, data: { count: 0 } }));
+
+      await service.countOrgStructureReferences({ areaId: 'area-1' });
+
+      expect(httpService.get).toHaveBeenCalledWith(
+        'http://localhost:3001/internal/users/org-structure-references?areaId=area-1',
+        expect.anything(),
+      );
+    });
+
+    it('builds the query string for a departamentoId filter', async () => {
+      httpService.get.mockReturnValue(of({ status: 200, data: { count: 0 } }));
+
+      await service.countOrgStructureReferences({ departamentoId: 'dept-1' });
+
+      expect(httpService.get).toHaveBeenCalledWith(
+        'http://localhost:3001/internal/users/org-structure-references?departamentoId=dept-1',
+        expect.anything(),
+      );
+    });
+
+    it('throws GatewayTimeoutException on timeout', async () => {
+      httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
+
+      await expect(
+        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+      ).rejects.toBeInstanceOf(GatewayTimeoutException);
+    });
+
+    it('throws ServiceUnavailableException when the circuit breaker is open', async () => {
+      const openError = Object.assign(new Error('circuit open'), { code: 'EOPENBREAKER' });
+      jest.spyOn((service as any).cb, 'fire').mockRejectedValueOnce(openError);
+
+      await expect(
+        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    });
+
+    it('passes through a 4xx status/message from user-service', async () => {
+      httpService.get.mockReturnValue(
+        throwError(() => ({ response: { status: 400, data: { message: 'Bad request' } } })),
+      );
+
+      await expect(
+        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('throws InternalServerErrorException for an unexpected 5xx/network error', async () => {
+      httpService.get.mockReturnValue(throwError(() => ({ response: { status: 500 } })));
+
+      await expect(
+        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+      ).rejects.toBeInstanceOf(InternalServerErrorException);
+    });
+  });
 });

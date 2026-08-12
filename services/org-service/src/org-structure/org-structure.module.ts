@@ -18,9 +18,16 @@ import { BulkStructureController } from './bulk-structure.controller';
 import { InternalStructureController } from './internal-structure.controller';
 import { OrgGuard } from '../common/guards/org.guard';
 import { OrgPermissionsGuard } from '../common/guards/org-permissions.guard';
+import { UserClientModule } from '../common/user-client/user-client.module';
+import { DocumentClientModule } from '../common/document-client/document-client.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Departamento, Area, Cargo]), KafkaModule],
+  imports: [
+    TypeOrmModule.forFeature([Departamento, Area, Cargo]),
+    KafkaModule,
+    UserClientModule,
+    DocumentClientModule,
+  ],
   controllers: [
     DepartamentosController,
     AreasController,

@@ -180,3 +180,20 @@ TypologySchema.index({ orgId: 1, typologyStatus: 1, createdAt: -1 });
 // The partial unique index above is restricted to ACTIVE docs and cannot serve this query
 // (history includes DELETED/ARCHIVED). This non-partial index fills that gap.
 TypologySchema.index({ orgId: 1, 'datosDeclarados.codigo': 1, createdAt: -1 });
+
+// Covers countOrgStructureReferences: countDocuments({ orgId, deletedAt: null,
+// 'estructuraOrg.<field>': id }) — used by org-service to block deleting a
+// departamento/area/cargo that a typology still references. departamentoId is
+// always set (required on every typology), so no partial filter needed there;
+// areaId/cargoId are only ever queried with a real id (never null — an
+// "unset" typology is never what's being deleted), so the partial filter
+// keeps the index small by excluding the common null case.
+TypologySchema.index({ orgId: 1, 'estructuraOrg.departamentoId': 1, deletedAt: 1 });
+TypologySchema.index(
+  { orgId: 1, 'estructuraOrg.areaId': 1, deletedAt: 1 },
+  { partialFilterExpression: { 'estructuraOrg.areaId': { $ne: null } } },
+);
+TypologySchema.index(
+  { orgId: 1, 'estructuraOrg.cargoId': 1, deletedAt: 1 },
+  { partialFilterExpression: { 'estructuraOrg.cargoId': { $ne: null } } },
+);

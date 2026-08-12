@@ -35,21 +35,6 @@ import { UserClientService } from '../common/clients/user-client.service';
 
 @Injectable()
 export class WorkflowsService {
-  // Bounds how long a single workflow detail read can be blocked by the
-  // best-effort reviewCycleEnabled refresh in findOneOrFail — much shorter
-  // than the shared DOCUMENT_SERVICE_TIMEOUT_MS used by approve()/
-  // createCycle(), where waiting the full timeout for an authoritative
-  // decision is worth it. Here a slow-but-alive document-service should just
-  // fall back to the stale snapshot (via the try/catch around the call)
-  // sooner rather than stall the whole read.
-  //
-  // This shorter timeout deliberately times out more often, so the call
-  // below also passes useCircuitBreaker: false — otherwise a burst of these
-  // best-effort reads could trip the breaker shared with approve()/
-  // createCycle() and make those fail fast (EOPENBREAKER) even when
-  // document-service would have answered fine within its own full timeout.
-  private static readonly REVIEW_CYCLE_REFRESH_TIMEOUT_MS = 1_500;
-
   constructor(
     @InjectRepository(Workflow)
     private readonly workflowRepo: Repository<Workflow>,
@@ -774,44 +759,16 @@ export class WorkflowsService {
   private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
     const workflow = await this.findWorkflowOrFail(id, user);
 
-    // El botón "Iniciar ciclo de revisión" del frontend depende de
-    // reviewCycleEnabled — para una lectura de UN SOLO workflow (nunca una
-    // lista/paginada, así que no hay riesgo de N+1) se refresca en vivo
-    // contra document-service en los estados donde realmente importa, en vez
-    // de servir la instantánea de creación/última aprobación, que puede haber
-    // quedado desactualizada si la tipología cambió mientras el workflow
-    // esperaba acción del usuario final.
-    //
-    // A diferencia de approve()/createCycle() (donde un false autoritativo
-    // conduce una transición de estado y por eso un fallo de document-service
-    // debe propagarse), este es solo un refresco de UI best-effort sobre una
-    // lectura — nunca debe tumbar la vista de detalle de un workflow porque
-    // document-service esté caído momentáneamente. Ante fallo, se conserva la
-    // instantánea existente y se registra la advertencia.
-    if (
-      workflow.status === WorkflowStatus.PENDING_REVIEW_CYCLE ||
-      workflow.status === WorkflowStatus.AVAILABLE_FOR_FINAL_USERS
-    ) {
-      try {
-        const liveReviewCycleEnabled = await this.documentClientService.isReviewCycleEnabledForTypology(
-          workflow.orgId,
-          workflow.typologyId,
-          WorkflowsService.REVIEW_CYCLE_REFRESH_TIMEOUT_MS,
-          false, // useCircuitBreaker — see constant's comment above
-        );
-        if (liveReviewCycleEnabled !== workflow.reviewCycleEnabled) {
-          workflow.reviewCycleEnabled = liveReviewCycleEnabled;
-          await this.workflowRepo.update(id, { reviewCycleEnabled: liveReviewCycleEnabled });
-        }
-      } catch (error: unknown) {
-        this.logger.warn(
-          `Could not refresh reviewCycleEnabled for workflow ${id}, serving stale snapshot: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          'WorkflowsService',
-        );
-      }
-    }
+    // reviewCycleEnabled es una instantánea fijada al crear el workflow (y
+    // actualizada en approve() al completar la aprobación final) — NO se
+    // refresca en vivo aquí. Un cambio posterior al flag de la tipología solo
+    // debe afectar workflows creados después del cambio; los ya creados
+    // deben conservar el valor con el que llegaron a este punto, incluso si
+    // luego se habilita/deshabilita el ciclo de revisión para la tipología.
+    // (Antes esto se refrescaba en vivo contra document-service en cada
+    // lectura, lo que sobrescribía la instantánea y dejaba el botón "Iniciar
+    // ciclo de revisión" del frontend visible pero sin efecto — ver
+    // MGESTDOC-58.)
 
     const actions = await this.actionRepo.find({
       where: { workflowId: id },

@@ -438,124 +438,29 @@ describe('WorkflowsService', () => {
     });
   });
 
-  describe('findOne() — live reviewCycleEnabled refresh', () => {
-    it.each([WorkflowStatus.PENDING_REVIEW_CYCLE, WorkflowStatus.AVAILABLE_FOR_FINAL_USERS])(
-      'overrides the stale snapshot with the live value and persists it when status is %s',
-      async (status) => {
-        const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
-          buildService();
-        const wf = makeWorkflow({
-          status,
-          typologyId: 'typ-1',
-          reviewCycleEnabled: false,
-          approvalSteps: [],
-          attachments: [],
-        });
-        workflowRepo.findOne.mockResolvedValue(wf);
-        actionRepo.find.mockResolvedValue([]);
-        dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
-        documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(true);
-
-        const result = await service.findOne('wf-1', makeUser());
-
-        expect(documentClientService.isReviewCycleEnabledForTypology).toHaveBeenCalledWith(
-          'org-1',
-          'typ-1',
-          expect.any(Number),
-          false,
-        );
-        expect(result.reviewCycleEnabled).toBe(true);
-        expect(workflowRepo.update).toHaveBeenCalledWith('wf-1', { reviewCycleEnabled: true });
-      },
-    );
-
-    it('passes a tighter timeout than the shared default so a slow-but-alive document-service can\'t stall the whole read', async () => {
-      const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
-        buildService();
-      const wf = makeWorkflow({
-        status: WorkflowStatus.PENDING_REVIEW_CYCLE,
-        typologyId: 'typ-1',
-        reviewCycleEnabled: false,
-        approvalSteps: [],
-        attachments: [],
-      });
-      workflowRepo.findOne.mockResolvedValue(wf);
-      actionRepo.find.mockResolvedValue([]);
-      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
-      documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(true);
-
-      await service.findOne('wf-1', makeUser());
-
-      const [, , timeoutMs] = documentClientService.isReviewCycleEnabledForTypology.mock.calls[0];
-      // Default DOCUMENT_SERVICE_TIMEOUT_MS is 5000ms — this must be noticeably
-      // shorter, since it only guards a best-effort UI refresh, not an
-      // authoritative decision.
-      expect(timeoutMs).toBeLessThan(5_000);
-    });
-
-    it('does not persist when the live value matches the stored snapshot', async () => {
-      const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
-        buildService();
-      const wf = makeWorkflow({
-        status: WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
-        reviewCycleEnabled: true,
-        approvalSteps: [],
-        attachments: [],
-      });
-      workflowRepo.findOne.mockResolvedValue(wf);
-      actionRepo.find.mockResolvedValue([]);
-      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
-      documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(true);
-
-      const result = await service.findOne('wf-1', makeUser());
-
-      expect(result.reviewCycleEnabled).toBe(true);
-      expect(workflowRepo.update).not.toHaveBeenCalled();
-    });
-
-    it('serves the stale snapshot and keeps the read succeeding when the live lookup fails', async () => {
-      const { service, workflowRepo, actionRepo, dataSource, documentClientService, logger } =
-        buildService();
-      const wf = makeWorkflow({
-        status: WorkflowStatus.PENDING_REVIEW_CYCLE,
-        typologyId: 'typ-1',
-        reviewCycleEnabled: true,
-        approvalSteps: [],
-        attachments: [],
-      });
-      workflowRepo.findOne.mockResolvedValue(wf);
-      actionRepo.find.mockResolvedValue([]);
-      dataSource.getRepository = jest.fn().mockReturnValue({ find: jest.fn().mockResolvedValue([]) });
-      documentClientService.isReviewCycleEnabledForTypology.mockRejectedValue(
-        new Error('document-service unavailable'),
-      );
-
-      // Unlike approve()/createCycle(), this is a best-effort display refresh
-      // on a read path — a document-service outage must not break viewing the
-      // workflow, so the stale snapshot is served instead of propagating.
-      const result = await service.findOne('wf-1', makeUser());
-
-      expect(result.reviewCycleEnabled).toBe(true);
-      expect(workflowRepo.update).not.toHaveBeenCalled();
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Could not refresh reviewCycleEnabled for workflow wf-1'),
-        'WorkflowsService',
-      );
-    });
-
+  describe('findOne() — reviewCycleEnabled snapshot', () => {
+    // Regression for MGESTDOC-58: findOne() used to re-check the typology's
+    // live reviewCycleEnabled flag against document-service and overwrite
+    // the workflow's own snapshot on every detail read. That let disabling
+    // the flag reach back and break already-created workflows — the
+    // snapshot must now be served as-is, whatever it was set to at creation
+    // (or at approval completion), with no live lookup and no persistence.
     it.each([
       WorkflowStatus.DRAFT,
       WorkflowStatus.PENDING_APPROVAL,
+      WorkflowStatus.PENDING_REVIEW_CYCLE,
+      WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
       WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
       WorkflowStatus.CLOSED,
       WorkflowStatus.CANCELLED,
       WorkflowStatus.REJECTED,
-    ])('does not live-check when status is %s — snapshot is not action-relevant there', async (status) => {
+    ])('serves the stored snapshot as-is for status %s, without any live document-service lookup', async (status) => {
       const { service, workflowRepo, actionRepo, dataSource, documentClientService } =
         buildService();
       const wf = makeWorkflow({
         status,
-        reviewCycleEnabled: false,
+        typologyId: 'typ-1',
+        reviewCycleEnabled: true,
         approvalSteps: [],
         attachments: [],
       });
@@ -567,7 +472,7 @@ describe('WorkflowsService', () => {
 
       expect(documentClientService.isReviewCycleEnabledForTypology).not.toHaveBeenCalled();
       expect(workflowRepo.update).not.toHaveBeenCalled();
-      expect(result.reviewCycleEnabled).toBe(false);
+      expect(result.reviewCycleEnabled).toBe(true);
     });
   });
 

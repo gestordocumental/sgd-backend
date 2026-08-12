@@ -55,4 +55,33 @@ export class InternalTypologiesController {
       reviewCycleEnabled: doc.reviewCycleEnabled ?? false,
     };
   }
+
+  // Called by org-service before deleting a departamento/area/cargo, to block
+  // the delete if a typology still references it — a separate token
+  // (INTERNAL_TOKEN_ORG_DOC) from the class-level one, since org-service is a
+  // distinct caller from workflow-service.
+  @Get('org-structure-references')
+  @AllowInternalTokens('INTERNAL_TOKEN_ORG_DOC')
+  async getOrgStructureReferences(
+    @Query('orgId') orgId: string,
+    @Query('departamentoId') departamentoId?: string,
+    @Query('areaId') areaId?: string,
+    @Query('cargoId') cargoId?: string,
+  ) {
+    if (!orgId) throw new BadRequestException('orgId query param is required');
+
+    const provided = [departamentoId, areaId, cargoId].filter((v) => v !== undefined);
+    if (provided.length !== 1) {
+      throw new BadRequestException(
+        'Exactly one of departamentoId, areaId, or cargoId query params is required',
+      );
+    }
+
+    const count = await this.typologiesService.countOrgStructureReferences(orgId, {
+      departamentoId,
+      areaId,
+      cargoId,
+    });
+    return { count };
+  }
 }

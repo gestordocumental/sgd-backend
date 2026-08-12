@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
@@ -6,6 +6,8 @@ import { DepartamentosService } from './departamentos.service';
 import { Departamento } from './entities/departamento.entity';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
+import { DocumentClientService } from '../common/document-client/document-client.service';
+import { UserClientService } from '../common/user-client/user-client.service';
 import { KafkaProducerService } from '@sgd/common';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
@@ -27,6 +29,9 @@ describe('DepartamentosService', () => {
   let repo: MockRepo<Departamento>;
   let areaRepo: MockRepo<Area>;
   let cargoRepo: MockRepo<Cargo>;
+  let dataSource: { transaction: jest.Mock };
+  let documentClient: { countOrgStructureReferences: jest.Mock };
+  let userClient: { countOrgStructureReferences: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -41,12 +46,16 @@ describe('DepartamentosService', () => {
     // specifically about the dependency guard doesn't have to opt in.
     areaRepo = { count: jest.fn().mockResolvedValue(0) };
     cargoRepo = { count: jest.fn().mockResolvedValue(0) };
+    // Defaults to "no external references" so every remove() test not
+    // specifically about this guard doesn't have to opt in.
+    documentClient = { countOrgStructureReferences: jest.fn().mockResolvedValue(0) };
+    userClient = { countOrgStructureReferences: jest.fn().mockResolvedValue(0) };
     // remove() runs inside a transaction now (see areas.service.ts /
     // departamentos.service.ts race-condition fix); this fakes .transaction()
     // by handing the callback a manager whose getRepository() resolves back
     // to the same mocks above, so existing assertions on repo/areaRepo/
     // cargoRepo keep working unchanged.
-    const dataSource = {
+    dataSource = {
       transaction: jest.fn((cb: (manager: EntityManager) => unknown) =>
         cb({
           getRepository: (entity: unknown) => {
@@ -66,6 +75,8 @@ describe('DepartamentosService', () => {
         { provide: getRepositoryToken(Area), useValue: areaRepo },
         { provide: getRepositoryToken(Cargo), useValue: cargoRepo },
         { provide: DataSource, useValue: dataSource },
+        { provide: DocumentClientService, useValue: documentClient },
+        { provide: UserClientService, useValue: userClient },
         { provide: KafkaProducerService, useValue: { emitSafe: jest.fn() } },
       ],
     }).compile();
@@ -149,6 +160,11 @@ describe('DepartamentosService', () => {
 
     await service.remove(departamento.orgId, departamento.id);
 
+    expect(documentClient.countOrgStructureReferences).toHaveBeenCalledWith(
+      departamento.orgId,
+      { departamentoId: departamento.id },
+    );
+    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith({ departamentoId: departamento.id });
     expect(areaRepo.count).toHaveBeenCalledWith({ where: { departamentoId: departamento.id } });
     expect(cargoRepo.count).toHaveBeenCalledWith({ where: { departamentoId: departamento.id } });
     expect(repo.softRemove).toHaveBeenCalledWith(departamento);
@@ -180,6 +196,47 @@ describe('DepartamentosService', () => {
       response: { errorCode: 'DEPARTMENT_HAS_DEPENDENCIES' },
     });
     expect(repo.softRemove).not.toHaveBeenCalled();
+  });
+
+  it('throws ConflictException instead of deleting a departamento a typology or user still references directly', async () => {
+    // Regression: a typology/user can be scoped at the departamento level
+    // (no area, no cargo) — the intra-service areas/cargos count above
+    // doesn't catch that.
+    const departamento = makeDepartamento();
+    repo.findOne!.mockResolvedValue(departamento);
+    documentClient.countOrgStructureReferences.mockResolvedValue(1);
+    userClient.countOrgStructureReferences.mockResolvedValue(2);
+
+    await expect(service.remove(departamento.orgId, departamento.id)).rejects.toMatchObject({
+      response: {
+        errorCode: 'DEPARTMENT_HAS_EXTERNAL_REFERENCES',
+        params: { typologiesCount: 1, usersCount: 2 },
+      },
+    });
+    expect(documentClient.countOrgStructureReferences).toHaveBeenCalledWith(
+      departamento.orgId,
+      { departamentoId: departamento.id },
+    );
+    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith({ departamentoId: departamento.id });
+    expect(repo.softRemove).not.toHaveBeenCalled();
+    // The external check runs before the transaction/lock is even opened —
+    // holding a row lock across the ~5s outbound HTTP timeout ceiling would
+    // be worse than the race it exists to close.
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('fails closed: propagates the error instead of allowing the delete when the reference check itself fails', async () => {
+    const departamento = makeDepartamento();
+    repo.findOne!.mockResolvedValue(departamento);
+    documentClient.countOrgStructureReferences.mockRejectedValue(
+      new ServiceUnavailableException('document-service is temporarily unavailable'),
+    );
+
+    await expect(service.remove(departamento.orgId, departamento.id)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(repo.softRemove).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('restores a deleted departamento', async () => {

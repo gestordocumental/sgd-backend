@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -178,6 +178,28 @@ export class DocumentUploadService {
   }
 
   /**
+   * Best-effort restore of `old` back to ACTIVE after a later step in
+   * createNewVersion() fails — old is archived early there (see that
+   * method's step-ordering comment), so every rollback branch after that
+   * point needs to undo it. Logs loudly instead of silently swallowing a
+   * failure here: unlike a failed cleanup of the new doc/file (merely
+   * orphaned resources), a failed restore leaves the org with a codigo that
+   * has NO active typology at all until someone notices.
+   */
+  private async restoreOldActive(old: TypologyDocument, typologyId: string): Promise<void> {
+    old.typologyStatus = TypologyStatus.ACTIVE;
+    const restored = await old.save().then(() => true).catch(() => false);
+    if (!restored) {
+      this.logger.error(
+        `Failed to restore typology ${typologyId} to ACTIVE after a new-version rollback; ` +
+          'it is stuck ARCHIVED with no active replacement. Needs manual intervention.',
+        undefined,
+        'DocumentUploadService',
+      );
+    }
+  }
+
+  /**
    * Archives the current typology and creates a new one with the same codigo,
    * uploads the provided file and triggers metadata extraction.
    * The new version must be strictly greater than the current one (if both are set).
@@ -220,12 +242,23 @@ export class DocumentUploadService {
       );
     }
 
-    // Step 1: Create new typology — old remains ACTIVE until everything succeeds.
     const nombre  = dto.nombre  !== undefined ? dto.nombre  : old.datosDeclarados.nombre;
     const version = newVersion  !== null       ? newVersion  : old.datosDeclarados.version;
     const codigo  = old.datosDeclarados.codigo;
     const hasDeclaredData = !!(nombre && codigo && version);
 
+    // Step 1: Archive old FIRST — it shares codigo with the new doc, and the
+    // unique-active-codigo index (typology.schema.ts) allows only one ACTIVE
+    // document per (orgId, codigo). Creating newDoc as ACTIVE (below) while
+    // old was still ACTIVE used to collide with itself on every single-step
+    // version bump of an already-complete typology — this was an
+    // unconditional failure, not a rare race. If this save fails, nothing
+    // else has happened yet.
+    old.typologyStatus = TypologyStatus.ARCHIVED;
+    await old.save();
+
+    // Step 2: Create new typology — now safe to go ACTIVE. If this fails,
+    // restore old to ACTIVE so the org is never left without one.
     const newDoc = new this.model({
       orgId,
       typologyStatus:  hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE,
@@ -241,20 +274,33 @@ export class DocumentUploadService {
       datosDeclarados: { nombre, codigo, version, fuente: old.datosDeclarados.fuente },
     });
 
-    await newDoc.save();
+    try {
+      await newDoc.save();
+    } catch (err: any) {
+      await this.restoreOldActive(old, typologyId);
+      if (err?.code === 11000) {
+        throw new ConflictException({
+          message: `An active typology with code '${codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+          errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
+          params: { codigo },
+        });
+      }
+      throw err;
+    }
 
     const newTypologyId = (newDoc._id as Types.ObjectId).toString();
     const r2Key = `org/${orgId}/typologies/${newTypologyId}/${uuidv4()}.${ext}`;
 
-    // Step 2: Upload file — if this fails, delete newDoc, old stays ACTIVE.
+    // Step 3: Upload file — if this fails, delete newDoc and restore old to ACTIVE.
     try {
       await this.storage.upload(r2Key, file.buffer, file.mimetype);
     } catch (err) {
       await newDoc.deleteOne().catch(() => {});
+      await this.restoreOldActive(old, typologyId);
       throw err;
     }
 
-    // Step 3: Persist documento on new doc — if this fails, clean up file + newDoc.
+    // Step 4: Persist documento on new doc — if this fails, clean up file + newDoc + restore old.
     newDoc.documento = {
       r2Key,
       originalName:     file.originalname,
@@ -269,21 +315,11 @@ export class DocumentUploadService {
     } catch (err) {
       await this.storage.delete(r2Key).catch(() => {});
       await newDoc.deleteOne().catch(() => {});
+      await this.restoreOldActive(old, typologyId);
       throw err;
     }
 
-    // Step 4: Archive old — only now that new doc is fully persisted.
-    // If this fails, clean up new doc + file (old is still ACTIVE).
-    old.typologyStatus = TypologyStatus.ARCHIVED;
-    try {
-      await old.save();
-    } catch (err) {
-      await this.storage.delete(r2Key).catch(() => {});
-      await newDoc.deleteOne().catch(() => {});
-      throw err;
-    }
-
-    // Step 5: Emit extraction event — if Kafka fails, restore old to ACTIVE and clean up.
+    // Step 5: Emit extraction event — if Kafka fails, clean up + restore old to ACTIVE.
     try {
       await this.kafka.emit(TOPICS.TYPOLOGY_FILE_UPLOADED, {
         orgId,
@@ -293,10 +329,9 @@ export class DocumentUploadService {
         ...(dto.orgName ? { orgName: dto.orgName } : {}),
       });
     } catch (err) {
-      old.typologyStatus = TypologyStatus.ACTIVE;
-      await old.save().catch(() => {});
       await this.storage.delete(r2Key).catch(() => {});
       await newDoc.deleteOne().catch(() => {});
+      await this.restoreOldActive(old, typologyId);
       throw new InternalServerErrorException('Failed to trigger metadata extraction. New version rolled back.');
     }
 

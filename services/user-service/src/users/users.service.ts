@@ -85,6 +85,10 @@ export class UsersService {
     return this.profile.findByPosition(orgId, filters);
   }
 
+  countByPosition(filters: { cargoId?: string; areaId?: string; departamentoId?: string }) {
+    return this.profile.countByPosition(filters);
+  }
+
   getCountsByOrg() {
     return this.profile.getCountsByOrg();
   }

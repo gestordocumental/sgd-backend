@@ -97,6 +97,42 @@ export class TypologiesService implements OnModuleInit {
     }
   }
 
+  /**
+   * Explicit pre-check for "only one ACTIVE typology per (orgId, codigo)".
+   * The partial unique index on the schema is the last line of defense
+   * against races (surfaced here as a caught Mongo 11000 error in every
+   * write path below) — but it only fires if the index actually got built,
+   * which onModuleInit warns can silently fail to happen (e.g. duplicate
+   * ACTIVE codigos that already existed before the index was added). Write
+   * paths that skip this explicit check and rely solely on that 11000 catch
+   * — as update()/resolveDiscrepancy() used to — have zero protection left
+   * once the index is missing: doc.save() just succeeds, silently leaving
+   * two ACTIVE typologies with the same codigo. create() already had this
+   * belt-and-suspenders pair; this factors it out so every write path gets
+   * both.
+   */
+  private async assertNoActiveDuplicateCodigo(
+    orgId: string,
+    codigo: string | null | undefined,
+    excludeId?: Types.ObjectId,
+  ): Promise<void> {
+    if (!codigo) return;
+    const filter: FilterQuery<TypologyDocument> = {
+      orgId,
+      'datosDeclarados.codigo': codigo,
+      typologyStatus: TypologyStatus.ACTIVE,
+    };
+    if (excludeId) filter._id = { $ne: excludeId };
+    const existing = await this.model.findOne(filter).exec();
+    if (existing) {
+      throw new ConflictException({
+        message: `An active typology with code '${codigo}' already exists in this organization. Only one active typology per code is allowed.`,
+        errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
+        params: { codigo },
+      });
+    }
+  }
+
   private emitAuditLog(params: {
     actorId: string;
     orgId: string;
@@ -127,21 +163,7 @@ export class TypologiesService implements OnModuleInit {
     source: CreationSource = CreationSource.MANUAL,
     actorId?: string,
   ): Promise<TypologyDocument> {
-    // Explicit pre-check: reject if an ACTIVE typology with the same codigo already exists
-    if (dto.codigo) {
-      const existing = await this.model.findOne({
-        orgId,
-        'datosDeclarados.codigo': dto.codigo,
-        typologyStatus: TypologyStatus.ACTIVE,
-      }).exec();
-      if (existing) {
-        throw new ConflictException({
-          message: `An active typology with code '${dto.codigo}' already exists in this organization. Only one active typology per code is allowed.`,
-          errorCode: 'TYPOLOGY_CODE_ALREADY_EXISTS',
-          params: { codigo: dto.codigo },
-        });
-      }
-    }
+    await this.assertNoActiveDuplicateCodigo(orgId, dto.codigo);
 
     const hasDeclaredData = !!(dto.nombre && dto.codigo && dto.version);
 
@@ -251,6 +273,14 @@ export class TypologiesService implements OnModuleInit {
     const hasDeclaredData = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
 
+    if (hasDeclaredData) {
+      await this.assertNoActiveDuplicateCodigo(
+        orgId,
+        doc.datosDeclarados.codigo,
+        doc._id as Types.ObjectId,
+      );
+    }
+
     try {
       const saved = await doc.save();
       if (actorId) {
@@ -345,6 +375,26 @@ export class TypologiesService implements OnModuleInit {
     ).exec();
   }
 
+  /**
+   * Counts non-deleted typologies whose estructuraOrg references the given
+   * departamento/area/cargo — used by org-service to block deleting a
+   * position that a typology still points to. Counts regardless of
+   * typologyStatus (INCOMPLETE/ACTIVE/ARCHIVED all count; only soft-deleted
+   * ones don't) — deletedAt is this service's source of truth for "does this
+   * document still exist", the same convention findOne/findByIdPublic
+   * already use; typologyStatus is a lifecycle field, not an existence one.
+   */
+  countOrgStructureReferences(
+    orgId: string,
+    filters: { departamentoId?: string; areaId?: string; cargoId?: string },
+  ): Promise<number> {
+    const filter: FilterQuery<TypologyDocument> = { orgId, deletedAt: null };
+    if (filters.departamentoId) filter['estructuraOrg.departamentoId'] = filters.departamentoId;
+    if (filters.areaId)         filter['estructuraOrg.areaId']         = filters.areaId;
+    if (filters.cargoId)        filter['estructuraOrg.cargoId']        = filters.cargoId;
+    return this.model.countDocuments(filter).exec();
+  }
+
   /** Finds a typology by ID scoped to an org — used by internal service calls */
   async findByIdPublic(orgId: string, id: string): Promise<TypologyDocument> {
     if (!Types.ObjectId.isValid(id)) {
@@ -413,6 +463,24 @@ export class TypologiesService implements OnModuleInit {
 
     const hasDeclaredData = !!(doc.datosDeclarados.nombre && doc.datosDeclarados.codigo && doc.datosDeclarados.version);
     doc.typologyStatus = hasDeclaredData ? TypologyStatus.ACTIVE : TypologyStatus.INCOMPLETE;
+
+    // Explicit pre-check (see assertNoActiveDuplicateCodigo) — without it this
+    // path had ONLY the 11000 catch below as protection. That matters
+    // specifically here: ADOPT_EXTRACTED is how a user who got blocked at
+    // creation for reusing an already-active codigo, then changed the
+    // declared codigo just to get past that check while keeping the same
+    // document, ends up re-adopting the document's real (colliding) codigo —
+    // this is the main way a duplicate-active-codigo actually gets attempted
+    // post-creation, so it must not depend solely on the DB index being
+    // built (see MGESTDOC-59 / onModuleInit's warning on silent index-sync
+    // failures).
+    if (hasDeclaredData) {
+      await this.assertNoActiveDuplicateCodigo(
+        orgId,
+        doc.datosDeclarados.codigo,
+        doc._id as Types.ObjectId,
+      );
+    }
 
     try {
       const saved = await doc.save();

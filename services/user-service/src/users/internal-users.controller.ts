@@ -1,7 +1,9 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
+  Query,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
@@ -78,5 +80,31 @@ export class InternalUsersController {
     const filters: { cargoId?: string; areaId?: string | null; departamentoId?: string } = { cargoId, departamentoId };
     if (dto.areaId !== undefined) filters.areaId = dto.areaId;
     return this.usersService.findByPosition(orgId, filters);
+  }
+
+  // Called by org-service before deleting a departamento/area/cargo, to block
+  // the delete if a user's profile still references it. Deliberately a
+  // separate endpoint from by-position above — see
+  // UserProfileService.countByPosition()'s doc comment for why that one
+  // can't be reused here (its role-assignment join would miss exactly the
+  // users this check needs to catch).
+  @ApiOperation({ summary: 'Count users referencing an org-structure position (internal only)' })
+  @ApiSecurity('internal-token')
+  @AllowInternalTokens('INTERNAL_TOKEN_ORG_USER')
+  @Get('org-structure-references')
+  async orgStructureReferences(
+    @Query('departamentoId') departamentoId?: string,
+    @Query('areaId') areaId?: string,
+    @Query('cargoId') cargoId?: string,
+  ) {
+    const provided = [departamentoId, areaId, cargoId].filter((v) => v !== undefined);
+    if (provided.length !== 1) {
+      throw new BadRequestException(
+        'Exactly one of departamentoId, areaId, or cargoId query params is required',
+      );
+    }
+
+    const count = await this.usersService.countByPosition({ departamentoId, areaId, cargoId });
+    return { count };
   }
 }
