@@ -8,6 +8,7 @@ import { Cargo } from './entities/cargo.entity';
 import { DepartamentosService } from './departamentos.service';
 import { DocumentClientService } from '../common/document-client/document-client.service';
 import { UserClientService } from '../common/user-client/user-client.service';
+import { StructureLeasesService } from './structure-leases.service';
 import { KafkaProducerService } from '@sgd/common';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
@@ -35,6 +36,7 @@ describe('AreasService', () => {
   let kafkaProducer: { emitSafe: jest.Mock };
   let documentClient: { countOrgStructureReferences: jest.Mock };
   let userClient: { countOrgStructureReferences: jest.Mock };
+  let structureLeases: { countActive: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -56,6 +58,9 @@ describe('AreasService', () => {
     // specifically about this guard doesn't have to opt in.
     documentClient = { countOrgStructureReferences: jest.fn().mockResolvedValue(0) };
     userClient = { countOrgStructureReferences: jest.fn().mockResolvedValue(0) };
+    // Defaults to "no pending cross-service lease" so every remove() test
+    // not specifically about this guard doesn't have to opt in.
+    structureLeases = { countActive: jest.fn().mockResolvedValue(0) };
     // create()/remove() run inside a transaction now (race-condition fix);
     // this fakes .transaction() by handing the callback a manager whose
     // getRepository() resolves back to the same mocks above, so existing
@@ -87,6 +92,7 @@ describe('AreasService', () => {
         { provide: DepartamentosService, useValue: departamentosService },
         { provide: DocumentClientService, useValue: documentClient },
         { provide: UserClientService, useValue: userClient },
+        { provide: StructureLeasesService, useValue: structureLeases },
         { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
     }).compile();
@@ -243,6 +249,22 @@ describe('AreasService', () => {
     // holding a row lock across the ~5s outbound HTTP timeout ceiling would
     // be worse than the race it exists to close.
     expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('throws ConflictException instead of deleting an area with an active cross-service lease (MGESTDOC TOCTOU fix)', async () => {
+    // Regression: a typology/user creation that already resolved this area
+    // (BulkStructureService.resolveStructureById()) but hasn't finished
+    // persisting yet must block the delete, even though the external
+    // reference count above is still 0 (the reference doesn't exist yet).
+    const area = makeArea();
+    repo.findOne!.mockResolvedValue(area);
+    structureLeases.countActive.mockResolvedValue(1);
+
+    await expect(service.remove(area.orgId, area.departamentoId, area.id)).rejects.toMatchObject({
+      response: { errorCode: 'AREA_HAS_PENDING_OPERATION', params: { id: area.id } },
+    });
+    expect(structureLeases.countActive).toHaveBeenCalledWith(expect.anything(), 'area', area.id);
+    expect(repo.softRemove).not.toHaveBeenCalled();
   });
 
   it('fails closed: propagates the error instead of allowing the delete when the reference check itself fails', async () => {

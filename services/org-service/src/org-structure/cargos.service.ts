@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { Cargo } from './entities/cargo.entity';
 import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
@@ -8,6 +8,7 @@ import { AreasService } from './areas.service';
 import { DepartamentosService } from './departamentos.service';
 import { DocumentClientService } from '../common/document-client/document-client.service';
 import { UserClientService } from '../common/user-client/user-client.service';
+import { StructureLeasesService } from './structure-leases.service';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
@@ -21,6 +22,7 @@ export class CargosService {
     private readonly departamentosService: DepartamentosService,
     private readonly documentClient: DocumentClientService,
     private readonly userClient: UserClientService,
+    private readonly structureLeases: StructureLeasesService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
@@ -254,18 +256,70 @@ export class CargosService {
     }
   }
 
+  /**
+   * Closes the cross-service TOCTOU gap — see the identical check in
+   * DepartamentosService.remove() for the full reasoning. Cargo is a leaf
+   * node (nothing is ever created "under" it), so unlike
+   * Departamentos/AreasService it never needed a transaction/lock here
+   * before — this is the first one, taken purely to pair against
+   * BulkStructureService.resolveStructureById()'s `pessimistic_read` lock
+   * on the same row via Postgres's lock serialization.
+   */
+  private async assertNoPendingLease(manager: EntityManager, cargo: Cargo): Promise<void> {
+    const leasesCount = await this.structureLeases.countActive(manager, 'cargo', cargo.id);
+    if (leasesCount > 0) {
+      throw new ConflictException({
+        message: `Cannot delete cargo "${cargo.name}": a typology or user assignment referencing it is currently being created`,
+        errorCode: 'CARGO_HAS_PENDING_OPERATION',
+        params: { id: cargo.id },
+      });
+    }
+  }
+
   async remove(orgId: string, departamentoId: string, areaId: string, id: string, actorId?: string): Promise<void> {
-    const cargo = await this.findOne(orgId, departamentoId, areaId, id);
+    const cargo = await this.findOne(orgId, departamentoId, areaId, id); // fast 404 without opening a transaction when it plainly doesn't exist
     await this.assertNoExternalReferences(orgId, cargo);
-    await this.repo.softRemove(cargo);
-    this.emitAuditLog({ actorId, orgId, action: 'CARGO_DELETED', resourceId: id, resourceName: cargo.name, metadata: { areaId, departamentoId } });
+
+    let removedName = '';
+    await this.dataSource.transaction(async (manager) => {
+      const locked = await manager.getRepository(Cargo).findOne({
+        where: { id, orgId, departamentoId, areaId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked) {
+        throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
+      }
+
+      await this.assertNoPendingLease(manager, locked);
+
+      await manager.getRepository(Cargo).softRemove(locked);
+      removedName = locked.name;
+    });
+
+    this.emitAuditLog({ actorId, orgId, action: 'CARGO_DELETED', resourceId: id, resourceName: removedName, metadata: { areaId, departamentoId } });
   }
 
   async removeDept(orgId: string, departamentoId: string, id: string, actorId?: string): Promise<void> {
-    const cargo = await this.findOneDept(orgId, departamentoId, id);
+    const cargo = await this.findOneDept(orgId, departamentoId, id); // fast 404 without opening a transaction when it plainly doesn't exist
     await this.assertNoExternalReferences(orgId, cargo);
-    await this.repo.softRemove(cargo);
-    this.emitAuditLog({ actorId, orgId, action: 'CARGO_DELETED', resourceId: id, resourceName: cargo.name, metadata: { departamentoId } });
+
+    let removedName = '';
+    await this.dataSource.transaction(async (manager) => {
+      const locked = await manager.getRepository(Cargo).findOne({
+        where: { id, orgId, departamentoId, areaId: IsNull() },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked) {
+        throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
+      }
+
+      await this.assertNoPendingLease(manager, locked);
+
+      await manager.getRepository(Cargo).softRemove(locked);
+      removedName = locked.name;
+    });
+
+    this.emitAuditLog({ actorId, orgId, action: 'CARGO_DELETED', resourceId: id, resourceName: removedName, metadata: { departamentoId } });
   }
 
   async restore(orgId: string, departamentoId: string, areaId: string, id: string, actorId?: string): Promise<Cargo> {

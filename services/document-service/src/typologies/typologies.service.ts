@@ -1,5 +1,6 @@
 import {
-  Injectable, NotFoundException, ConflictException, BadRequestException, OnModuleInit,
+  Injectable, NotFoundException, ConflictException, BadRequestException,
+  ServiceUnavailableException, OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
@@ -68,6 +69,14 @@ interface OrgStructureNames {
 
 @Injectable()
 export class TypologiesService implements OnModuleInit {
+  // Flipped to false if syncIndexes() (below) can't confirm the
+  // unique-active-codigo index is actually built. assertNoActiveDuplicateCodigo()
+  // fails closed on it — see that method's docstring for why a pre-check
+  // read alone can't safely stand in for the index. No auto-recovery: the
+  // documented remediation is fixing the underlying duplicate data and
+  // restarting the service, which re-runs onModuleInit() and clears this.
+  private codigoUniquenessEnforced = true;
+
   constructor(
     @InjectModel(Typology.name)
     private readonly model: Model<TypologyDocument>,
@@ -86,11 +95,13 @@ export class TypologiesService implements OnModuleInit {
     try {
       await this.model.syncIndexes();
     } catch (err) {
+      this.codigoUniquenessEnforced = false;
       Sentry.captureException(err);
       this.logger.error(
         'Failed to sync typology indexes — the unique-active-codigo constraint may not be enforced. ' +
           'This usually means duplicate ACTIVE typologies already exist for the same (orgId, codigo); ' +
-          'find and resolve them, then restart this service.',
+          'find and resolve them, then restart this service. Blocking typology writes that would rely ' +
+          'on this constraint (create/update/resolveDiscrepancy with a codigo) until then.',
         err instanceof Error ? err.stack : String(err),
         'TypologiesService',
       );
@@ -99,17 +110,22 @@ export class TypologiesService implements OnModuleInit {
 
   /**
    * Explicit pre-check for "only one ACTIVE typology per (orgId, codigo)".
-   * The partial unique index on the schema is the last line of defense
-   * against races (surfaced here as a caught Mongo 11000 error in every
-   * write path below) — but it only fires if the index actually got built,
-   * which onModuleInit warns can silently fail to happen (e.g. duplicate
-   * ACTIVE codigos that already existed before the index was added). Write
-   * paths that skip this explicit check and rely solely on that 11000 catch
-   * — as update()/resolveDiscrepancy() used to — have zero protection left
-   * once the index is missing: doc.save() just succeeds, silently leaving
-   * two ACTIVE typologies with the same codigo. create() already had this
-   * belt-and-suspenders pair; this factors it out so every write path gets
-   * both.
+   * On its own this is a plain read-then-write: two concurrent requests can
+   * both read "no duplicate" and both proceed to save, so it CANNOT
+   * guarantee the constraint by itself. The actual guarantee comes from
+   * MongoDB's own unique index, enforced atomically at write time
+   * (surfaced here as a caught 11000 error in every write path below) —
+   * this pre-check only exists to turn that into a clean ConflictException
+   * instead of a raw duplicate-key error reaching the caller. Write paths
+   * that skip this explicit check and rely solely on the 11000 catch — as
+   * update()/resolveDiscrepancy() used to — have zero protection once the
+   * index is missing: doc.save() just succeeds, silently leaving two ACTIVE
+   * typologies with the same codigo.
+   *
+   * So if syncIndexes() couldn't confirm the index is actually built
+   * (codigoUniquenessEnforced), this read can no longer be trusted as even
+   * a best-effort check — fail closed instead of silently accepting an
+   * unbounded race window.
    */
   private async assertNoActiveDuplicateCodigo(
     orgId: string,
@@ -117,6 +133,12 @@ export class TypologiesService implements OnModuleInit {
     excludeId?: Types.ObjectId,
   ): Promise<void> {
     if (!codigo) return;
+    if (!this.codigoUniquenessEnforced) {
+      throw new ServiceUnavailableException({
+        message: 'Typology creation/update is temporarily unavailable: the active-codigo uniqueness constraint could not be verified. Contact an administrator.',
+        errorCode: 'TYPOLOGY_UNIQUENESS_UNAVAILABLE',
+      });
+    }
     const filter: FilterQuery<TypologyDocument> = {
       orgId,
       'datosDeclarados.codigo': codigo,

@@ -8,6 +8,7 @@ import { UpdateAreaDto } from './dto/update-area.dto';
 import { DepartamentosService } from './departamentos.service';
 import { DocumentClientService } from '../common/document-client/document-client.service';
 import { UserClientService } from '../common/user-client/user-client.service';
+import { StructureLeasesService } from './structure-leases.service';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
@@ -25,6 +26,7 @@ export class AreasService {
     private readonly departamentosService: DepartamentosService,
     private readonly documentClient: DocumentClientService,
     private readonly userClient: UserClientService,
+    private readonly structureLeases: StructureLeasesService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
@@ -209,6 +211,17 @@ export class AreasService {
           message: `Cannot delete area "${area.name}": it still has ${cargosCount} cargo(s) associated`,
           errorCode: 'AREA_HAS_DEPENDENCIES',
           params: { id, cargosCount },
+        });
+      }
+
+      // Closes the cross-service TOCTOU gap — see the identical check in
+      // DepartamentosService.remove() for the full reasoning.
+      const leasesCount = await this.structureLeases.countActive(manager, 'area', id);
+      if (leasesCount > 0) {
+        throw new ConflictException({
+          message: `Cannot delete area "${area.name}": a typology or user assignment referencing it is currently being created`,
+          errorCode: 'AREA_HAS_PENDING_OPERATION',
+          params: { id },
         });
       }
 

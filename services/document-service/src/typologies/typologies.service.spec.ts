@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { TypologiesService } from './typologies.service';
 import {
@@ -119,6 +119,37 @@ describe('TypologiesService', () => {
         expect.any(String),
         'TypologiesService',
       );
+    });
+
+    // Regression: a pre-check read-then-write can't guarantee uniqueness on
+    // its own under concurrent requests — the real guarantee is the Mongo
+    // unique index. If syncIndexes() can't confirm that index is built,
+    // every write path that would otherwise rely on the pre-check must
+    // fail closed instead of silently accepting an unbounded race window
+    // (two concurrent requests both reading "no duplicate" and both saving).
+    it('blocks create()/update()/resolveDiscrepancy() with ServiceUnavailableException after a failed index sync, without ever touching the DB', async () => {
+      const { Model, instance } = makeModel(makeDoc({
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Policy', codigo: 'POL-002', version: '01', extractedAt: new Date(), discrepancias: [] },
+      }));
+      Model.syncIndexes = jest.fn().mockRejectedValue(new Error('E11000 duplicate key error'));
+      const service = makeService(Model);
+      await service.onModuleInit();
+      mockLogger.error.mockClear();
+
+      await expect(
+        service.create('org-1', { departamentoId: 'dept-1', codigo: 'POL-001' }, STRUCTURE_NAMES),
+      ).rejects.toThrow(ServiceUnavailableException);
+      expect(instance.save).not.toHaveBeenCalled();
+
+      await expect(
+        service.update('org-1', instance.id, { codigo: 'POL-003' }),
+      ).rejects.toThrow(ServiceUnavailableException);
+
+      await expect(
+        service.resolveDiscrepancy('org-1', instance.id, { action: ResolveAction.ADOPT_EXTRACTED }),
+      ).rejects.toThrow(ServiceUnavailableException);
+      expect(instance.save).not.toHaveBeenCalled();
     });
   });
 

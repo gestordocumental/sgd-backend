@@ -95,12 +95,14 @@ export class WorkflowAdminCycleService {
 
       // [RN-17] Defensa en profundidad: el ciclo de revisión debe estar
       // habilitado para este workflow. reviewCycleEnabled es una instantánea
-      // fijada al crear el workflow (y actualizada en approve() al completar
-      // la aprobación final) — se valida contra esa instantánea propia del
-      // workflow, no contra el flag en vivo de la tipología en
-      // document-service: un cambio posterior al flag de la tipología no
-      // debe afectar workflows ya creados, solo a los que se creen después
-      // del cambio (ver MGESTDOC-58).
+      // fijada al crear el workflow, y sobrescrita una última vez en
+      // approve() al completar la aprobación final — ese valor final es el
+      // que queda — se valida contra esa instantánea propia del workflow,
+      // no contra el flag en vivo de la tipología en document-service: un
+      // cambio posterior al flag de la tipología solo afecta a los
+      // workflows que aún no completaron su aprobación final, sin importar
+      // cuándo se crearon — los que ya la completaron quedan fijos (ver
+      // MGESTDOC-58).
       if (!workflow.reviewCycleEnabled) {
         throw new ForbiddenException('The review cycle is disabled for this workflow');
       }

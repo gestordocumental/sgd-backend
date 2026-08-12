@@ -8,6 +8,7 @@ import { CreateDepartamentoDto } from './dto/create-departamento.dto';
 import { UpdateDepartamentoDto } from './dto/update-departamento.dto';
 import { DocumentClientService } from '../common/document-client/document-client.service';
 import { UserClientService } from '../common/user-client/user-client.service';
+import { StructureLeasesService } from './structure-leases.service';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
@@ -27,6 +28,7 @@ export class DepartamentosService {
     private readonly dataSource: DataSource,
     private readonly documentClient: DocumentClientService,
     private readonly userClient: UserClientService,
+    private readonly structureLeases: StructureLeasesService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
@@ -211,6 +213,23 @@ export class DepartamentosService {
           message: `Cannot delete departamento "${departamento.name}": it still has ${areasCount} area(s) and ${cargosCount} cargo(s) associated`,
           errorCode: 'DEPARTMENT_HAS_DEPENDENCIES',
           params: { id, areasCount, cargosCount },
+        });
+      }
+
+      // Closes the cross-service TOCTOU gap: a typology/user creation that
+      // already validated this departamento (BulkStructureService.
+      // resolveStructureById()) but hasn't finished persisting yet holds a
+      // lease here — reserve() took the paired `pessimistic_read` lock on
+      // this same row, so by the time we hold `pessimistic_write` here,
+      // every lease that could exist has already been inserted and
+      // committed (or never will be, since a concurrent resolve is now
+      // blocked behind this transaction). See StructureLease entity.
+      const leasesCount = await this.structureLeases.countActive(manager, 'departamento', id);
+      if (leasesCount > 0) {
+        throw new ConflictException({
+          message: `Cannot delete departamento "${departamento.name}": a typology or user assignment referencing it is currently being created`,
+          errorCode: 'DEPARTMENT_HAS_PENDING_OPERATION',
+          params: { id },
         });
       }
 

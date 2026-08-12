@@ -12,6 +12,18 @@ import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import { CORRELATION_ID_HEADER, getCorrelationId } from '@sgd/common';
 import CircuitBreaker = require('opossum');
 
+/**
+ * True for 4xx statuses that are deterministic client/business errors (not found,
+ * forbidden, validation) — repeating the exact same request wouldn't succeed, so
+ * they must not count as a circuit failure. 408 (timeout) and 429 (rate limited)
+ * are deliberately excluded: they signal user-service is struggling, not a bad
+ * request, so they must trip the circuit the same way a 5xx would. Mirrors
+ * DocumentClientService's isNonTrippingClientError().
+ */
+export function isNonTrippingClientError(status: unknown): boolean {
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 @Injectable()
 export class UserClientService {
   private readonly userServiceUrl: string;
@@ -35,11 +47,7 @@ export class UserClientService {
         errorThresholdPercentage: 50,
         resetTimeout:             30_000,
         volumeThreshold:          3,
-        // 4xx errors are deterministic — don't trip the circuit.
-        errorFilter: (err: any) => {
-          const s = err?.response?.status;
-          return typeof s === 'number' && s >= 400 && s < 500;
-        },
+        errorFilter: (err: any) => isNonTrippingClientError(err?.response?.status),
       },
     );
 

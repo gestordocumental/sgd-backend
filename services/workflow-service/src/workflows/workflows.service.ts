@@ -759,16 +759,18 @@ export class WorkflowsService {
   private async findOneOrFail(id: string, user: JwtPayload): Promise<WorkflowResponseDto> {
     const workflow = await this.findWorkflowOrFail(id, user);
 
-    // reviewCycleEnabled es una instantánea fijada al crear el workflow (y
-    // actualizada en approve() al completar la aprobación final) — NO se
-    // refresca en vivo aquí. Un cambio posterior al flag de la tipología solo
-    // debe afectar workflows creados después del cambio; los ya creados
-    // deben conservar el valor con el que llegaron a este punto, incluso si
-    // luego se habilita/deshabilita el ciclo de revisión para la tipología.
-    // (Antes esto se refrescaba en vivo contra document-service en cada
-    // lectura, lo que sobrescribía la instantánea y dejaba el botón "Iniciar
-    // ciclo de revisión" del frontend visible pero sin efecto — ver
-    // MGESTDOC-58.)
+    // reviewCycleEnabled es una instantánea fijada al crear el workflow, y
+    // sobrescrita una última vez en approve() al completar la aprobación
+    // final — ese es el valor que queda fijo de ahí en adelante; NO se
+    // refresca en vivo aquí. Un cambio posterior al flag de la tipología
+    // solo debe afectar workflows que todavía no completaron su aprobación
+    // final, sin importar cuándo se crearon — los que ya la completaron
+    // deben conservar el valor con el que salieron de la aprobación, incluso
+    // si luego se habilita/deshabilita el ciclo de revisión para la
+    // tipología. (Antes esto se refrescaba en vivo contra document-service
+    // en cada lectura, lo que sobrescribía la instantánea y dejaba el botón
+    // "Iniciar ciclo de revisión" del frontend visible pero sin efecto —
+    // ver MGESTDOC-58.)
 
     const actions = await this.actionRepo.find({
       where: { workflowId: id },

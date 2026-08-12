@@ -331,6 +331,73 @@ describe('UsersService', () => {
       expect(usersRepo.save).not.toHaveBeenCalled();
     });
 
+    // ── org-structure validation on create (MGESTDOC TOCTOU fix) ────────────
+    // Regression: create() used to persist departamentoId/areaId/cargoId
+    // as-is with zero validation against org-service — unlike update(),
+    // which already called validateOrgStructure(). This also matters for
+    // the cross-service lease mechanism (see org-service's StructureLease):
+    // every write path that persists a new org-structure reference must
+    // call resolve-by-ids first, or a concurrent departamento/area/cargo
+    // deletion can't detect it.
+
+    it('does not call orgClientService.validateOrgStructure when no org-structure fields are provided', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer' };
+      const user = makeUser({ email: dto.email });
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
+    });
+
+    it('calls orgClientService.validateOrgStructure with dto.orgId when departamentoId is provided', async () => {
+      const dto = {
+        email: 'new@example.com', position: 'Developer',
+        orgId: 'org-uuid-1', departamentoId: 'dept-uuid', areaId: 'area-uuid', cargoId: 'cargo-uuid',
+      };
+      const user = makeUser({ email: dto.email });
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto);
+
+      expect(orgClient.validateOrgStructure).toHaveBeenCalledWith(
+        'org-uuid-1', 'dept-uuid', 'area-uuid', 'cargo-uuid',
+      );
+      expect(usersRepo.save).toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException — without persisting the user — when areaId is provided without departamentoId', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1', areaId: 'area-uuid' };
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+      expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
+      expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException — without persisting the user — when departamentoId is provided without orgId', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', departamentoId: 'dept-uuid' };
+      usersRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+      expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
+      expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('propagates the rejection from validateOrgStructure and does not persist the user', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', orgId: 'org-uuid-1', departamentoId: 'dept-uuid' };
+      usersRepo.findOne.mockResolvedValue(null);
+      orgClient.validateOrgStructure.mockRejectedValue(new BadRequestException('Departamento not found'));
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+      expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
     it('resends invitation when pending user has an active membership in the calling org', async () => {
       const dto = { email: 'pending@example.com', position: 'Dev' };
       const pendingUser = makeUser({

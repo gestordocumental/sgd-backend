@@ -242,14 +242,41 @@ describe('DocumentUploadService', () => {
       );
     });
 
-    it('throws InternalServerErrorException when Kafka emit fails and deletes the uploaded file', async () => {
+    // A rejected producer.send() doesn't prove Kafka never got the message —
+    // the ack round-trip can fail after a successful write. So this must NOT
+    // roll back the upload (that would risk deleting/reverting data an
+    // already-delivered event still references) — it only marks extraction
+    // FAILED and leaves recovery to the existing retryExtraction() flow.
+    it('keeps the uploaded document (does not roll back) and marks extraction FAILED when the Kafka emit fails', async () => {
       const doc = makeDoc();
       const { model, storage, kafka, logger, clamav } = makeDeps(doc);
       kafka.emit.mockRejectedValue(new Error('Kafka down'));
       const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
-      await expect(service.upload('org-1', doc.id, makeFile())).rejects.toThrow(InternalServerErrorException);
-      expect(storage.delete).toHaveBeenCalled();
+      const result = await service.upload('org-1', doc.id, makeFile());
+
+      expect(result.extractionStatus).toBe(ExtractionStatus.FAILED);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.FAILED);
+      expect(doc.documento.r2Key).not.toBeNull(); // new file kept, not reverted
+      expect(storage.delete).not.toHaveBeenCalled(); // no previous file, and the new one is kept
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('delivery is unconfirmed'),
+        expect.any(String), // err.stack
+        'DocumentUploadService',
+      );
+    });
+
+    it('still deletes the previous file after a Kafka failure — the new document is already canonical either way', async () => {
+      const doc = makeDoc({
+        documento: { r2Key: 'org/org-1/typologies/old-file.pdf', extractionStatus: ExtractionStatus.COMPLETED, originalName: 'old.pdf', mimeType: PDF_MIME, uploadedAt: new Date() },
+      });
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      kafka.emit.mockRejectedValue(new Error('Kafka down'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      await service.upload('org-1', doc.id, makeFile());
+
+      expect(storage.delete).toHaveBeenCalledWith('org/org-1/typologies/old-file.pdf');
     });
 
     it('deletes orphaned upload and rethrows when DB save fails', async () => {
@@ -522,7 +549,12 @@ describe('DocumentUploadService', () => {
       expect(oldDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
     });
 
-    it('cleans up newDoc/file and restores old to ACTIVE when the Kafka emit fails', async () => {
+    // A rejected producer.send() doesn't prove Kafka never got the message —
+    // the ack round-trip can fail after a successful write. So this must NOT
+    // roll back the version bump (that would risk deleting data a delivered
+    // event still references) — it only marks extraction FAILED and leaves
+    // recovery to the existing retryExtraction() flow.
+    it('keeps the new version (does not roll back) and marks extraction FAILED when the Kafka emit fails, instead of deleting data an already-delivered event might reference', async () => {
       const oldDoc = makeDoc();
       const newDoc = makeDoc({ id: makeId() });
 
@@ -535,13 +567,17 @@ describe('DocumentUploadService', () => {
       const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
 
       const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
-      await expect(
-        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
-      ).rejects.toThrow(InternalServerErrorException);
+      const result = await service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' });
 
-      expect(newDoc.deleteOne).toHaveBeenCalled();
-      expect(storage.delete).toHaveBeenCalled();
-      expect(oldDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
+      expect(result.documento.extractionStatus).toBe(ExtractionStatus.FAILED);
+      expect(newDoc.deleteOne).not.toHaveBeenCalled();
+      expect(storage.delete).not.toHaveBeenCalled();
+      expect(oldDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED); // not restored — newDoc is the real active one now
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('delivery is unconfirmed'),
+        expect.any(String), // err.stack
+        'DocumentUploadService',
+      );
     });
 
     it('logs loudly instead of silently swallowing when restoring old to ACTIVE itself fails', async () => {

@@ -1,10 +1,12 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { BulkStructureService } from './bulk-structure.service';
 import { Departamento } from './entities/departamento.entity';
 import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
+import { StructureLeasesService } from './structure-leases.service';
 import { AppLogger } from '@sgd/common';
 
 // ─── ExcelJS mock ─────────────────────────────────────────────────────────────
@@ -94,12 +96,32 @@ describe('BulkStructureService', () => {
   let deptRepo: MockRepo<Departamento>;
   let areaRepo: MockRepo<Area>;
   let cargoRepo: MockRepo<Cargo>;
+  let dataSource: { transaction: jest.Mock };
+  let structureLeases: { reserve: jest.Mock };
   let mockLogger: jest.Mocked<AppLogger>;
 
   beforeEach(async () => {
     deptRepo = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
     areaRepo = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
     cargoRepo = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+    // resolveStructureById() now runs inside a transaction (cross-service
+    // TOCTOU fix) — routes manager.getRepository(X) back to the same repo
+    // mocks above so every existing assertion on deptRepo/areaRepo/cargoRepo
+    // keeps working unchanged.
+    dataSource = {
+      transaction: jest.fn(async (cb: (manager: unknown) => unknown) => {
+        const manager = {
+          getRepository: (entity: unknown) => {
+            if (entity === Departamento) return deptRepo;
+            if (entity === Area) return areaRepo;
+            if (entity === Cargo) return cargoRepo;
+            throw new Error(`Unexpected entity passed to manager.getRepository: ${String(entity)}`);
+          },
+        };
+        return cb(manager);
+      }),
+    };
+    structureLeases = { reserve: jest.fn().mockResolvedValue(undefined) };
     mockLogger = {
       log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn(), http: jest.fn(),
     } as any;
@@ -110,6 +132,8 @@ describe('BulkStructureService', () => {
         { provide: getRepositoryToken(Departamento), useValue: deptRepo },
         { provide: getRepositoryToken(Area), useValue: areaRepo },
         { provide: getRepositoryToken(Cargo), useValue: cargoRepo },
+        { provide: DataSource, useValue: dataSource },
+        { provide: StructureLeasesService, useValue: structureLeases },
         { provide: AppLogger, useValue: mockLogger },
       ],
     }).compile();
@@ -616,6 +640,73 @@ describe('BulkStructureService', () => {
       expect(cargoRepo.findOne).toHaveBeenNthCalledWith(2, {
         where: { orgId: ORG_ID, id: misplacedCargo.id },
       });
+    });
+
+    // Regression: this is the write side of the cross-service TOCTOU fix —
+    // document-service/user-service call resolveStructureById() right
+    // before persisting a new/changed reference, and each resolved level
+    // must get a lease so Departamentos/Areas/CargosService.remove() can
+    // detect an in-flight write and refuse to delete out from under it.
+    it('reserves a lease for the departamento only when no area/cargo is resolved', async () => {
+      const dept = makeDept();
+      deptRepo.findOne.mockResolvedValue(dept);
+
+      await service.resolveStructureById({ orgId: ORG_ID, departamentoId: dept.id });
+
+      expect(structureLeases.reserve).toHaveBeenCalledTimes(1);
+      expect(structureLeases.reserve).toHaveBeenCalledWith(expect.anything(), ORG_ID, 'departamento', dept.id);
+    });
+
+    it('reserves a lease for both departamento and area when an area is resolved', async () => {
+      const dept = makeDept();
+      const area = makeArea();
+      deptRepo.findOne.mockResolvedValue(dept);
+      areaRepo.findOne.mockResolvedValue(area);
+
+      await service.resolveStructureById({ orgId: ORG_ID, departamentoId: dept.id, areaId: area.id });
+
+      expect(structureLeases.reserve).toHaveBeenCalledTimes(2);
+      expect(structureLeases.reserve).toHaveBeenCalledWith(expect.anything(), ORG_ID, 'departamento', dept.id);
+      expect(structureLeases.reserve).toHaveBeenCalledWith(expect.anything(), ORG_ID, 'area', area.id);
+    });
+
+    it('reserves a lease for departamento, area and cargo when all three are resolved', async () => {
+      const dept = makeDept();
+      const area = makeArea();
+      const cargo = makeCargo();
+      deptRepo.findOne.mockResolvedValue(dept);
+      areaRepo.findOne.mockResolvedValue(area);
+      cargoRepo.findOne.mockResolvedValue(cargo);
+
+      await service.resolveStructureById({
+        orgId: ORG_ID, departamentoId: dept.id, areaId: area.id, cargoId: cargo.id,
+      });
+
+      expect(structureLeases.reserve).toHaveBeenCalledTimes(3);
+      expect(structureLeases.reserve).toHaveBeenCalledWith(expect.anything(), ORG_ID, 'cargo', cargo.id);
+    });
+
+    it('reserves a lease for departamento and cargo (dept-level cargo, no area)', async () => {
+      const dept = makeDept();
+      const cargo = makeCargo({ areaId: null });
+      deptRepo.findOne.mockResolvedValue(dept);
+      cargoRepo.findOne.mockResolvedValue(cargo);
+
+      await service.resolveStructureById({ orgId: ORG_ID, departamentoId: dept.id, cargoId: cargo.id });
+
+      expect(structureLeases.reserve).toHaveBeenCalledTimes(2);
+      expect(structureLeases.reserve).toHaveBeenCalledWith(expect.anything(), ORG_ID, 'departamento', dept.id);
+      expect(structureLeases.reserve).toHaveBeenCalledWith(expect.anything(), ORG_ID, 'cargo', cargo.id);
+    });
+
+    it('does not reserve any lease when the departamento is not found', async () => {
+      deptRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.resolveStructureById({ orgId: ORG_ID, departamentoId: 'missing-dept' }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(structureLeases.reserve).not.toHaveBeenCalled();
     });
   });
 });

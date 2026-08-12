@@ -196,14 +196,18 @@ export class DocumentClientService {
   }
 
   /**
-   * Whether workflows created against this typology should go through the
-   * admin review cycle step. Called only once per workflow, from approve()'s
+   * Whether workflows against this typology should go through the admin
+   * review cycle step. Called only once per workflow, from approve()'s
    * final-approval branch, to decide the reviewCycleEnabled snapshot stored
    * on that workflow at the moment it leaves the approval flow — that
    * snapshot then travels with the workflow for its whole lifetime and is
-   * never re-checked live again (see MGESTDOC-58: changes to this flag must
-   * only affect workflows created afterwards, not ones already past
-   * approval).
+   * never re-checked live again (see MGESTDOC-58). Note the boundary this
+   * draws: it's the workflow's *final-approval* moment that matters, not
+   * its creation moment — a workflow created before the typology's flag
+   * changes but still mid-approval when it changes picks up the new value
+   * at approval time, same as one created after the change. Only workflows
+   * that have *already completed* final approval are insulated from a
+   * later flag change.
    *
    * `false` is only ever a genuine, validated answer from document-service —
    * never a stand-in for "couldn't tell". The caller treats `false` as
