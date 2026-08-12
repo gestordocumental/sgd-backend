@@ -86,6 +86,20 @@ class DocumentoInfo {
 
   @Prop({ type: Number, default: null })
   sizeBytes!: number | null;
+
+  /**
+   * When the *current* extraction attempt started — distinct from
+   * `uploadedAt`, which never changes across retries. DocumentUploadService
+   * sets this every time extractionStatus flips to PROCESSING (initial
+   * upload, new version, or retryExtraction()), atomically with that same
+   * save, before emitting the Kafka event. Used to detect an extraction
+   * genuinely stuck in PROCESSING (see STUCK_EXTRACTION_THRESHOLD_MS) —
+   * using `uploadedAt` for that instead would never reset on a successful
+   * retry, so a second retry call moments after a legitimate one started
+   * would also see the file as "old" and be allowed to re-interrupt it.
+   */
+  @Prop({ type: Date, default: null })
+  extractionStartedAt!: Date | null;
 }
 
 @Schema({ _id: false })

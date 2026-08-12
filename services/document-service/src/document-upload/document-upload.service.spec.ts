@@ -796,11 +796,12 @@ describe('DocumentUploadService', () => {
     it('allows a retry when PROCESSING has been stuck longer than the threshold', async () => {
       const doc = makeDoc({
         documento: {
-          r2Key:            'org/org-1/typologies/file.pdf',
-          originalName:     'file.pdf',
-          mimeType:         PDF_MIME,
-          uploadedAt:       new Date(Date.now() - 20 * 60 * 1000), // 20 min ago > 15 min threshold
-          extractionStatus: ExtractionStatus.PROCESSING,
+          r2Key:               'org/org-1/typologies/file.pdf',
+          originalName:        'file.pdf',
+          mimeType:            PDF_MIME,
+          uploadedAt:          new Date(Date.now() - 20 * 60 * 1000),
+          extractionStartedAt: new Date(Date.now() - 20 * 60 * 1000), // 20 min ago > 15 min threshold
+          extractionStatus:    ExtractionStatus.PROCESSING,
         },
       });
       const { model, storage, kafka, logger, clamav } = makeDeps(doc);
@@ -816,11 +817,12 @@ describe('DocumentUploadService', () => {
     it('still rejects PROCESSING that has not yet crossed the stuck threshold', async () => {
       const doc = makeDoc({
         documento: {
-          r2Key:            'org/org-1/typologies/file.pdf',
-          originalName:     'file.pdf',
-          mimeType:         PDF_MIME,
-          uploadedAt:       new Date(Date.now() - 5 * 60 * 1000), // 5 min ago < 15 min threshold
-          extractionStatus: ExtractionStatus.PROCESSING,
+          r2Key:               'org/org-1/typologies/file.pdf',
+          originalName:        'file.pdf',
+          mimeType:            PDF_MIME,
+          uploadedAt:          new Date(Date.now() - 5 * 60 * 1000),
+          extractionStartedAt: new Date(Date.now() - 5 * 60 * 1000), // 5 min ago < 15 min threshold
+          extractionStatus:    ExtractionStatus.PROCESSING,
         },
       });
       const { model, storage, kafka, logger, clamav } = makeDeps(doc);
@@ -830,14 +832,15 @@ describe('DocumentUploadService', () => {
       expect(kafka.emit).not.toHaveBeenCalled();
     });
 
-    it('rejects PROCESSING with no uploadedAt to measure staleness against, rather than assuming it is stuck', async () => {
+    it('rejects PROCESSING with no extractionStartedAt to measure staleness against, rather than assuming it is stuck', async () => {
       const doc = makeDoc({
         documento: {
-          r2Key:            'org/org-1/typologies/file.pdf',
-          originalName:     'file.pdf',
-          mimeType:         PDF_MIME,
-          uploadedAt:       null,
-          extractionStatus: ExtractionStatus.PROCESSING,
+          r2Key:               'org/org-1/typologies/file.pdf',
+          originalName:        'file.pdf',
+          mimeType:            PDF_MIME,
+          uploadedAt:          new Date(Date.now() - 20 * 60 * 1000), // old upload — must not be used as the signal
+          extractionStartedAt: null,
+          extractionStatus:    ExtractionStatus.PROCESSING,
         },
       });
       const { model, storage, kafka, logger, clamav } = makeDeps(doc);
@@ -845,6 +848,36 @@ describe('DocumentUploadService', () => {
 
       await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
       expect(kafka.emit).not.toHaveBeenCalled();
+    });
+
+    // Regression: uploadedAt never changes across retries, so a threshold
+    // check anchored to it would never reset — once a file is older than
+    // STUCK_EXTRACTION_THRESHOLD_MS, every subsequent PROCESSING state,
+    // including one from a retry that started moments ago, would always
+    // look "stuck" and be re-interruptible. extractionStartedAt is
+    // re-claimed on every successful retry specifically to prevent this.
+    it('rejects an immediate second retry right after a successful re-emission, even though the file itself is old', async () => {
+      const doc = makeDoc({
+        documento: {
+          r2Key:               'org/org-1/typologies/file.pdf',
+          originalName:        'file.pdf',
+          mimeType:            PDF_MIME,
+          uploadedAt:          new Date(Date.now() - 20 * 60 * 1000), // file is old — was already past the threshold once
+          extractionStartedAt: new Date(Date.now() - 20 * 60 * 1000),
+          extractionStatus:    ExtractionStatus.PROCESSING,
+        },
+      });
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      const first = await service.retryExtraction('org-1', doc.id);
+      expect(first.extractionStatus).toBe(ExtractionStatus.PROCESSING);
+      expect(kafka.emit).toHaveBeenCalledTimes(1);
+
+      // extractionStartedAt was just re-claimed to "now" by the call above —
+      // an immediate second call must NOT see it as stuck anymore.
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(BadRequestException);
+      expect(kafka.emit).toHaveBeenCalledTimes(1); // no second emit
     });
   });
 

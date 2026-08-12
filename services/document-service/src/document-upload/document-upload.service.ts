@@ -137,11 +137,12 @@ export class DocumentUploadService {
     // Step 2: Persist new state — if this fails, delete the orphaned upload.
     typology.documento = {
       r2Key,
-      originalName:      file.originalname,
-      mimeType:          file.mimetype,
-      uploadedAt:        new Date(),
-      extractionStatus:  ExtractionStatus.PROCESSING,
-      sizeBytes:         file.size ?? null,
+      originalName:        file.originalname,
+      mimeType:            file.mimetype,
+      uploadedAt:          new Date(),
+      extractionStatus:    ExtractionStatus.PROCESSING,
+      extractionStartedAt: new Date(),
+      sizeBytes:           file.size ?? null,
     };
 
     try {
@@ -343,11 +344,12 @@ export class DocumentUploadService {
     // Step 4: Persist documento on new doc — if this fails, clean up file + newDoc + restore old.
     newDoc.documento = {
       r2Key,
-      originalName:     file.originalname,
-      mimeType:         file.mimetype,
-      uploadedAt:       new Date(),
-      extractionStatus: ExtractionStatus.PROCESSING,
-      sizeBytes:        file.size ?? null,
+      originalName:        file.originalname,
+      mimeType:            file.mimetype,
+      uploadedAt:          new Date(),
+      extractionStatus:    ExtractionStatus.PROCESSING,
+      extractionStartedAt: new Date(),
+      sizeBytes:           file.size ?? null,
     };
 
     try {
@@ -458,11 +460,18 @@ export class DocumentUploadService {
 
     if (typology.documento.extractionStatus !== ExtractionStatus.FAILED) {
       // Recovery path for a typology stuck in PROCESSING with no way back to
-      // FAILED — see STUCK_EXTRACTION_THRESHOLD_MS.
+      // FAILED — see STUCK_EXTRACTION_THRESHOLD_MS. Anchored to
+      // extractionStartedAt, NOT uploadedAt: uploadedAt never changes across
+      // retries, so once a file is older than the threshold every PROCESSING
+      // state — including one from a retry that started a second ago — would
+      // always look "stuck" and be re-interruptible, defeating the point of
+      // having a threshold at all. extractionStartedAt is re-claimed below
+      // every time an attempt actually begins, so this only fires for an
+      // attempt that's genuinely been running longer than the threshold.
       const stuckInProcessing =
         typology.documento.extractionStatus === ExtractionStatus.PROCESSING &&
-        !!typology.documento.uploadedAt &&
-        Date.now() - typology.documento.uploadedAt.getTime() > DocumentUploadService.STUCK_EXTRACTION_THRESHOLD_MS;
+        !!typology.documento.extractionStartedAt &&
+        Date.now() - typology.documento.extractionStartedAt.getTime() > DocumentUploadService.STUCK_EXTRACTION_THRESHOLD_MS;
 
       if (!stuckInProcessing) {
         throw new BadRequestException(
@@ -471,7 +480,12 @@ export class DocumentUploadService {
       }
     }
 
+    // Claims this attempt atomically — persisted before the Kafka emit below
+    // — so an immediate second retryExtraction() call sees a fresh
+    // extractionStartedAt and correctly gets rejected instead of also
+    // passing the stuck-check above and re-emitting on top of this attempt.
     typology.documento.extractionStatus = ExtractionStatus.PROCESSING;
+    typology.documento.extractionStartedAt = new Date();
     await typology.save();
 
     try {
