@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, FindOptionsWhere, IsNull, Repository } from 'typeorm';
 import { Cargo } from './entities/cargo.entity';
 import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
@@ -276,14 +276,23 @@ export class CargosService {
     }
   }
 
-  async remove(orgId: string, departamentoId: string, areaId: string, id: string, actorId?: string): Promise<void> {
-    const cargo = await this.findOne(orgId, departamentoId, areaId, id); // fast 404 without opening a transaction when it plainly doesn't exist
-    await this.assertNoExternalReferences(orgId, cargo);
-
+  /**
+   * Shared body of remove()/removeDept(): lock, check for a pending
+   * cross-service lease, soft-delete, audit-log. Only the row filter and
+   * audit metadata differ between the area-scoped and department-level
+   * cargo variants — factored out so the two can't silently drift apart.
+   */
+  private async removeLocked(
+    orgId: string,
+    id: string,
+    where: FindOptionsWhere<Cargo>,
+    auditMetadata: Record<string, unknown>,
+    actorId?: string,
+  ): Promise<void> {
     let removedName = '';
     await this.dataSource.transaction(async (manager) => {
       const locked = await manager.getRepository(Cargo).findOne({
-        where: { id, orgId, departamentoId, areaId },
+        where,
         lock: { mode: 'pessimistic_write' },
       });
       if (!locked) {
@@ -296,30 +305,19 @@ export class CargosService {
       removedName = locked.name;
     });
 
-    this.emitAuditLog({ actorId, orgId, action: 'CARGO_DELETED', resourceId: id, resourceName: removedName, metadata: { areaId, departamentoId } });
+    this.emitAuditLog({ actorId, orgId, action: 'CARGO_DELETED', resourceId: id, resourceName: removedName, metadata: auditMetadata });
+  }
+
+  async remove(orgId: string, departamentoId: string, areaId: string, id: string, actorId?: string): Promise<void> {
+    const cargo = await this.findOne(orgId, departamentoId, areaId, id); // fast 404 without opening a transaction when it plainly doesn't exist
+    await this.assertNoExternalReferences(orgId, cargo);
+    await this.removeLocked(orgId, id, { id, orgId, departamentoId, areaId }, { areaId, departamentoId }, actorId);
   }
 
   async removeDept(orgId: string, departamentoId: string, id: string, actorId?: string): Promise<void> {
     const cargo = await this.findOneDept(orgId, departamentoId, id); // fast 404 without opening a transaction when it plainly doesn't exist
     await this.assertNoExternalReferences(orgId, cargo);
-
-    let removedName = '';
-    await this.dataSource.transaction(async (manager) => {
-      const locked = await manager.getRepository(Cargo).findOne({
-        where: { id, orgId, departamentoId, areaId: IsNull() },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!locked) {
-        throw new NotFoundException({ message: `Cargo ${id} not found`, errorCode: 'CARGO_NOT_FOUND', params: { id } });
-      }
-
-      await this.assertNoPendingLease(manager, locked);
-
-      await manager.getRepository(Cargo).softRemove(locked);
-      removedName = locked.name;
-    });
-
-    this.emitAuditLog({ actorId, orgId, action: 'CARGO_DELETED', resourceId: id, resourceName: removedName, metadata: { departamentoId } });
+    await this.removeLocked(orgId, id, { id, orgId, departamentoId, areaId: IsNull() }, { departamentoId }, actorId);
   }
 
   async restore(orgId: string, departamentoId: string, areaId: string, id: string, actorId?: string): Promise<Cargo> {

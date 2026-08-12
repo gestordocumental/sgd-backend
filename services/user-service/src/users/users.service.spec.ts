@@ -380,13 +380,35 @@ describe('UsersService', () => {
       expect(usersRepo.save).not.toHaveBeenCalled();
     });
 
-    it('throws BadRequestException — without persisting the user — when departamentoId is provided without orgId', async () => {
+    it('throws BadRequestException — without persisting the user — when departamentoId is provided without dto.orgId or the caller-org param', async () => {
       const dto = { email: 'new@example.com', position: 'Developer', departamentoId: 'dept-uuid' };
       usersRepo.findOne.mockResolvedValue(null);
 
       await expect(service.create(dto)).rejects.toThrow(BadRequestException);
       expect(orgClient.validateOrgStructure).not.toHaveBeenCalled();
       expect(usersRepo.save).not.toHaveBeenCalled();
+    });
+
+    // Regression: a regular (non-super-admin) caller's request body doesn't
+    // necessarily echo dto.orgId back — the caller's own org is already
+    // available via the orgId param (e.g. UsersController passes
+    // caller.companyId). Requiring dto.orgId specifically would reject a
+    // perfectly valid create just because the org came from the caller's
+    // context instead of being repeated in the body.
+    it('falls back to the caller-org param when dto.orgId is not set', async () => {
+      const dto = { email: 'new@example.com', position: 'Developer', departamentoId: 'dept-uuid', areaId: 'area-uuid' };
+      const user = makeUser({ email: dto.email });
+      usersRepo.findOne.mockResolvedValue(null);
+      usersRepo.create.mockReturnValue(user);
+      usersRepo.save.mockResolvedValue(user);
+      redis.setex.mockResolvedValue('OK');
+
+      await service.create(dto, undefined, 'caller-org-uuid');
+
+      expect(orgClient.validateOrgStructure).toHaveBeenCalledWith(
+        'caller-org-uuid', 'dept-uuid', 'area-uuid', undefined,
+      );
+      expect(usersRepo.save).toHaveBeenCalled();
     });
 
     it('propagates the rejection from validateOrgStructure and does not persist the user', async () => {

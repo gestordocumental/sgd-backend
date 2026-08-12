@@ -162,7 +162,16 @@ export class DocumentUploadService {
         'DocumentUploadService',
       );
       typology.documento.extractionStatus = ExtractionStatus.FAILED;
-      await typology.save().catch(() => {});
+      await typology.save().catch((saveErr: unknown) => {
+        this.logger.error(
+          `Failed to persist extractionStatus=FAILED for typology ${typologyId} after the Kafka emit ` +
+            'failure above — the DB still shows PROCESSING, so the response will claim FAILED while ' +
+            'retryExtraction() rejects a retry attempt (it requires the persisted status to already be ' +
+            `FAILED) until this is fixed manually. Cause: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
+          saveErr instanceof Error ? saveErr.stack : undefined,
+          'DocumentUploadService',
+        );
+      });
     }
 
     // Step 4: Delete the previous file — safe regardless of Step 3's outcome,
@@ -361,7 +370,16 @@ export class DocumentUploadService {
         'DocumentUploadService',
       );
       newDoc.documento.extractionStatus = ExtractionStatus.FAILED;
-      await newDoc.save().catch(() => {});
+      await newDoc.save().catch((saveErr: unknown) => {
+        this.logger.error(
+          `Failed to persist extractionStatus=FAILED for new typology version ${newTypologyId} after ` +
+            'the Kafka emit failure above — the DB still shows PROCESSING, so the response will claim ' +
+            'FAILED while retryExtraction() rejects a retry attempt (it requires the persisted status ' +
+            `to already be FAILED) until this is fixed manually. Cause: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
+          saveErr instanceof Error ? saveErr.stack : undefined,
+          'DocumentUploadService',
+        );
+      });
     }
 
     if (dto.actorId) {
@@ -432,7 +450,15 @@ export class DocumentUploadService {
       });
     } catch (err) {
       typology.documento.extractionStatus = ExtractionStatus.FAILED;
-      await typology.save().catch(() => {});
+      await typology.save().catch((saveErr: unknown) => {
+        this.logger.error(
+          `Failed to revert extractionStatus back to FAILED for typology ${typologyId} after a retry's ` +
+            'Kafka emit failed — the DB is stuck showing PROCESSING, so a future retryExtraction() call ' +
+            `will also reject (it requires the persisted status to already be FAILED). Cause: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
+          saveErr instanceof Error ? saveErr.stack : undefined,
+          'DocumentUploadService',
+        );
+      });
       throw new InternalServerErrorException('No se pudo reencolar la extracción. Intenta de nuevo.');
     }
 

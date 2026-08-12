@@ -97,7 +97,13 @@ export class InternalUsersController {
     @Query('areaId') areaId?: string,
     @Query('cargoId') cargoId?: string,
   ) {
-    const provided = [departamentoId, areaId, cargoId].filter((v) => v !== undefined);
+    // Excludes '' along with undefined — an empty query param (e.g.
+    // ?departamentoId=) must count as "not provided", not as a real filter
+    // value. Otherwise it silently passes this check but then gets dropped
+    // by countByPosition()'s own `if (filters.departamentoId)` guard (empty
+    // string is falsy), leaving the query scoped to nothing but
+    // deleted_at IS NULL — every non-deleted user, service-wide.
+    const provided = [departamentoId, areaId, cargoId].filter((v) => v !== undefined && v !== '');
     if (provided.length !== 1) {
       throw new BadRequestException(
         'Exactly one of departamentoId, areaId, or cargoId query params is required',

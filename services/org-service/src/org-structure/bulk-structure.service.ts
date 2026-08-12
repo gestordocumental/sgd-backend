@@ -274,7 +274,7 @@ export class BulkStructureService {
         });
         if (!cargo) {
           throw new BadRequestException(
-            `Cargo ${await this.cargoErrorLabel(dto.orgId, dto.cargoId)} no encontrado a nivel de departamento '${dept.name}'`,
+            `Cargo ${await this.cargoErrorLabel(manager, dto.orgId, dto.cargoId)} no encontrado a nivel de departamento '${dept.name}'`,
           );
         }
         await this.structureLeases.reserve(manager, dto.orgId, 'departamento', dept.id);
@@ -309,7 +309,7 @@ export class BulkStructureService {
           });
           if (!cargo) {
             throw new BadRequestException(
-              `Cargo ${await this.cargoErrorLabel(dto.orgId, dto.cargoId)} no encontrado en el área '${area.name}'`,
+              `Cargo ${await this.cargoErrorLabel(manager, dto.orgId, dto.cargoId)} no encontrado en el área '${area.name}'`,
             );
           }
           cargoId = cargo.id;
@@ -345,8 +345,8 @@ export class BulkStructureService {
    * interpret. Falls back to the raw ID only when the cargo doesn't exist
    * anywhere in the org either.
    */
-  private async cargoErrorLabel(orgId: string, cargoId: string): Promise<string> {
-    const misplaced = await this.cargoRepo.findOne({ where: { orgId, id: cargoId } });
+  private async cargoErrorLabel(manager: EntityManager, orgId: string, cargoId: string): Promise<string> {
+    const misplaced = await manager.getRepository(Cargo).findOne({ where: { orgId, id: cargoId } });
     return misplaced ? `'${misplaced.name}'` : `'${cargoId}'`;
   }
 

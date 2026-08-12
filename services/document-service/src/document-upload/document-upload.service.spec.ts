@@ -266,6 +266,30 @@ describe('DocumentUploadService', () => {
       );
     });
 
+    // Regression: the compensating save() that persists extractionStatus =
+    // FAILED used to swallow its own failure silently (`.catch(() => {})`).
+    // If it fails, the DB is left stuck at PROCESSING while the response
+    // claims FAILED, and retryExtraction() would reject any retry attempt
+    // (it requires the persisted status to already be FAILED) — with
+    // nothing in the logs to explain why.
+    it('logs loudly when the compensating save (extractionStatus = FAILED) itself fails after a Kafka failure', async () => {
+      const doc = makeDoc();
+      (doc.save as jest.Mock)
+        .mockResolvedValueOnce(undefined) // Step 2's normal persist
+        .mockRejectedValueOnce(new Error('DB down')); // the compensating save in the catch block
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      kafka.emit.mockRejectedValue(new Error('Kafka down'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      await expect(service.upload('org-1', doc.id, makeFile())).resolves.toBeDefined();
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining(`Failed to persist extractionStatus=FAILED for typology ${doc.id}`),
+        expect.any(String),
+        'DocumentUploadService',
+      );
+    });
+
     it('still deletes the previous file after a Kafka failure — the new document is already canonical either way', async () => {
       const doc = makeDoc({
         documento: { r2Key: 'org/org-1/typologies/old-file.pdf', extractionStatus: ExtractionStatus.COMPLETED, originalName: 'old.pdf', mimeType: PDF_MIME, uploadedAt: new Date() },
@@ -580,6 +604,38 @@ describe('DocumentUploadService', () => {
       );
     });
 
+    // Regression: same root cause as the equivalent upload() test above —
+    // the compensating save() that persists extractionStatus = FAILED used
+    // to swallow its own failure silently.
+    it('logs loudly when the compensating save (extractionStatus = FAILED) itself fails after a Kafka failure', async () => {
+      const oldDoc = makeDoc();
+      const newDoc = makeDoc({ id: makeId() });
+      (newDoc.save as jest.Mock)
+        .mockResolvedValueOnce(undefined) // Step 2: create as ACTIVE
+        .mockResolvedValueOnce(undefined) // Step 4: persist documento
+        .mockRejectedValueOnce(new Error('DB down')); // the compensating save in Step 5's catch block
+
+      const FullModel: any = function () { return newDoc; };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn().mockRejectedValue(new Error('Kafka down')) };
+      const logger  = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
+      ).resolves.toBeDefined();
+
+      const newTypologyId = (newDoc._id as { toString(): string }).toString();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining(`Failed to persist extractionStatus=FAILED for new typology version ${newTypologyId}`),
+        expect.any(String),
+        'DocumentUploadService',
+      );
+    });
+
     it('logs loudly instead of silently swallowing when restoring old to ACTIVE itself fails', async () => {
       const oldDoc = makeDoc();
       const newDoc = makeDoc({ id: makeId() });
@@ -663,6 +719,29 @@ describe('DocumentUploadService', () => {
 
       await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(InternalServerErrorException);
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.FAILED);
+    });
+
+    // Regression: same root cause as the equivalent upload()/createNewVersion()
+    // tests — the compensating save() that reverts extractionStatus back to
+    // FAILED used to swallow its own failure silently, leaving the typology
+    // stuck at PROCESSING with nothing in the logs to explain why a future
+    // retryExtraction() call also gets rejected.
+    it('logs loudly when the compensating save (extractionStatus = FAILED) itself fails after a Kafka failure', async () => {
+      const doc = makeFailedDoc();
+      (doc.save as jest.Mock)
+        .mockResolvedValueOnce(undefined) // sets PROCESSING before emitting
+        .mockRejectedValueOnce(new Error('DB down')); // the compensating save in the catch block
+      const { model, storage, kafka, logger, clamav } = makeDeps(doc);
+      kafka.emit.mockRejectedValue(new Error('Kafka down'));
+      const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
+
+      await expect(service.retryExtraction('org-1', doc.id)).rejects.toThrow(InternalServerErrorException);
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining(`Failed to revert extractionStatus back to FAILED for typology ${doc.id}`),
+        expect.any(String),
+        'DocumentUploadService',
+      );
     });
 
     it('throws BadRequestException for invalid typology ID', async () => {

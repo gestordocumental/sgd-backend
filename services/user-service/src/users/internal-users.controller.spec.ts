@@ -170,6 +170,30 @@ describe('InternalUsersController', () => {
       ).rejects.toThrow(BadRequestException);
       expect(usersService.countByPosition).not.toHaveBeenCalled();
     });
+
+    // Regression: an empty string used to pass the "exactly one" check
+    // (only undefined was excluded), then get silently dropped by
+    // countByPosition()'s own falsy check — leaving the query scoped to
+    // nothing but deleted_at IS NULL, every non-deleted user service-wide.
+    it('throws BadRequestException when the only filter given is an empty string', async () => {
+      await expect(
+        controller.orgStructureReferences('', undefined, undefined),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.countByPosition).not.toHaveBeenCalled();
+    });
+
+    it('ignores an empty-string filter alongside a real one instead of treating it as "two filters given"', async () => {
+      usersService.countByPosition.mockResolvedValue(1);
+
+      const result = await controller.orgStructureReferences('dept-1', '', undefined);
+
+      expect(usersService.countByPosition).toHaveBeenCalledWith({
+        departamentoId: 'dept-1',
+        areaId: '',
+        cargoId: undefined,
+      });
+      expect(result).toEqual({ count: 1 });
+    });
   });
 
   // ── Security contract ──────────────────────────────────────────────────────

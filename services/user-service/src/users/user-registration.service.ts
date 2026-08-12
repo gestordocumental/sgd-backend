@@ -156,17 +156,20 @@ export class UserRegistrationService {
     // BulkStructureService.resolveStructureById() / StructureLease in
     // org-service): every write path that persists a new org-structure
     // reference must obtain a lease first, or a concurrent delete can't see
-    // it coming. Uses dto.orgId — the org the new user is being placed
-    // into, which can differ from the caller's own org for a super-admin —
-    // same as the role-assignment lookup a few lines below.
+    // it coming. Prefers dto.orgId — the org the new user is explicitly
+    // being placed into, which can differ from the caller's own org for a
+    // super-admin — but falls back to the caller's own org (the `orgId`
+    // param, e.g. a regular admin whose request doesn't echo their org back
+    // in the body) rather than requiring it to be spelled out in the DTO.
     if (dto.departamentoId != null || dto.areaId != null || dto.cargoId != null) {
       if (dto.departamentoId == null) {
         throw new BadRequestException('departamentoId is required when assigning an area or cargo');
       }
-      if (!dto.orgId) {
+      const structureOrgId = dto.orgId ?? orgId;
+      if (!structureOrgId) {
         throw new BadRequestException('orgId is required when assigning departamentoId/areaId/cargoId');
       }
-      await this.orgClientService.validateOrgStructure(dto.orgId, dto.departamentoId, dto.areaId, dto.cargoId);
+      await this.orgClientService.validateOrgStructure(structureOrgId, dto.departamentoId, dto.areaId, dto.cargoId);
     }
 
     const user = this.usersRepository.create(dto);
