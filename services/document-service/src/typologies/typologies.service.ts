@@ -167,8 +167,16 @@ export class TypologiesService implements OnModuleInit {
             // rejection) keeps the marker in place for the next startup's
             // sweep to retry, instead of proceeding as if it succeeded.
             // deletedCount === 0 alongside acknowledged: true is NOT a
-            // failure case — it just means newDoc was already gone.
-            const result = await this.model.deleteOne({ _id: newTypologyId, orgId: doc.orgId }).exec();
+            // failure case — it just means newDoc was already gone (which
+            // includes having been legitimately soft-deleted by a user in
+            // the meantime — deletedAt: null below is required so this
+            // never hard-deletes a real, already-soft-deleted historical
+            // record; findHistory() still needs to be able to show it).
+            const result = await this.model.deleteOne({
+              _id: newTypologyId,
+              orgId: doc.orgId,
+              deletedAt: null,
+            }).exec();
             if (!result.acknowledged) {
               throw new Error(`deleteOne for typology ${newTypologyId} was not acknowledged`);
             }

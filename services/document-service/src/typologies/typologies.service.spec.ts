@@ -211,7 +211,40 @@ describe('TypologiesService', () => {
       expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
       expect(stuckDoc.pendingVersionTransition).toBeNull();
       expect(stuckDoc.save).toHaveBeenCalled();
-      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId, deletedAt: null });
+    });
+
+    // Regression: the cleanup deleteOne() used to have no deletedAt filter,
+    // so it would HARD-delete newTypologyId unconditionally. The
+    // "never fully written" branch is reached any time newDocFullyWritten's
+    // own query (which does filter deletedAt: null) finds nothing — including
+    // when newDoc was actually fully written (has documento.r2Key) but has
+    // since been legitimately soft-deleted by a user. Without the same
+    // deletedAt: null filter here, that real historical record — which
+    // findHistory() is supposed to still be able to show — would be
+    // permanently destroyed instead of just left alone.
+    it('does not hard-delete newDoc if it was already legitimately soft-deleted — deletedCount: 0 still restores old normally', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      // newDocFullyWritten's own deletedAt: null filter excludes it, even
+      // though it was in fact fully written before being soft-deleted.
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      // deleteOne, now scoped to deletedAt: null, matches nothing — the doc
+      // is already soft-deleted, not hard-deleted.
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ acknowledged: true, deletedCount: 0 }) });
+
+      const service = makeService(Model);
+      await service.onModuleInit();
+
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId, deletedAt: null });
+      expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
+      expect(stuckDoc.pendingVersionTransition).toBeNull();
+      expect(stuckDoc.save).toHaveBeenCalled();
     });
 
     // Regression: deleteOne() resolving is not the same as the delete being
@@ -236,7 +269,7 @@ describe('TypologiesService', () => {
       const service = makeService(Model);
       await expect(service.onModuleInit()).resolves.toBeUndefined();
 
-      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId, deletedAt: null });
       expect(stuckDoc.save).not.toHaveBeenCalled();
       expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
       expect(stuckDoc.pendingVersionTransition).not.toBeNull();
@@ -267,7 +300,7 @@ describe('TypologiesService', () => {
       const service = makeService(Model);
       await expect(service.onModuleInit()).resolves.toBeUndefined();
 
-      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId, deletedAt: null });
       expect(stuckDoc.save).not.toHaveBeenCalled();
       expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
       expect(stuckDoc.pendingVersionTransition).not.toBeNull();
