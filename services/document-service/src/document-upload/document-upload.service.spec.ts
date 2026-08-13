@@ -85,7 +85,7 @@ function makeDoc(overrides: Record<string, any> = {}): TypologyDocument {
     fuenteCreacion: CreationSource.MANUAL,
     deletedAt:      null,
     save:           jest.fn().mockResolvedValue(undefined),
-    deleteOne:      jest.fn().mockResolvedValue(undefined),
+    deleteOne:      jest.fn().mockResolvedValue({ acknowledged: true, deletedCount: 1 }),
     ...overrides,
   } as unknown as TypologyDocument;
 }
@@ -667,6 +667,134 @@ describe('DocumentUploadService', () => {
 
       expect(newDoc.deleteOne).toHaveBeenCalled();
       expect(oldDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
+    });
+
+    // Regression: restoreOldActive() used to be called unconditionally after
+    // a best-effort newDoc.deleteOne() — if the delete itself failed, newDoc
+    // was still sitting ACTIVE (from Step 2) with old's codigo, so old.save()
+    // was doomed to collide with the unique-active-codigo index and fail too,
+    // leaving BOTH old and newDoc broken with only a misleading "no active
+    // replacement" log (newDoc, the actual culprit, was never mentioned).
+    it('does NOT try to restore old when the file upload fails AND the newDoc cleanup also fails — logs the real state instead', async () => {
+      const oldDoc = makeDoc();
+      const newDoc = makeDoc({ id: makeId(), deleteOne: jest.fn().mockRejectedValue(new Error('delete failed')) });
+
+      const FullModel: any = function () { return newDoc; };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockRejectedValue(new Error('storage down')), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
+      ).rejects.toThrow('storage down');
+
+      expect(newDoc.deleteOne).toHaveBeenCalled();
+      // old.save() was only ever called once, to archive it in Step 1 — the
+      // doomed-to-collide restore attempt must not happen.
+      expect(oldDoc.save).toHaveBeenCalledTimes(1);
+      expect(oldDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to delete the broken new version'),
+        undefined,
+        'DocumentUploadService',
+      );
+    });
+
+    it('deletes newDoc and restores old to ACTIVE when persisting documento (Step 4) fails', async () => {
+      const oldDoc = makeDoc();
+      const newDoc = makeDoc({ id: makeId() });
+      (newDoc.save as jest.Mock)
+        .mockResolvedValueOnce(undefined) // Step 2: create as ACTIVE
+        .mockRejectedValueOnce(new Error('DB down')); // Step 4: persist documento
+
+      const FullModel: any = function () { return newDoc; };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
+      ).rejects.toThrow('DB down');
+
+      expect(storage.delete).toHaveBeenCalled();
+      expect(newDoc.deleteOne).toHaveBeenCalled();
+      expect(oldDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
+    });
+
+    it('does NOT try to restore old when persisting documento (Step 4) fails AND the newDoc cleanup also fails — logs the real state instead', async () => {
+      const oldDoc = makeDoc();
+      const newDoc = makeDoc({ id: makeId(), deleteOne: jest.fn().mockRejectedValue(new Error('delete failed')) });
+      (newDoc.save as jest.Mock)
+        .mockResolvedValueOnce(undefined) // Step 2: create as ACTIVE
+        .mockRejectedValueOnce(new Error('DB down')); // Step 4: persist documento
+
+      const FullModel: any = function () { return newDoc; };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
+      ).rejects.toThrow('DB down');
+
+      expect(newDoc.deleteOne).toHaveBeenCalled();
+      expect(oldDoc.save).toHaveBeenCalledTimes(1); // only Step 1's archive — no doomed restore attempt
+      expect(oldDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to delete the broken new version'),
+        undefined,
+        'DocumentUploadService',
+      );
+    });
+
+    // Regression: deleteOne() resolving is not the same as the delete being
+    // confirmed — an unacknowledged write (acknowledged: false) resolves
+    // without throwing, so a plain "did the promise resolve" check would
+    // treat it as success and restore old anyway, doomed to collide with
+    // newDoc still sitting ACTIVE on the same codigo.
+    it('does NOT try to restore old when newDoc.deleteOne() resolves but is unacknowledged', async () => {
+      const oldDoc = makeDoc();
+      const newDoc = makeDoc({
+        id: makeId(),
+        deleteOne: jest.fn().mockResolvedValue({ acknowledged: false, deletedCount: 0 }),
+      });
+      (newDoc.save as jest.Mock)
+        .mockResolvedValueOnce(undefined) // Step 2: create as ACTIVE
+        .mockRejectedValueOnce(new Error('DB down')); // Step 4: persist documento
+
+      const FullModel: any = function () { return newDoc; };
+      FullModel.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(oldDoc) });
+
+      const storage = { upload: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+      const kafka   = { emit: jest.fn() };
+      const logger  = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const clamav  = { scan: jest.fn().mockResolvedValue({ clean: true }) };
+
+      const service = new DocumentUploadService(FullModel, storage as any, kafka as any, logger as any, clamav as any);
+      await expect(
+        service.createNewVersion('org-1', oldDoc.id, makeFile(), { version: '02' }),
+      ).rejects.toThrow('DB down');
+
+      expect(newDoc.deleteOne).toHaveBeenCalled();
+      expect(oldDoc.save).toHaveBeenCalledTimes(1); // only Step 1's archive — no doomed restore attempt
+      expect(oldDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to delete the broken new version'),
+        undefined,
+        'DocumentUploadService',
+      );
     });
 
     // A rejected producer.send() doesn't prove Kafka never got the message —

@@ -186,11 +186,11 @@ describe('UserClientService', () => {
       httpService.get.mockReturnValue(of({ status: 200, data: { count: 2 } }));
 
       await expect(
-        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+        service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
       ).resolves.toBe(2);
 
       expect(httpService.get).toHaveBeenCalledWith(
-        'http://localhost:3001/internal/users/org-structure-references?cargoId=cargo-1',
+        'http://localhost:3001/internal/users/org-structure-references?orgId=org-1&cargoId=cargo-1',
         expect.objectContaining({
           headers: expect.objectContaining({ 'x-internal-token': 'test-token' }),
         }),
@@ -200,10 +200,10 @@ describe('UserClientService', () => {
     it('builds the query string for an areaId filter', async () => {
       httpService.get.mockReturnValue(of({ status: 200, data: { count: 0 } }));
 
-      await service.countOrgStructureReferences({ areaId: 'area-1' });
+      await service.countOrgStructureReferences('org-1', { areaId: 'area-1' });
 
       expect(httpService.get).toHaveBeenCalledWith(
-        'http://localhost:3001/internal/users/org-structure-references?areaId=area-1',
+        'http://localhost:3001/internal/users/org-structure-references?orgId=org-1&areaId=area-1',
         expect.anything(),
       );
     });
@@ -211,10 +211,10 @@ describe('UserClientService', () => {
     it('builds the query string for a departamentoId filter', async () => {
       httpService.get.mockReturnValue(of({ status: 200, data: { count: 0 } }));
 
-      await service.countOrgStructureReferences({ departamentoId: 'dept-1' });
+      await service.countOrgStructureReferences('org-1', { departamentoId: 'dept-1' });
 
       expect(httpService.get).toHaveBeenCalledWith(
-        'http://localhost:3001/internal/users/org-structure-references?departamentoId=dept-1',
+        'http://localhost:3001/internal/users/org-structure-references?orgId=org-1&departamentoId=dept-1',
         expect.anything(),
       );
     });
@@ -223,7 +223,7 @@ describe('UserClientService', () => {
       httpService.get.mockReturnValue(throwError(() => new TimeoutError()));
 
       await expect(
-        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+        service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
       ).rejects.toBeInstanceOf(GatewayTimeoutException);
     });
 
@@ -232,7 +232,7 @@ describe('UserClientService', () => {
       jest.spyOn((service as any).cb, 'fire').mockRejectedValueOnce(openError);
 
       await expect(
-        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+        service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
       ).rejects.toBeInstanceOf(ServiceUnavailableException);
     });
 
@@ -242,7 +242,7 @@ describe('UserClientService', () => {
       );
 
       await expect(
-        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+        service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
       ).rejects.toMatchObject({ status: 400 });
     });
 
@@ -250,7 +250,26 @@ describe('UserClientService', () => {
       httpService.get.mockReturnValue(throwError(() => ({ response: { status: 500 } })));
 
       await expect(
-        service.countOrgStructureReferences({ cargoId: 'cargo-1' }),
+        service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
+      ).rejects.toBeInstanceOf(InternalServerErrorException);
+    });
+
+    // Regression: a 200 response with a missing/non-numeric `count` used to
+    // be returned as `undefined` — every caller does `count > 0`, and
+    // `undefined > 0` is false, so a malformed response silently let a
+    // structure delete through as if zero references existed.
+    it.each([
+      ['a body with no count field', {}],
+      ['a non-numeric count', { count: 'three' }],
+      ['a null count', { count: null }],
+      ['a NaN count', { count: NaN }],
+      ['a negative count', { count: -1 }],
+      ['a fractional count', { count: 0.5 }],
+    ])('throws InternalServerErrorException (not undefined) for a 200 with %s', async (_label, data) => {
+      httpService.get.mockReturnValue(of({ status: 200, data }));
+
+      await expect(
+        service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
       ).rejects.toBeInstanceOf(InternalServerErrorException);
     });
   });

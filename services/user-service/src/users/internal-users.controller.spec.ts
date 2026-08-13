@@ -147,9 +147,9 @@ describe('InternalUsersController', () => {
     it('returns the count for a single cargoId filter', async () => {
       usersService.countByPosition.mockResolvedValue(2);
 
-      const result = await controller.orgStructureReferences(undefined, undefined, 'cargo-uuid-1');
+      const result = await controller.orgStructureReferences('org-1', undefined, undefined, 'cargo-uuid-1');
 
-      expect(usersService.countByPosition).toHaveBeenCalledWith({
+      expect(usersService.countByPosition).toHaveBeenCalledWith('org-1', {
         departamentoId: undefined,
         areaId: undefined,
         cargoId: 'cargo-uuid-1',
@@ -157,16 +157,30 @@ describe('InternalUsersController', () => {
       expect(result).toEqual({ count: 2 });
     });
 
+    it('throws BadRequestException when orgId is missing', async () => {
+      await expect(
+        controller.orgStructureReferences(undefined, undefined, undefined, 'cargo-uuid-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.countByPosition).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when orgId is an empty string', async () => {
+      await expect(
+        controller.orgStructureReferences('', undefined, undefined, 'cargo-uuid-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.countByPosition).not.toHaveBeenCalled();
+    });
+
     it('throws BadRequestException when no filter is given', async () => {
       await expect(
-        controller.orgStructureReferences(undefined, undefined, undefined),
+        controller.orgStructureReferences('org-1', undefined, undefined, undefined),
       ).rejects.toThrow(BadRequestException);
       expect(usersService.countByPosition).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when more than one filter is given', async () => {
       await expect(
-        controller.orgStructureReferences('dept-1', 'area-1', undefined),
+        controller.orgStructureReferences('org-1', 'dept-1', 'area-1', undefined),
       ).rejects.toThrow(BadRequestException);
       expect(usersService.countByPosition).not.toHaveBeenCalled();
     });
@@ -177,7 +191,7 @@ describe('InternalUsersController', () => {
     // nothing but deleted_at IS NULL, every non-deleted user service-wide.
     it('throws BadRequestException when the only filter given is an empty string', async () => {
       await expect(
-        controller.orgStructureReferences('', undefined, undefined),
+        controller.orgStructureReferences('org-1', '', undefined, undefined),
       ).rejects.toThrow(BadRequestException);
       expect(usersService.countByPosition).not.toHaveBeenCalled();
     });
@@ -185,9 +199,9 @@ describe('InternalUsersController', () => {
     it('ignores an empty-string filter alongside a real one instead of treating it as "two filters given"', async () => {
       usersService.countByPosition.mockResolvedValue(1);
 
-      const result = await controller.orgStructureReferences('dept-1', '', undefined);
+      const result = await controller.orgStructureReferences('org-1', 'dept-1', '', undefined);
 
-      expect(usersService.countByPosition).toHaveBeenCalledWith({
+      expect(usersService.countByPosition).toHaveBeenCalledWith('org-1', {
         departamentoId: 'dept-1',
         areaId: '',
         cargoId: undefined,

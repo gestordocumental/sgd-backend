@@ -6,9 +6,8 @@ import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
 import { AreasService } from './areas.service';
 import { DepartamentosService } from './departamentos.service';
-import { DocumentClientService } from '../common/document-client/document-client.service';
-import { UserClientService } from '../common/user-client/user-client.service';
 import { StructureLeasesService } from './structure-leases.service';
+import { ExternalReferencesGuard } from './external-references.guard';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
@@ -20,8 +19,7 @@ export class CargosService {
     private readonly dataSource: DataSource,
     private readonly areasService: AreasService,
     private readonly departamentosService: DepartamentosService,
-    private readonly documentClient: DocumentClientService,
-    private readonly userClient: UserClientService,
+    private readonly externalReferences: ExternalReferencesGuard,
     private readonly structureLeases: StructureLeasesService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
@@ -234,26 +232,16 @@ export class CargosService {
     return saved;
   }
 
-  /**
-   * Blocks deleting a cargo that a typology or user still references —
-   * otherwise their record is left pointing at a cargoId that no longer
-   * exists. Deliberately NOT wrapped in try/catch: a failure here (timeout,
-   * open circuit, 5xx) must fail the delete too (fail-closed), not silently
-   * let it through. DocumentClientService/UserClientService already
-   * translate every failure mode into a propagatable Nest exception.
-   */
-  private async assertNoExternalReferences(orgId: string, cargo: Cargo): Promise<void> {
-    const [typologiesCount, usersCount] = await Promise.all([
-      this.documentClient.countOrgStructureReferences(orgId, { cargoId: cargo.id }),
-      this.userClient.countOrgStructureReferences({ cargoId: cargo.id }),
-    ]);
-    if (typologiesCount > 0 || usersCount > 0) {
-      throw new ConflictException({
-        message: `Cannot delete cargo "${cargo.name}": it is still referenced by ${typologiesCount} typology(ies) and ${usersCount} user(s)`,
-        errorCode: 'CARGO_HAS_EXTERNAL_REFERENCES',
-        params: { id: cargo.id, typologiesCount, usersCount },
-      });
-    }
+  // See ExternalReferencesGuard for the fail-closed reasoning and why this
+  // must run before remove()/removeDept()'s transaction.
+  private assertNoExternalReferences(orgId: string, cargo: Cargo): Promise<void> {
+    return this.externalReferences.assertNone({
+      orgId,
+      filter: { cargoId: cargo.id },
+      resourceLabel: `cargo "${cargo.name}"`,
+      resourceId: cargo.id,
+      errorCode: 'CARGO_HAS_EXTERNAL_REFERENCES',
+    });
   }
 
   /**

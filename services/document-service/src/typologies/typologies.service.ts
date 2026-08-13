@@ -152,12 +152,30 @@ export class TypologiesService implements OnModuleInit {
             'TypologiesService',
           );
         } else {
+          // Delete the partial newDoc BEFORE restoring old/clearing the marker
+          // (not best-effort/swallowed) — if this fails, the catch block below
+          // must see it and leave the marker in place, so the sweep on the
+          // NEXT startup finds this doc again and retries the cleanup.
+          // Clearing the marker regardless (the old ordering) would silently
+          // orphan newDoc forever the moment this delete has a transient
+          // failure: nothing else is watching for it once the marker is gone.
+          if (newTypologyId) {
+            // Checking the promise resolved isn't enough — deleteOne() can
+            // resolve with { acknowledged: false } instead of rejecting on an
+            // unacknowledged write, which doesn't confirm the delete actually
+            // persisted. Throwing here (caught below, same as an outright
+            // rejection) keeps the marker in place for the next startup's
+            // sweep to retry, instead of proceeding as if it succeeded.
+            // deletedCount === 0 alongside acknowledged: true is NOT a
+            // failure case — it just means newDoc was already gone.
+            const result = await this.model.deleteOne({ _id: newTypologyId, orgId: doc.orgId }).exec();
+            if (!result.acknowledged) {
+              throw new Error(`deleteOne for typology ${newTypologyId} was not acknowledged`);
+            }
+          }
           doc.typologyStatus = TypologyStatus.ACTIVE;
           doc.pendingVersionTransition = null;
           await doc.save();
-          if (newTypologyId) {
-            await this.model.deleteOne({ _id: newTypologyId, orgId: doc.orgId }).exec().catch(() => {});
-          }
           Sentry.captureMessage(
             `Reconciled an interrupted typology version transition on startup: ${doc.id}`,
             'warning',
