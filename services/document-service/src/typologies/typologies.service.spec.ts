@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { TypologiesService } from './typologies.service';
 import {
@@ -26,8 +26,10 @@ const STRUCTURE_NAMES = {
 };
 
 function makeDoc(overrides: Record<string, any> = {}): TypologyDocument {
+  const id = makeId();
   return {
-    id:             makeId(),
+    id,
+    _id:            new Types.ObjectId(id),
     orgId:          'org-1',
     typologyStatus: TypologyStatus.ACTIVE,
     estructuraOrg: { ...STRUCTURE_NAMES },
@@ -54,9 +56,26 @@ function makeDoc(overrides: Record<string, any> = {}): TypologyDocument {
 function makeModel(docOrNull: TypologyDocument | null = null) {
   const instance = docOrNull ?? makeDoc();
   const Model: any = jest.fn().mockReturnValue(instance);
-  Model.findOne  = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(docOrNull) });
+  // Distinguishes the two shapes of findOne() call this service makes:
+  // the id-based lookup (findOne/update/resolveDiscrepancy's initial fetch,
+  // by _id) resolves to docOrNull as before; the duplicate-active-codigo
+  // pre-check (assertNoActiveDuplicateCodigo, filtered by
+  // 'datosDeclarados.codigo' + typologyStatus, no _id) defaults to "no
+  // collision" (null) — tests that need to simulate one override with
+  // mockReturnValueOnce before calling the service method under test.
+  Model.findOne = jest.fn().mockImplementation((filter: any = {}) => {
+    // assertNoActiveDuplicateCodigo's filter always includes typologyStatus:
+    // ACTIVE; the id-based lookups (findOne/update/resolveDiscrepancy's
+    // initial fetch) never do — that's what tells the two apart here.
+    if ('typologyStatus' in filter) {
+      return { exec: jest.fn().mockResolvedValue(null) };
+    }
+    return { exec: jest.fn().mockResolvedValue(docOrNull) };
+  });
   Model.find     = jest.fn().mockReturnValue({ sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue([]) });
   Model.updateOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }) });
+  Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 1 }) });
+  Model.countDocuments = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(0) });
   Model.syncIndexes = jest.fn().mockResolvedValue([]);
   return { Model, instance };
 }
@@ -98,6 +117,120 @@ describe('TypologiesService', () => {
 
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('unique-active-codigo constraint'),
+        expect.any(String),
+        'TypologiesService',
+      );
+    });
+
+    // Regression: a pre-check read-then-write can't guarantee uniqueness on
+    // its own under concurrent requests — the real guarantee is the Mongo
+    // unique index. If syncIndexes() can't confirm that index is built,
+    // every write path that would otherwise rely on the pre-check must
+    // fail closed instead of silently accepting an unbounded race window
+    // (two concurrent requests both reading "no duplicate" and both saving).
+    it('blocks create()/update()/resolveDiscrepancy() with ServiceUnavailableException after a failed index sync, without ever touching the DB', async () => {
+      const { Model, instance } = makeModel(makeDoc({
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Policy', codigo: 'POL-002', version: '01', extractedAt: new Date(), discrepancias: [] },
+      }));
+      Model.syncIndexes = jest.fn().mockRejectedValue(new Error('E11000 duplicate key error'));
+      const service = makeService(Model);
+      await service.onModuleInit();
+      mockLogger.error.mockClear();
+
+      await expect(
+        service.create('org-1', { departamentoId: 'dept-1', codigo: 'POL-001' }, STRUCTURE_NAMES),
+      ).rejects.toThrow(ServiceUnavailableException);
+      expect(instance.save).not.toHaveBeenCalled();
+
+      await expect(
+        service.update('org-1', instance.id, { codigo: 'POL-003' }),
+      ).rejects.toThrow(ServiceUnavailableException);
+
+      await expect(
+        service.resolveDiscrepancy('org-1', instance.id, { action: ResolveAction.ADOPT_EXTRACTED }),
+      ).rejects.toThrow(ServiceUnavailableException);
+      expect(instance.save).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── reconcilePendingVersionTransitions (private, called from onModuleInit) ──
+  // Repairs DocumentUploadService.createNewVersion()'s archive-old/create-new
+  // sequence when a process crash left a typology ARCHIVED with a pending
+  // marker and no confirmed ACTIVE replacement — see PendingVersionTransition
+  // in typology.schema.ts.
+
+  describe('reconcilePendingVersionTransitions() (via onModuleInit)', () => {
+    it('does nothing when no typology has a pending version transition', async () => {
+      const { Model } = makeModel(); // default find() → []
+      const service = makeService(Model);
+
+      await service.onModuleInit();
+
+      expect(Model.find).toHaveBeenCalledWith({ pendingVersionTransition: { $ne: null } });
+    });
+
+    it('clears the marker without touching typologyStatus when the new version was already fully written', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      // "fully written" — findOne() with documento.r2Key: { $ne: null } finds it.
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ id: 'new-1' })) });
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) });
+
+      const service = makeService(Model);
+      await service.onModuleInit();
+
+      expect(Model.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: 'new-1', 'documento.r2Key': { $ne: null } }),
+      );
+      expect(stuckDoc.pendingVersionTransition).toBeNull();
+      expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED); // untouched — the new version really is the active one
+      expect(stuckDoc.save).toHaveBeenCalled();
+      expect(Model.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('restores old to ACTIVE and discards the partial new version when it was never fully written', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }); // never fully written
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 1 }) });
+
+      const service = makeService(Model);
+      await service.onModuleInit();
+
+      expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ACTIVE);
+      expect(stuckDoc.pendingVersionTransition).toBeNull();
+      expect(stuckDoc.save).toHaveBeenCalled();
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+    });
+
+    it('logs and reports to Sentry instead of throwing when reconciling one typology fails, without blocking startup', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      (stuckDoc.save as jest.Mock).mockRejectedValue(new Error('DB down'));
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) });
+
+      const service = makeService(Model);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to reconcile pending version transition'),
         expect.any(String),
         'TypologiesService',
       );
@@ -333,6 +466,22 @@ describe('TypologiesService', () => {
       const service = makeService(Model);
       await expect(service.update('org-1', doc.id, { nombre: 'X' })).rejects.toThrow(ConflictException);
     });
+
+    // Regression (MGESTDOC-59): this explicit pre-check must not depend on the
+    // DB unique index actually being built (see onModuleInit's warning) — it
+    // has to reject on its own, without ever reaching doc.save().
+    it('throws ConflictException — without saving — when the new codigo collides with a different ACTIVE typology', async () => {
+      const doc = makeDoc({ datosDeclarados: { nombre: 'P', codigo: 'OLD', version: '01', fuente: DataSource.MANUAL } });
+      const { Model } = makeModel(doc);
+      const otherActive = makeDoc({ datosDeclarados: { nombre: 'Other', codigo: 'NEW', version: '01', fuente: DataSource.MANUAL } });
+      Model.findOne
+        .mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(doc) })         // findOne(orgId, id)
+        .mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(otherActive) }); // duplicate pre-check
+
+      const service = makeService(Model);
+      await expect(service.update('org-1', doc.id, { codigo: 'NEW' })).rejects.toThrow(ConflictException);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
   });
 
   // ── remove ────────────────────────────────────────────────────────────────
@@ -379,6 +528,72 @@ describe('TypologiesService', () => {
       const validId = makeId();
       await expect(service.findByIdPublic('org-1', validId)).rejects.toThrow(NotFoundException);
     });
+  });
+
+  // ── countOrgStructureReferences ─────────────────────────────────────────────
+
+  describe('countOrgStructureReferences()', () => {
+    // Regression: org-service uses this to decide whether a cargo/area/departamento
+    // can be safely deleted — undercounting here would let a delete through while a
+    // real, non-deleted typology still points at the now-gone id.
+    it('counts typologies matching the given cargoId, excluding soft-deleted ones', async () => {
+      const { Model } = makeModel();
+      Model.countDocuments.mockReturnValue({ exec: jest.fn().mockResolvedValue(3) });
+      const service = makeService(Model);
+
+      const count = await service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' });
+
+      expect(Model.countDocuments).toHaveBeenCalledWith({
+        orgId: 'org-1',
+        deletedAt: null,
+        'estructuraOrg.cargoId': 'cargo-1',
+      });
+      expect(count).toBe(3);
+    });
+
+    it('filters by areaId when given areaId instead of cargoId', async () => {
+      const { Model } = makeModel();
+      const service = makeService(Model);
+
+      await service.countOrgStructureReferences('org-1', { areaId: 'area-1' });
+
+      expect(Model.countDocuments).toHaveBeenCalledWith({
+        orgId: 'org-1',
+        deletedAt: null,
+        'estructuraOrg.areaId': 'area-1',
+      });
+    });
+
+    it('filters by departamentoId when given departamentoId', async () => {
+      const { Model } = makeModel();
+      const service = makeService(Model);
+
+      await service.countOrgStructureReferences('org-1', { departamentoId: 'dept-1' });
+
+      expect(Model.countDocuments).toHaveBeenCalledWith({
+        orgId: 'org-1',
+        deletedAt: null,
+        'estructuraOrg.departamentoId': 'dept-1',
+      });
+    });
+
+    it.each([TypologyStatus.INCOMPLETE, TypologyStatus.ACTIVE, TypologyStatus.ARCHIVED])(
+      'counts a %s typology as a reference (only deletedAt determines existence, not typologyStatus)',
+      async (status) => {
+        // Not asserting on `status` directly (the filter never includes
+        // typologyStatus) — this test documents the intentional decision that
+        // INCOMPLETE/ACTIVE/ARCHIVED all block deletion, only a soft-deleted
+        // (deletedAt set) typology doesn't.
+        const { Model } = makeModel();
+        const service = makeService(Model);
+
+        await service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' });
+
+        const filterArg = Model.countDocuments.mock.calls[0][0];
+        expect(filterArg).not.toHaveProperty('typologyStatus');
+        expect(filterArg.deletedAt).toBeNull();
+      },
+    );
   });
 
   // ── findHistory ───────────────────────────────────────────────────────────
@@ -585,6 +800,34 @@ describe('TypologiesService', () => {
       expect(doc.datosDeclarados.nombre).toBe('Extracted Name');
       expect(doc.datosDeclarados.version).toBe('01'); // preserved, not nulled out
       expect(doc.typologyStatus).toBe(TypologyStatus.ACTIVE); // still complete — doesn't vanish from the active list
+    });
+
+    // Regression (MGESTDOC-59): a user blocked at creation for reusing an
+    // already-active codigo can get past that check by declaring a
+    // different codigo while keeping the same document. The document's real
+    // (colliding) content then surfaces as a discrepancy, and adopting the
+    // extracted data must still be blocked — it must not depend on the DB
+    // unique index actually being built (see onModuleInit's warning), so
+    // this checks it explicitly instead of only via the 11000 catch.
+    it('ADOPT_EXTRACTED — throws ConflictException — without saving — when the extracted codigo collides with a different ACTIVE typology', async () => {
+      const doc = makeDoc({
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        datosDeclarados: { nombre: 'Policy', codigo: 'Y', version: '01', fuente: DataSource.MANUAL },
+        // The document's real content — what the user was blocked from
+        // declaring directly at creation time.
+        metadataExtraida: { nombre: 'Policy', codigo: 'X', version: '01', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+      const otherActive = makeDoc({ datosDeclarados: { nombre: 'Existing', codigo: 'X', version: '01', fuente: DataSource.MANUAL } });
+      Model.findOne
+        .mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(doc) })         // findOne(orgId, id)
+        .mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(otherActive) }); // duplicate pre-check
+
+      const service = makeService(Model);
+      await expect(
+        service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.ADOPT_EXTRACTED }),
+      ).rejects.toThrow(ConflictException);
+      expect(doc.save).not.toHaveBeenCalled();
     });
 
     it('MANUAL_OVERRIDE — uses provided values', async () => {

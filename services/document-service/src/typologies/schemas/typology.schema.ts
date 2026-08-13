@@ -86,6 +86,20 @@ class DocumentoInfo {
 
   @Prop({ type: Number, default: null })
   sizeBytes!: number | null;
+
+  /**
+   * When the *current* extraction attempt started — distinct from
+   * `uploadedAt`, which never changes across retries. DocumentUploadService
+   * sets this every time extractionStatus flips to PROCESSING (initial
+   * upload, new version, or retryExtraction()), atomically with that same
+   * save, before emitting the Kafka event. Used to detect an extraction
+   * genuinely stuck in PROCESSING (see STUCK_EXTRACTION_THRESHOLD_MS) —
+   * using `uploadedAt` for that instead would never reset on a successful
+   * retry, so a second retry call moments after a legitimate one started
+   * would also see the file as "old" and be allowed to re-interrupt it.
+   */
+  @Prop({ type: Date, default: null })
+  extractionStartedAt!: Date | null;
 }
 
 @Schema({ _id: false })
@@ -116,6 +130,35 @@ class MetadataExtraida {
 
   @Prop({ type: [{ campo: String, valorDeclarado: String, valorExtraido: String }], default: [] })
   discrepancias!: Discrepancia[];
+}
+
+/**
+ * Recovery marker for DocumentUploadService.createNewVersion()'s
+ * archive-old/create-new sequence — two separate MongoDB writes, not one
+ * atomic transaction (this deployment's MongoDB runs standalone, not as a
+ * replica set, so multi-document transactions aren't available). If the
+ * process crashes between them, `old` is left ARCHIVED with no ACTIVE
+ * replacement and nothing left running to catch it in a try/catch.
+ *
+ * Set on `old` in the SAME write that archives it (before `newDoc` exists),
+ * naming the pre-generated id `newDoc` will be created with. Cleared on
+ * `old` once `newDoc` is confirmed fully written (has `documento.r2Key`
+ * set) — or, on any rollback path, once `old` has been restored to ACTIVE.
+ * TypologiesService.reconcilePendingVersionTransitions() sweeps for any
+ * marker still present at the next service startup (no cron/scheduler
+ * infra exists in this codebase; a crashed instance restarting is exactly
+ * when a stuck transition is most likely to exist) and repairs it: if
+ * `newTypologyId` turns out to be fully written after all (crash only hit
+ * the marker-clear step), just clears the marker; otherwise restores `old`
+ * to ACTIVE and discards whatever partial `newDoc` exists.
+ */
+@Schema({ _id: false })
+class PendingVersionTransition {
+  @Prop({ required: true })
+  newTypologyId!: string;
+
+  @Prop({ required: true })
+  startedAt!: Date;
 }
 
 @Schema({ timestamps: true, collection: 'typologies' })
@@ -155,12 +198,41 @@ export class Typology {
 
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;
+
+  @Prop({ type: PendingVersionTransition, default: null })
+  pendingVersionTransition!: PendingVersionTransition | null;
 }
 
 export const TypologySchema = SchemaFactory.createForClass(Typology);
 
 // Partial unique index: only one ACTIVE typology per (orgId, codigo) is allowed.
 // INCOMPLETE / ARCHIVED / soft-deleted records with the same codigo are permitted.
+//
+// partialFilterExpression does NOT support $ne (confirmed by the actual
+// runtime failure below, not just docs — MongoDB rewrites `{ $ne: null }`
+// internally to `$not: { $eq: null }`, and $not isn't accepted there
+// regardless of server version). Using $ne here made createIndex() fail
+// outright with "Expression not supported in partial index: $not" on every
+// environment
+// — the index never actually built, silently under Mongoose's default
+// autoIndex, loudly once onModuleInit() started calling syncIndexes()
+// explicitly (see that method's docstring). $type: 'string' is the
+// MongoDB-documented way to express "not null" in a partial filter: codigo is
+// only ever set to a real string or left null (never any other BSON type), so
+// this excludes exactly the null case $ne was trying to exclude.
+//
+// This index has never successfully built on any deployment (the $ne bug
+// above made every attempt fail), so its uniqueness guarantee has never
+// actually been enforced by MongoDB — only by TypologiesService's app-level
+// assertNoActiveDuplicateCodigo() pre-check, which is a plain read-then-write
+// and does NOT prevent real duplicate ACTIVE (orgId, codigo) rows from having
+// piled up already. Before deploying this fix to an environment with existing
+// data, run `npm run fix:duplicate-active-codigos` (no --fix) against that
+// environment's MONGODB_URI first — if it finds any group, resolve them
+// (`--fix`, or by hand) BEFORE this index's first build attempt, or
+// syncIndexes() will keep failing (now on a genuine E11000 duplicate-key
+// violation instead of the $ne syntax error) and codigoUniquenessEnforced
+// stays false.
 TypologySchema.index(
   { orgId: 1, 'datosDeclarados.codigo': 1 },
   {
@@ -168,7 +240,7 @@ TypologySchema.index(
     partialFilterExpression: {
       deletedAt: null,
       typologyStatus: TypologyStatus.ACTIVE,
-      'datosDeclarados.codigo': { $ne: null },
+      'datosDeclarados.codigo': { $type: 'string' },
     },
   },
 );
@@ -180,3 +252,22 @@ TypologySchema.index({ orgId: 1, typologyStatus: 1, createdAt: -1 });
 // The partial unique index above is restricted to ACTIVE docs and cannot serve this query
 // (history includes DELETED/ARCHIVED). This non-partial index fills that gap.
 TypologySchema.index({ orgId: 1, 'datosDeclarados.codigo': 1, createdAt: -1 });
+
+// Covers countOrgStructureReferences: countDocuments({ orgId, deletedAt: null,
+// 'estructuraOrg.<field>': id }) — used by org-service to block deleting a
+// departamento/area/cargo that a typology still references. departamentoId is
+// always set (required on every typology), so no partial filter needed there;
+// areaId/cargoId are only ever queried with a real id (never null — an
+// "unset" typology is never what's being deleted), so the partial filter
+// keeps the index small by excluding the common null case.
+// $type: 'string' (not $ne: null) — see the comment on the codigo unique
+// index above for why $ne isn't valid in a partialFilterExpression at all.
+TypologySchema.index({ orgId: 1, 'estructuraOrg.departamentoId': 1, deletedAt: 1 });
+TypologySchema.index(
+  { orgId: 1, 'estructuraOrg.areaId': 1, deletedAt: 1 },
+  { partialFilterExpression: { 'estructuraOrg.areaId': { $type: 'string' } } },
+);
+TypologySchema.index(
+  { orgId: 1, 'estructuraOrg.cargoId': 1, deletedAt: 1 },
+  { partialFilterExpression: { 'estructuraOrg.cargoId': { $type: 'string' } } },
+);

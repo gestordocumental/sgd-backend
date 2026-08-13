@@ -7,12 +7,13 @@ import { UsersService } from './users.service';
 
 describe('InternalUsersController', () => {
   let controller: InternalUsersController;
-  let usersService: jest.Mocked<Pick<UsersService, 'findByPosition' | 'findManyByIds'>>;
+  let usersService: jest.Mocked<Pick<UsersService, 'findByPosition' | 'findManyByIds' | 'countByPosition'>>;
 
   beforeEach(() => {
     usersService = {
-      findByPosition: jest.fn(),
-      findManyByIds:  jest.fn(),
+      findByPosition:  jest.fn(),
+      findManyByIds:   jest.fn(),
+      countByPosition: jest.fn(),
     };
 
     controller = new InternalUsersController(usersService as unknown as UsersService);
@@ -142,6 +143,59 @@ describe('InternalUsersController', () => {
     });
   });
 
+  describe('orgStructureReferences()', () => {
+    it('returns the count for a single cargoId filter', async () => {
+      usersService.countByPosition.mockResolvedValue(2);
+
+      const result = await controller.orgStructureReferences(undefined, undefined, 'cargo-uuid-1');
+
+      expect(usersService.countByPosition).toHaveBeenCalledWith({
+        departamentoId: undefined,
+        areaId: undefined,
+        cargoId: 'cargo-uuid-1',
+      });
+      expect(result).toEqual({ count: 2 });
+    });
+
+    it('throws BadRequestException when no filter is given', async () => {
+      await expect(
+        controller.orgStructureReferences(undefined, undefined, undefined),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.countByPosition).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when more than one filter is given', async () => {
+      await expect(
+        controller.orgStructureReferences('dept-1', 'area-1', undefined),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.countByPosition).not.toHaveBeenCalled();
+    });
+
+    // Regression: an empty string used to pass the "exactly one" check
+    // (only undefined was excluded), then get silently dropped by
+    // countByPosition()'s own falsy check — leaving the query scoped to
+    // nothing but deleted_at IS NULL, every non-deleted user service-wide.
+    it('throws BadRequestException when the only filter given is an empty string', async () => {
+      await expect(
+        controller.orgStructureReferences('', undefined, undefined),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.countByPosition).not.toHaveBeenCalled();
+    });
+
+    it('ignores an empty-string filter alongside a real one instead of treating it as "two filters given"', async () => {
+      usersService.countByPosition.mockResolvedValue(1);
+
+      const result = await controller.orgStructureReferences('dept-1', '', undefined);
+
+      expect(usersService.countByPosition).toHaveBeenCalledWith({
+        departamentoId: 'dept-1',
+        areaId: '',
+        cargoId: undefined,
+      });
+      expect(result).toEqual({ count: 1 });
+    });
+  });
+
   // ── Security contract ──────────────────────────────────────────────────────
 
   describe('security contract', () => {
@@ -174,6 +228,14 @@ describe('InternalUsersController', () => {
       it('restricts byPosition to INTERNAL_TOKEN_WORKFLOW_USER', () => {
         const keys = (Reflect.getMetadata(INTERNAL_TOKEN_KEYS_META, InternalUsersController.prototype.byPosition) ?? []) as string[];
         expect(keys).toContain(WORKFLOW_KEY);
+      });
+
+      it('restricts orgStructureReferences to INTERNAL_TOKEN_ORG_USER — org-service is a distinct caller from workflow-service', () => {
+        const keys = (Reflect.getMetadata(
+          INTERNAL_TOKEN_KEYS_META,
+          InternalUsersController.prototype.orgStructureReferences,
+        ) ?? []) as string[];
+        expect(keys).toEqual(['INTERNAL_TOKEN_ORG_USER']);
       });
     });
 

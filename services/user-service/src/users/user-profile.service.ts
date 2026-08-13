@@ -428,6 +428,40 @@ export class UserProfileService {
     return users.map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email }));
   }
 
+  /**
+   * Counts non-deleted users referencing the given cargo/area/departamento —
+   * used by org-service to block deleting a position that a user's profile
+   * still points to.
+   *
+   * Deliberately NOT built on findByPosition() above: that method requires
+   * an active role assignment (its inner join to user_org_roles), which
+   * exists for its own purpose — who to route a workflow to right now — but
+   * would silently miss a user whose profile still has cargo_id set with no
+   * active role, reproducing the exact orphaned-reference bug this method
+   * exists to prevent. Also deliberately doesn't filter is_active — a
+   * disabled-but-not-deleted user's profile row is still a real dangling
+   * reference if the delete goes through.
+   */
+  async countByPosition(
+    filters: { cargoId?: string; areaId?: string; departamentoId?: string },
+  ): Promise<number> {
+    const qb = this.usersRepository
+      .createQueryBuilder('u')
+      .where('u.deleted_at IS NULL');
+
+    if (filters.departamentoId) {
+      qb.andWhere('u.departamento_id = :departamentoId', { departamentoId: filters.departamentoId });
+    }
+    if (filters.areaId) {
+      qb.andWhere('u.area_id = :areaId', { areaId: filters.areaId });
+    }
+    if (filters.cargoId) {
+      qb.andWhere('u.cargo_id = :cargoId', { cargoId: filters.cargoId });
+    }
+
+    return qb.getCount();
+  }
+
   async getCountsByOrg(): Promise<
     { orgId: string; total: number; active: number; inactive: number; deleted: number }[]
   > {
