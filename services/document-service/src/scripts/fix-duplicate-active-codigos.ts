@@ -99,6 +99,15 @@ async function main() {
       return Number.isNaN(created) ? 0 : created;
     };
 
+    // Same "legacy record missing/invalid updatedAt" case rank() already guards
+    // against — toISOString() throws RangeError on an Invalid Date, which would
+    // otherwise crash the whole script (including a plain dry-run) before any
+    // group gets reported.
+    const formatDate = (d: Date | null | undefined): string => {
+      const t = d ? new Date(d).getTime() : NaN;
+      return Number.isNaN(t) ? '(sin fecha)' : new Date(t).toISOString();
+    };
+
     for (const group of groups) {
       const sorted = [...group.docs].sort(
         (a, b) => rank(b) - rank(a) || b._id.toString().localeCompare(a._id.toString()),
@@ -109,7 +118,7 @@ async function main() {
       for (const doc of sorted) {
         const role = doc._id.equals(keep._id) ? 'KEEP (most recently updated)' : 'would archive';
         console.log(
-          `  - ${doc._id}  nombre="${doc.nombre}"  version="${doc.version}"  updatedAt=${new Date(doc.updatedAt).toISOString()}  [${role}]`,
+          `  - ${doc._id}  nombre="${doc.nombre}"  version="${doc.version}"  updatedAt=${formatDate(doc.updatedAt)}  [${role}]`,
         );
       }
 

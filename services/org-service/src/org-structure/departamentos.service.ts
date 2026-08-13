@@ -6,9 +6,8 @@ import { Area } from './entities/area.entity';
 import { Cargo } from './entities/cargo.entity';
 import { CreateDepartamentoDto } from './dto/create-departamento.dto';
 import { UpdateDepartamentoDto } from './dto/update-departamento.dto';
-import { DocumentClientService } from '../common/document-client/document-client.service';
-import { UserClientService } from '../common/user-client/user-client.service';
 import { StructureLeasesService } from './structure-leases.service';
+import { ExternalReferencesGuard } from './external-references.guard';
 import { KafkaProducerService, TOPICS, correlationStorage } from '@sgd/common';
 
 @Injectable()
@@ -26,8 +25,7 @@ export class DepartamentosService {
     private readonly cargoRepo: Repository<Cargo>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
-    private readonly documentClient: DocumentClientService,
-    private readonly userClient: UserClientService,
+    private readonly externalReferences: ExternalReferencesGuard,
     private readonly structureLeases: StructureLeasesService,
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
@@ -155,26 +153,15 @@ export class DepartamentosService {
   async remove(orgId: string, id: string, actorId?: string): Promise<void> {
     const departamento = await this.findOne(orgId, id); // fast 404 without opening a transaction when it plainly doesn't exist
 
-    // Blocks deletion while a typology or user still references this
-    // departamento directly (no area, no cargo) — otherwise their record is
-    // left pointing at a departamentoId that no longer exists. Runs before
-    // the transaction below for the same reason as AreasService.remove():
-    // holding the pessimistic_write lock across two outbound HTTP calls
-    // would turn a document-service/user-service slowdown into a long-held
-    // lock on a hot row. Deliberately NOT wrapped in try/catch — see
-    // CargosService.assertNoExternalReferences() for the fail-closed
-    // reasoning, identical here.
-    const [typologiesCount, usersCount] = await Promise.all([
-      this.documentClient.countOrgStructureReferences(orgId, { departamentoId: id }),
-      this.userClient.countOrgStructureReferences({ departamentoId: id }),
-    ]);
-    if (typologiesCount > 0 || usersCount > 0) {
-      throw new ConflictException({
-        message: `Cannot delete departamento "${departamento.name}": it is still referenced by ${typologiesCount} typology(ies) and ${usersCount} user(s)`,
-        errorCode: 'DEPARTMENT_HAS_EXTERNAL_REFERENCES',
-        params: { id, typologiesCount, usersCount },
-      });
-    }
+    // See ExternalReferencesGuard for the fail-closed reasoning and why this
+    // must run before the transaction below.
+    await this.externalReferences.assertNone({
+      orgId,
+      filter: { departamentoId: id },
+      resourceLabel: `departamento "${departamento.name}"`,
+      resourceId: id,
+      errorCode: 'DEPARTMENT_HAS_EXTERNAL_REFERENCES',
+    });
 
     let removedName = '';
     await this.dataSource.transaction(async (manager) => {

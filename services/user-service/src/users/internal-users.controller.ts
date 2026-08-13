@@ -93,10 +93,13 @@ export class InternalUsersController {
   @AllowInternalTokens('INTERNAL_TOKEN_ORG_USER')
   @Get('org-structure-references')
   async orgStructureReferences(
+    @Query('orgId') orgId?: string,
     @Query('departamentoId') departamentoId?: string,
     @Query('areaId') areaId?: string,
     @Query('cargoId') cargoId?: string,
   ) {
+    if (!orgId) throw new BadRequestException('orgId query param is required');
+
     // Excludes '' along with undefined — an empty query param (e.g.
     // ?departamentoId=) must count as "not provided", not as a real filter
     // value. Otherwise it silently passes this check but then gets dropped
@@ -110,7 +113,7 @@ export class InternalUsersController {
       );
     }
 
-    const count = await this.usersService.countByPosition({ departamentoId, areaId, cargoId });
+    const count = await this.usersService.countByPosition(orgId, { departamentoId, areaId, cargoId });
     return { count };
   }
 }

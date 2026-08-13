@@ -10,6 +10,7 @@ import { AreasService } from './areas.service';
 import { CargosService } from './cargos.service';
 import { BulkStructureService } from './bulk-structure.service';
 import { StructureLeasesService } from './structure-leases.service';
+import { ExternalReferencesGuard } from './external-references.guard';
 import { DepartamentosController } from './departamentos.controller';
 import { AreasController } from './areas.controller';
 import { CargosController } from './cargos.controller';
@@ -47,6 +48,7 @@ import { DocumentClientModule } from '../common/document-client/document-client.
     CargosService,
     BulkStructureService,
     StructureLeasesService,
+    ExternalReferencesGuard,
     OrgGuard,
     OrgPermissionsGuard,
     InternalGuard,
