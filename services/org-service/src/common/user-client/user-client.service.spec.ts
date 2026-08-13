@@ -263,6 +263,8 @@ describe('UserClientService', () => {
       ['a non-numeric count', { count: 'three' }],
       ['a null count', { count: null }],
       ['a NaN count', { count: NaN }],
+      ['a negative count', { count: -1 }],
+      ['a fractional count', { count: 0.5 }],
     ])('throws InternalServerErrorException (not undefined) for a 200 with %s', async (_label, data) => {
       httpService.get.mockReturnValue(of({ status: 200, data }));
 

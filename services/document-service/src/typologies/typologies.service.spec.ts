@@ -74,7 +74,7 @@ function makeModel(docOrNull: TypologyDocument | null = null) {
   });
   Model.find     = jest.fn().mockReturnValue({ sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue([]) });
   Model.updateOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }) });
-  Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 1 }) });
+  Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ acknowledged: true, deletedCount: 1 }) });
   Model.countDocuments = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(0) });
   Model.syncIndexes = jest.fn().mockResolvedValue([]);
   return { Model, instance };
@@ -203,7 +203,7 @@ describe('TypologiesService', () => {
       Model.syncIndexes = jest.fn().mockResolvedValue([]);
       Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
       Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }); // never fully written
-      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 1 }) });
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ acknowledged: true, deletedCount: 1 }) });
 
       const service = makeService(Model);
       await service.onModuleInit();
@@ -212,6 +212,39 @@ describe('TypologiesService', () => {
       expect(stuckDoc.pendingVersionTransition).toBeNull();
       expect(stuckDoc.save).toHaveBeenCalled();
       expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+    });
+
+    // Regression: deleteOne() resolving is not the same as the delete being
+    // confirmed — an unacknowledged write (acknowledged: false) resolves
+    // without throwing, so a plain "did it resolve" check would treat it as
+    // success and restore old anyway, doomed to collide with newDoc still
+    // sitting ACTIVE (or, here, incomplete but not yet cleaned up) on the
+    // same codigo. deletedCount alone isn't the right signal either —
+    // deletedCount === 0 alongside acknowledged: true just means newDoc was
+    // already gone, which is fine.
+    it('does not restore old or clear the marker when deleting the partial newDoc resolves but is unacknowledged', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }); // never fully written
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ acknowledged: false, deletedCount: 0 }) });
+
+      const service = makeService(Model);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+      expect(stuckDoc.save).not.toHaveBeenCalled();
+      expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
+      expect(stuckDoc.pendingVersionTransition).not.toBeNull();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to reconcile pending version transition'),
+        expect.any(String),
+        'TypologiesService',
+      );
     });
 
     // Regression: deleting the partial newDoc used to be best-effort
@@ -255,7 +288,7 @@ describe('TypologiesService', () => {
       Model.syncIndexes = jest.fn().mockResolvedValue([]);
       Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
       Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
-      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) });
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ acknowledged: true, deletedCount: 0 }) });
 
       const service = makeService(Model);
       await expect(service.onModuleInit()).resolves.toBeUndefined();

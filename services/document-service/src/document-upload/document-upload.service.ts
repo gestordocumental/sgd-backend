@@ -261,7 +261,15 @@ export class DocumentUploadService {
     typologyId: string,
     newTypologyId: string,
   ): Promise<void> {
-    const deleted = await newDoc.deleteOne().then(() => true).catch(() => false);
+    // Checking the promise resolved isn't enough — deleteOne() resolves with
+    // { acknowledged, deletedCount } even on an unacknowledged write (w: 0),
+    // which doesn't confirm the delete actually persisted. acknowledged is
+    // the right check, not deletedCount === 1: deletedCount === 0 with
+    // acknowledged: true just means newDoc was already gone (e.g. a prior
+    // partial retry), which is equally safe to proceed on.
+    const deleted = await newDoc.deleteOne()
+      .then((result) => result.acknowledged)
+      .catch(() => false);
     if (deleted) {
       await this.restoreOldActive(old, typologyId);
       return;

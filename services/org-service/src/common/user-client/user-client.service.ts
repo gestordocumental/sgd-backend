@@ -173,8 +173,10 @@ export class UserClientService {
       // annotation: a 200 with a missing/non-numeric `count` would otherwise
       // become `undefined` here, and `undefined > 0` is false at every
       // caller — silently letting a delete through as if zero references
-      // existed.
-      if (typeof response.data?.count !== 'number' || !Number.isFinite(response.data.count)) {
+      // existed. Number.isSafeInteger() + >= 0, not just isFinite(): a
+      // count: -1 would also read as "no references" (`-1 > 0` is false),
+      // and this is a DB count — only a non-negative integer is ever valid.
+      if (!Number.isSafeInteger(response.data?.count) || response.data.count < 0) {
         throw new InternalServerErrorException(
           'user-service returned a malformed org-structure-references response (missing or non-numeric count)',
         );

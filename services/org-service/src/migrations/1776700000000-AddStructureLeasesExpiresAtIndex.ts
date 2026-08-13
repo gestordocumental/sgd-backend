@@ -22,13 +22,22 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class AddStructureLeasesExpiresAtIndex1776700000000 implements MigrationInterface {
   name = 'AddStructureLeasesExpiresAtIndex1776700000000';
 
+  // CONCURRENTLY no puede ejecutarse dentro de una transacción — ver
+  // 1775500000000-AddOrgSearchTrigram.ts para el mismo patrón. Necesario acá
+  // porque structure_leases recibe INSERTs en cada resolveStructureById()
+  // (típicamente en pleno tráfico de creación de tipologías/usuarios); un
+  // CREATE INDEX normal toma un lock SHARE que bloquea esos escritores
+  // durante toda la construcción del índice, y con un rolling deploy puede
+  // haber instancias viejas todavía escribiendo mientras corre la migración.
+  transaction = false;
+
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `CREATE INDEX "IDX_structure_leases_expires_at" ON "structure_leases" ("expires_at")`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_structure_leases_expires_at" ON "structure_leases" ("expires_at")`,
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_structure_leases_expires_at"`);
+    await queryRunner.query(`DROP INDEX CONCURRENTLY IF EXISTS "IDX_structure_leases_expires_at"`);
   }
 }

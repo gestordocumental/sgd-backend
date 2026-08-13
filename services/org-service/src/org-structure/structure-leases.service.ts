@@ -135,7 +135,15 @@ export class StructureLeasesService {
       );
       await manager.query('RELEASE SAVEPOINT sweep_expired_leases');
     } catch (err) {
+      // ROLLBACK TO SAVEPOINT undoes the DELETE but does NOT release the
+      // savepoint itself — Postgres keeps it defined until this RELEASE (or
+      // the outer transaction ends). Without it, a transaction that calls
+      // reserve() more than once (resolveStructureById() does, up to once
+      // per departamento/area/cargo resolved) and hits a failing sweep more
+      // than once would just keep nesting same-named savepoints instead of
+      // cleanly reusing this one.
       await manager.query('ROLLBACK TO SAVEPOINT sweep_expired_leases');
+      await manager.query('RELEASE SAVEPOINT sweep_expired_leases');
       this.logger.warn(
         `Opportunistic structure_leases sweep failed (harmless — best-effort cleanup, caller's ` +
           `transaction is unaffected): ${err instanceof Error ? err.message : String(err)}`,

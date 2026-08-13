@@ -89,7 +89,12 @@ export class DocumentClientService {
       // would let a delete through as if zero references existed. Fail
       // closed instead of trusting the type annotation on .get<{count}>(),
       // which only affects TypeScript, not what's actually on the wire.
-      if (typeof response.data?.count !== 'number' || !Number.isFinite(response.data.count)) {
+      // Number.isFinite() alone isn't enough — it accepts -1 and 0.5, and
+      // count: -1 would also read as "no references" (`-1 > 0` is false),
+      // silently letting a delete through on a malformed response instead of
+      // failing closed. This is a DB count — only a non-negative integer is
+      // ever a valid value.
+      if (!Number.isSafeInteger(response.data?.count) || response.data.count < 0) {
         throw new InternalServerErrorException(
           'document-service returned a malformed org-structure-references response (missing or non-numeric count)',
         );

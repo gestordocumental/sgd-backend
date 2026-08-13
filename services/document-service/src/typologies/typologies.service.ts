@@ -160,7 +160,18 @@ export class TypologiesService implements OnModuleInit {
           // orphan newDoc forever the moment this delete has a transient
           // failure: nothing else is watching for it once the marker is gone.
           if (newTypologyId) {
-            await this.model.deleteOne({ _id: newTypologyId, orgId: doc.orgId }).exec();
+            // Checking the promise resolved isn't enough — deleteOne() can
+            // resolve with { acknowledged: false } instead of rejecting on an
+            // unacknowledged write, which doesn't confirm the delete actually
+            // persisted. Throwing here (caught below, same as an outright
+            // rejection) keeps the marker in place for the next startup's
+            // sweep to retry, instead of proceeding as if it succeeded.
+            // deletedCount === 0 alongside acknowledged: true is NOT a
+            // failure case — it just means newDoc was already gone.
+            const result = await this.model.deleteOne({ _id: newTypologyId, orgId: doc.orgId }).exec();
+            if (!result.acknowledged) {
+              throw new Error(`deleteOne for typology ${newTypologyId} was not acknowledged`);
+            }
           }
           doc.typologyStatus = TypologyStatus.ACTIVE;
           doc.pendingVersionTransition = null;

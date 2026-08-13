@@ -136,12 +136,16 @@ describe('StructureLeasesService', () => {
       (manager.query as jest.Mock)
         .mockResolvedValueOnce(undefined) // SAVEPOINT
         .mockRejectedValueOnce(new Error('deadlock detected')) // DELETE
-        .mockResolvedValueOnce(undefined); // ROLLBACK TO SAVEPOINT
+        .mockResolvedValueOnce(undefined) // ROLLBACK TO SAVEPOINT
+        .mockResolvedValueOnce(undefined); // RELEASE SAVEPOINT (after rollback)
 
       await expect(service.reserve(manager, 'org-1', 'area', 'area-1')).resolves.toBeUndefined();
 
       const calls = (manager.query as jest.Mock).mock.calls;
       expect(calls[2][0]).toBe('ROLLBACK TO SAVEPOINT sweep_expired_leases');
+      // Postgres keeps a savepoint defined after ROLLBACK TO — must be
+      // released explicitly, or it lingers until the outer transaction ends.
+      expect(calls[3][0]).toBe('RELEASE SAVEPOINT sweep_expired_leases');
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Opportunistic structure_leases sweep failed'),
         'StructureLeasesService',
