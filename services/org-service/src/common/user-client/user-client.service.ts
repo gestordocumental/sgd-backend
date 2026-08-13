@@ -9,20 +9,13 @@ import {
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
-import { CORRELATION_ID_HEADER, getCorrelationId } from '@sgd/common';
+import { CORRELATION_ID_HEADER, getCorrelationId, isNonTrippingClientError } from '@sgd/common';
 import CircuitBreaker = require('opossum');
 
-/**
- * True for 4xx statuses that are deterministic client/business errors (not found,
- * forbidden, validation) — repeating the exact same request wouldn't succeed, so
- * they must not count as a circuit failure. 408 (timeout) and 429 (rate limited)
- * are deliberately excluded: they signal user-service is struggling, not a bad
- * request, so they must trip the circuit the same way a 5xx would. Mirrors
- * DocumentClientService's isNonTrippingClientError().
- */
-export function isNonTrippingClientError(status: unknown): boolean {
-  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
-}
+// Re-exported for this file's existing spec import — the actual definition
+// (and its circuit-breaker-policy reasoning) now lives in @sgd/common,
+// shared with every other internal HTTP client instead of forked per file.
+export { isNonTrippingClientError };
 
 @Injectable()
 export class UserClientService {
@@ -140,12 +133,22 @@ export class UserClientService {
    * org-service that a user still points to (see CargosService/AreasService/
    * DepartamentosService.remove()). Exactly one of the filter fields must be
    * set — this mirrors the id being deleted at the caller's level.
+   *
+   * orgId scopes the count to users who are currently active members of
+   * that specific org — mirrors DocumentClientService's already-orgId-scoped
+   * equivalent. Matters concretely, not just for symmetry: a user's
+   * departamentoId/areaId/cargoId live directly on their profile with no
+   * org_id alongside them, and removing a user from an org never clears
+   * those fields — without this, a user long removed from org A but still
+   * carrying org A's stale cargoId would wrongly count as a live reference
+   * and block deleting that cargo.
    */
   async countOrgStructureReferences(
+    orgId: string,
     filters: { departamentoId?: string; areaId?: string; cargoId?: string },
   ): Promise<number> {
     const correlationId = getCorrelationId();
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ orgId });
     if (filters.departamentoId) params.set('departamentoId', filters.departamentoId);
     if (filters.areaId)         params.set('areaId', filters.areaId);
     if (filters.cargoId)        params.set('cargoId', filters.cargoId);
@@ -164,8 +167,24 @@ export class UserClientService {
             .pipe(timeout(this.timeoutMs)),
         ),
       );
+
+      // See DocumentClientService.countOrgStructureReferences() for why this
+      // must fail closed instead of trusting the .get<{count}>() type
+      // annotation: a 200 with a missing/non-numeric `count` would otherwise
+      // become `undefined` here, and `undefined > 0` is false at every
+      // caller — silently letting a delete through as if zero references
+      // existed. Number.isSafeInteger() + >= 0, not just isFinite(): a
+      // count: -1 would also read as "no references" (`-1 > 0` is false),
+      // and this is a DB count — only a non-negative integer is ever valid.
+      if (!Number.isSafeInteger(response.data?.count) || response.data.count < 0) {
+        throw new InternalServerErrorException(
+          'user-service returned a malformed org-structure-references response (missing or non-numeric count)',
+        );
+      }
+
       return response.data.count;
     } catch (error: any) {
+      if (error instanceof InternalServerErrorException) throw error;
       if (error instanceof ServiceUnavailableException) throw error;
 
       if (error instanceof TimeoutError) {

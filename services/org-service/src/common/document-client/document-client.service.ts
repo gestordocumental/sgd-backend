@@ -2,19 +2,13 @@ import { Injectable, InternalServerErrorException, GatewayTimeoutException, Serv
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
-import { AppLogger, CORRELATION_ID_HEADER, getCorrelationId } from '@sgd/common';
+import { AppLogger, CORRELATION_ID_HEADER, getCorrelationId, isNonTrippingClientError } from '@sgd/common';
 import CircuitBreaker = require('opossum');
 
-/**
- * True for 4xx statuses that are deterministic client/business errors (not found,
- * forbidden, validation) — repeating the exact same request wouldn't succeed, so
- * they must not count as a circuit failure. 408 (timeout) and 429 (rate limited)
- * are deliberately excluded: they signal document-service is struggling, not a
- * bad request, so they must trip the circuit the same way a 5xx would.
- */
-export function isNonTrippingClientError(status: unknown): boolean {
-  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
-}
+// Re-exported for this file's existing spec import — the actual definition
+// (and its circuit-breaker-policy reasoning) now lives in @sgd/common,
+// shared with every other internal HTTP client instead of forked per file.
+export { isNonTrippingClientError };
 
 @Injectable()
 export class DocumentClientService {
@@ -88,8 +82,27 @@ export class DocumentClientService {
         message: `← [document-service] GET /internal/typologies/org-structure-references 200`,
       });
 
+      // A 200 with a body missing/malformed `count` (a proxy swallowing it, a
+      // stale document-service build, a differently-shaped error wrapped as
+      // 200) must not silently become `undefined` here — every caller does
+      // `count > 0`, and `undefined > 0` is false, so a malformed response
+      // would let a delete through as if zero references existed. Fail
+      // closed instead of trusting the type annotation on .get<{count}>(),
+      // which only affects TypeScript, not what's actually on the wire.
+      // Number.isFinite() alone isn't enough — it accepts -1 and 0.5, and
+      // count: -1 would also read as "no references" (`-1 > 0` is false),
+      // silently letting a delete through on a malformed response instead of
+      // failing closed. This is a DB count — only a non-negative integer is
+      // ever a valid value.
+      if (!Number.isSafeInteger(response.data?.count) || response.data.count < 0) {
+        throw new InternalServerErrorException(
+          'document-service returned a malformed org-structure-references response (missing or non-numeric count)',
+        );
+      }
+
       return response.data.count;
     } catch (error: any) {
+      if (error instanceof InternalServerErrorException) throw error;
       if (error instanceof ServiceUnavailableException) throw error;
 
       if (error instanceof TimeoutError) {

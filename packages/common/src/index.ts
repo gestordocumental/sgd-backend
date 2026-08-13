@@ -17,6 +17,9 @@ export { HttpExceptionFilter } from './filters/http-exception.filter';
 // Middleware
 export { CorrelationMiddleware, CORRELATION_ID_HEADER } from './middleware/correlation.middleware';
 
+// HTTP
+export { isNonTrippingClientError } from './http/circuit-error-filter';
+
 // Metrics
 export { MetricsModule } from './metrics/metrics.module';
 export { MetricsController } from './metrics/metrics.controller';

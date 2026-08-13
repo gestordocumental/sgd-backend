@@ -441,12 +441,33 @@ export class UserProfileService {
    * exists to prevent. Also deliberately doesn't filter is_active — a
    * disabled-but-not-deleted user's profile row is still a real dangling
    * reference if the delete goes through.
+   *
+   * `orgId`-scoped via the same user_org_roles join findByPosition() uses
+   * (minus its role_id/is_active requirements — see above for why those two
+   * don't belong here), not a column on `users` directly: departamentoId/
+   * areaId/cargoId live on the user row itself, with no org_id alongside
+   * them, so scoping by org means joining to confirm current membership.
+   * `removed_at IS NULL` matters concretely: removeFromOrg() only stamps
+   * user_org_roles.removed_at — it never clears the user's departamento_id/
+   * area_id/cargo_id — so without this join, a user removed from org A
+   * months ago but still carrying org A's stale cargo_id would wrongly
+   * count as a live reference and block deleting that cargo in org A (or,
+   * for a user who has since joined a different org, would count against
+   * whichever org happens to call this with a matching id, since nothing
+   * before this join tied the count to org A specifically at all).
    */
   async countByPosition(
+    orgId: string,
     filters: { cargoId?: string; areaId?: string; departamentoId?: string },
   ): Promise<number> {
     const qb = this.usersRepository
       .createQueryBuilder('u')
+      .innerJoin(
+        'user_org_roles',
+        'uor',
+        'uor.user_id = u.id AND uor.org_id = :orgId AND uor.removed_at IS NULL',
+        { orgId },
+      )
       .where('u.deleted_at IS NULL');
 
     if (filters.departamentoId) {

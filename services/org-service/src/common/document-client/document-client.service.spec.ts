@@ -146,4 +146,23 @@ describe('DocumentClientService', () => {
       service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
     ).rejects.toBeInstanceOf(InternalServerErrorException);
   });
+
+  // Regression: a 200 response with a missing/non-numeric `count` used to be
+  // returned as `undefined` — every caller does `count > 0`, and
+  // `undefined > 0` is false, so a malformed response silently let a
+  // structure delete through as if zero references existed.
+  it.each([
+    ['a body with no count field', {}],
+    ['a non-numeric count', { count: 'three' }],
+    ['a null count', { count: null }],
+    ['a NaN count', { count: NaN }],
+    ['a negative count', { count: -1 }],
+    ['a fractional count', { count: 0.5 }],
+  ])('throws InternalServerErrorException (not undefined) for a 200 with %s', async (_label, data) => {
+    httpService.get.mockReturnValue(of({ status: 200, data }));
+
+    await expect(
+      service.countOrgStructureReferences('org-1', { cargoId: 'cargo-1' }),
+    ).rejects.toBeInstanceOf(InternalServerErrorException);
+  });
 });

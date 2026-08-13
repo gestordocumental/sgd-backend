@@ -242,6 +242,50 @@ export class DocumentUploadService {
   }
 
   /**
+   * Rollback used by createNewVersion()'s Step 3/4 catch blocks. By the time
+   * either runs, newDoc was already persisted ACTIVE in Step 2, sharing
+   * old's codigo — so restoring old to ACTIVE is only safe once newDoc is
+   * actually gone; the unique-active-codigo index forbids both being ACTIVE
+   * at once. If newDoc.deleteOne() itself fails, calling restoreOldActive()
+   * anyway would just make old.save() collide on that same index and fail —
+   * a wasted call whose failure path (restoreOldActive's own log) wrongly
+   * claims "no active replacement", when in fact a broken, document-less
+   * newDoc is silently squatting on the ACTIVE slot for this codigo. So this
+   * only restores old once the delete is confirmed, and otherwise logs the
+   * real state (newDoc, not old, is what needs manual cleanup) instead of
+   * that misleading message.
+   */
+  private async rollbackFailedVersionWrite(
+    newDoc: TypologyDocument,
+    old: TypologyDocument,
+    typologyId: string,
+    newTypologyId: string,
+  ): Promise<void> {
+    // Checking the promise resolved isn't enough — deleteOne() resolves with
+    // { acknowledged, deletedCount } even on an unacknowledged write (w: 0),
+    // which doesn't confirm the delete actually persisted. acknowledged is
+    // the right check, not deletedCount === 1: deletedCount === 0 with
+    // acknowledged: true just means newDoc was already gone (e.g. a prior
+    // partial retry), which is equally safe to proceed on.
+    const deleted = await newDoc.deleteOne()
+      .then((result) => result.acknowledged)
+      .catch(() => false);
+    if (deleted) {
+      await this.restoreOldActive(old, typologyId);
+      return;
+    }
+    this.logger.error(
+      `Failed to delete the broken new version ${newTypologyId} after a version-bump rollback — it is ` +
+        `left ACTIVE with codigo '${old.datosDeclarados.codigo}' but no usable document, and typology ` +
+        `${typologyId} was intentionally left ARCHIVED instead of restoring it to ACTIVE (which would ` +
+        'collide with that same codigo on the unique-active-codigo index and fail anyway). Needs manual ' +
+        `intervention: delete or fix ${newTypologyId} directly, then restore ${typologyId} to ACTIVE.`,
+      undefined,
+      'DocumentUploadService',
+    );
+  }
+
+  /**
    * Archives the current typology and creates a new one with the same codigo,
    * uploads the provided file and triggers metadata extraction.
    * The new version must be strictly greater than the current one (if both are set).
@@ -348,8 +392,7 @@ export class DocumentUploadService {
     try {
       await this.storage.upload(r2Key, file.buffer, file.mimetype);
     } catch (err) {
-      await newDoc.deleteOne().catch(() => {});
-      await this.restoreOldActive(old, typologyId);
+      await this.rollbackFailedVersionWrite(newDoc, old, typologyId, newTypologyId);
       throw err;
     }
 
@@ -368,8 +411,7 @@ export class DocumentUploadService {
       await newDoc.save();
     } catch (err) {
       await this.storage.delete(r2Key).catch(() => {});
-      await newDoc.deleteOne().catch(() => {});
-      await this.restoreOldActive(old, typologyId);
+      await this.rollbackFailedVersionWrite(newDoc, old, typologyId, newTypologyId);
       throw err;
     }
 
