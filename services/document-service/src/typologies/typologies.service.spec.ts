@@ -214,6 +214,37 @@ describe('TypologiesService', () => {
       expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
     });
 
+    // Regression: deleting the partial newDoc used to be best-effort
+    // (.catch(() => {})) AFTER old was already restored and its marker
+    // cleared — a transient delete failure left newDoc orphaned forever,
+    // since nothing sweeps for it once the marker is gone. Deleting first
+    // means a failure here must leave old untouched (still ARCHIVED, marker
+    // still set) so the NEXT startup's sweep finds this doc again and retries.
+    it('does not restore old or clear the marker when deleting the partial newDoc fails — leaves it for the next startup to retry', async () => {
+      const stuckDoc = makeDoc({
+        typologyStatus: TypologyStatus.ARCHIVED,
+        pendingVersionTransition: { newTypologyId: 'new-1', startedAt: new Date() },
+      });
+      const Model: any = jest.fn();
+      Model.syncIndexes = jest.fn().mockResolvedValue([]);
+      Model.find = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([stuckDoc]) });
+      Model.findOne = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }); // never fully written
+      Model.deleteOne = jest.fn().mockReturnValue({ exec: jest.fn().mockRejectedValue(new Error('Mongo down')) });
+
+      const service = makeService(Model);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+      expect(Model.deleteOne).toHaveBeenCalledWith({ _id: 'new-1', orgId: stuckDoc.orgId });
+      expect(stuckDoc.save).not.toHaveBeenCalled();
+      expect(stuckDoc.typologyStatus).toBe(TypologyStatus.ARCHIVED);
+      expect(stuckDoc.pendingVersionTransition).not.toBeNull();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to reconcile pending version transition'),
+        expect.any(String),
+        'TypologiesService',
+      );
+    });
+
     it('logs and reports to Sentry instead of throwing when reconciling one typology fails, without blocking startup', async () => {
       const stuckDoc = makeDoc({
         typologyStatus: TypologyStatus.ARCHIVED,

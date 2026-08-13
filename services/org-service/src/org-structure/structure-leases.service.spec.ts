@@ -29,6 +29,7 @@ describe('StructureLeasesService', () => {
   let managerQb: ReturnType<typeof makeQueryBuilder>;
   let manager: EntityManager;
   let randomSpy: jest.SpyInstance;
+  let logger: { log: jest.Mock; warn: jest.Mock; error: jest.Mock };
 
   beforeEach(() => {
     repoQb = makeQueryBuilder();
@@ -37,8 +38,10 @@ describe('StructureLeasesService', () => {
     manager = {
       getRepository: () => repo,
       createQueryBuilder: jest.fn().mockReturnValue(managerQb),
+      query: jest.fn().mockResolvedValue(undefined),
     } as unknown as EntityManager;
-    service = new StructureLeasesService();
+    logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    service = new StructureLeasesService(logger as any);
   });
 
   afterEach(() => {
@@ -95,15 +98,23 @@ describe('StructureLeasesService', () => {
     // table only shrinks via this opportunistic sweep, so it must actually
     // fire (on the fraction of calls it's supposed to) or structure_leases
     // grows unboundedly under sustained traffic.
-    it('sweeps expired leases (via Postgres clock_timestamp()) when the random roll lands under SWEEP_PROBABILITY', async () => {
+    // Regression: sweepExpired() used to run a plain query-builder DELETE
+    // with no isolation from the caller's own transaction and no bound on
+    // how many rows it could touch. Now it's raw SQL wrapped in a SAVEPOINT
+    // (so a failure can be rolled back without poisoning reserve()'s
+    // transaction) and capped at SWEEP_BATCH_SIZE rows per sweep.
+    it('sweeps expired leases inside a SAVEPOINT (via Postgres clock_timestamp()), bounded to SWEEP_BATCH_SIZE, when the random roll lands under SWEEP_PROBABILITY', async () => {
       randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.01); // 0.01 < 0.02
 
       await service.reserve(manager, 'org-1', 'area', 'area-1');
 
-      expect(repo.createQueryBuilder).toHaveBeenCalledWith('lease');
-      expect(repoQb.delete).toHaveBeenCalled();
-      expect(repoQb.where).toHaveBeenCalledWith('lease.expiresAt < clock_timestamp()');
-      expect(repoQb.execute).toHaveBeenCalled();
+      const calls = (manager.query as jest.Mock).mock.calls;
+      expect(calls[0][0]).toBe('SAVEPOINT sweep_expired_leases');
+      expect(calls[1][0]).toContain('DELETE FROM "structure_leases"');
+      expect(calls[1][0]).toContain('expires_at" < clock_timestamp()');
+      expect(calls[1][0]).toContain('LIMIT $1');
+      expect(calls[1][1]).toEqual([500]);
+      expect(calls[2][0]).toBe('RELEASE SAVEPOINT sweep_expired_leases');
     });
 
     it('does not sweep when the random roll lands above SWEEP_PROBABILITY', async () => {
@@ -111,7 +122,33 @@ describe('StructureLeasesService', () => {
 
       await service.reserve(manager, 'org-1', 'area', 'area-1');
 
-      expect(repo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(manager.query).not.toHaveBeenCalled();
+    });
+
+    // Regression: if the sweep's DELETE hit a deadlock/lock-timeout, Postgres
+    // marks the whole transaction aborted regardless of a JS try/catch — the
+    // caller's real work (the lease insert reserve() exists to do) must
+    // still go through and this best-effort cleanup must not surface as a
+    // failure. ROLLBACK TO SAVEPOINT is what actually un-poisons the
+    // transaction; a bare try/catch around the DELETE would not be enough.
+    it('rolls back to the savepoint and logs a warning instead of throwing when the sweep DELETE fails — reserve() still succeeds', async () => {
+      randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.01);
+      (manager.query as jest.Mock)
+        .mockResolvedValueOnce(undefined) // SAVEPOINT
+        .mockRejectedValueOnce(new Error('deadlock detected')) // DELETE
+        .mockResolvedValueOnce(undefined); // ROLLBACK TO SAVEPOINT
+
+      await expect(service.reserve(manager, 'org-1', 'area', 'area-1')).resolves.toBeUndefined();
+
+      const calls = (manager.query as jest.Mock).mock.calls;
+      expect(calls[2][0]).toBe('ROLLBACK TO SAVEPOINT sweep_expired_leases');
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Opportunistic structure_leases sweep failed'),
+        'StructureLeasesService',
+      );
+      // The actual lease reservation — the one thing that must never be
+      // sacrificed for a best-effort cleanup — still went through.
+      expect(managerQb.execute).toHaveBeenCalled();
     });
   });
 

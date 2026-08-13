@@ -9,6 +9,7 @@ import { DepartamentosService } from './departamentos.service';
 import { DocumentClientService } from '../common/document-client/document-client.service';
 import { UserClientService } from '../common/user-client/user-client.service';
 import { StructureLeasesService } from './structure-leases.service';
+import { ExternalReferencesGuard } from './external-references.guard';
 import { KafkaProducerService } from '@sgd/common';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
@@ -90,8 +91,10 @@ describe('AreasService', () => {
         { provide: getRepositoryToken(Cargo), useValue: cargoRepo },
         { provide: DataSource, useValue: dataSource },
         { provide: DepartamentosService, useValue: departamentosService },
-        { provide: DocumentClientService, useValue: documentClient },
-        { provide: UserClientService, useValue: userClient },
+        // Real ExternalReferencesGuard wired to the mocked clients below — keeps
+        // existing assertions on the resulting ConflictException shape valid
+        // without duplicating that shape here.
+        { provide: ExternalReferencesGuard, useValue: new ExternalReferencesGuard(documentClient as unknown as DocumentClientService, userClient as unknown as UserClientService) },
         { provide: StructureLeasesService, useValue: structureLeases },
         { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
@@ -243,7 +246,7 @@ describe('AreasService', () => {
       },
     });
     expect(documentClient.countOrgStructureReferences).toHaveBeenCalledWith(area.orgId, { areaId: area.id });
-    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith({ areaId: area.id });
+    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith(area.orgId, { areaId: area.id });
     expect(repo.softRemove).not.toHaveBeenCalled();
     // The external check runs before the transaction/lock is even opened —
     // holding a row lock across the ~5s outbound HTTP timeout ceiling would

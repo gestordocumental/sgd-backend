@@ -277,19 +277,9 @@ export class BulkStructureService {
             `Cargo ${await this.cargoErrorLabel(manager, dto.orgId, dto.cargoId)} no encontrado a nivel de departamento '${dept.name}'`,
           );
         }
-        await this.structureLeases.reserve(manager, dto.orgId, 'departamento', dept.id);
-        await this.structureLeases.reserve(manager, dto.orgId, 'cargo', cargo.id);
-        return {
-          departamentoId: dept.id,
-          departamentoNombre: dept.name,
-          areaId: null,
-          areaNombre: null,
-          cargoId: cargo.id,
-          cargoNombre: cargo.name,
-        };
-      }
-
-      if (dto.areaId) {
+        cargoId = cargo.id;
+        cargoNombre = cargo.name;
+      } else if (dto.areaId) {
         const area = await manager.getRepository(Area).findOne({
           where: { orgId: dto.orgId, departamentoId: dept.id, id: dto.areaId },
           lock: { mode: 'pessimistic_read' },

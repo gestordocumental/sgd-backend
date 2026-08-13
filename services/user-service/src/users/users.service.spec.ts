@@ -1989,52 +1989,78 @@ describe('UsersService', () => {
 
   describe('countByPosition', () => {
     // Regression coverage: this is what makes countByPosition safe for
-    // org-service's delete-blocking check, unlike findByPosition above —
-    // no inner join to user_org_roles, no is_active filter.
+    // org-service's delete-blocking check, unlike findByPosition above — it
+    // joins user_org_roles only to confirm current org membership
+    // (org_id + removed_at IS NULL), with no role_id or is_active
+    // requirement. Those two specifically must stay absent: a user with
+    // cargo_id set but no active role assignment (the exact case
+    // findByPosition's inner join would miss) must still be counted.
     function makeCountQb(count: number) {
       const qb: Record<string, jest.Mock> = {
-        where:    jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        getCount: jest.fn().mockResolvedValue(count),
+        innerJoin: jest.fn().mockReturnThis(),
+        where:     jest.fn().mockReturnThis(),
+        andWhere:  jest.fn().mockReturnThis(),
+        getCount:  jest.fn().mockResolvedValue(count),
       };
       usersRepo.createQueryBuilder.mockReturnValue(qb as any);
       return qb;
     }
 
-    it('counts by cargoId without joining user_org_roles or filtering is_active', async () => {
-      // Regression guard: a user with cargo_id set but no active role
-      // assignment (the exact case findByPosition's inner join would miss)
-      // must still be counted — asserting no join/is_active call is the
-      // right level to test that at, since this is a mocked query builder,
-      // not a real DB.
+    it('counts by cargoId, scoped to current org membership, without role_id/is_active requirements', async () => {
       const qb = makeCountQb(1);
 
-      const result = await service.countByPosition({ cargoId: 'cargo-uuid' });
+      const result = await service.countByPosition('org-1', { cargoId: 'cargo-uuid' });
 
       expect(result).toBe(1);
+      expect(qb.innerJoin).toHaveBeenCalledWith(
+        'user_org_roles',
+        'uor',
+        'uor.user_id = u.id AND uor.org_id = :orgId AND uor.removed_at IS NULL',
+        { orgId: 'org-1' },
+      );
       expect(qb.where).toHaveBeenCalledWith('u.deleted_at IS NULL');
       expect(qb.andWhere).toHaveBeenCalledWith('u.cargo_id = :cargoId', { cargoId: 'cargo-uuid' });
       expect(qb.andWhere).not.toHaveBeenCalledWith(expect.stringContaining('is_active'), expect.anything());
-      expect(qb.andWhere).not.toHaveBeenCalledWith(expect.stringContaining('user_org_roles'), expect.anything());
-      // The mock query builder above doesn't even define innerJoin — calling
-      // it would throw and fail this test, which is the point.
+      expect(qb.innerJoin).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.stringContaining('role_id'),
+        expect.anything(),
+      );
     });
 
     it('counts by areaId', async () => {
       const qb = makeCountQb(2);
-      await service.countByPosition({ areaId: 'area-uuid' });
+      await service.countByPosition('org-1', { areaId: 'area-uuid' });
       expect(qb.andWhere).toHaveBeenCalledWith('u.area_id = :areaId', { areaId: 'area-uuid' });
     });
 
     it('counts by departamentoId', async () => {
       const qb = makeCountQb(3);
-      await service.countByPosition({ departamentoId: 'dept-uuid' });
+      await service.countByPosition('org-1', { departamentoId: 'dept-uuid' });
       expect(qb.andWhere).toHaveBeenCalledWith('u.departamento_id = :departamentoId', { departamentoId: 'dept-uuid' });
     });
 
     it('returns 0 when nothing matches', async () => {
       makeCountQb(0);
-      expect(await service.countByPosition({ cargoId: 'missing' })).toBe(0);
+      expect(await service.countByPosition('org-1', { cargoId: 'missing' })).toBe(0);
+    });
+
+    // Regression: removeFromOrg() only stamps user_org_roles.removed_at — it
+    // never clears the user's departamento_id/area_id/cargo_id. Without the
+    // org-membership join, a user long removed from org A but still
+    // carrying org A's stale cargo_id would wrongly count as a live
+    // reference and block deleting that cargo. The join itself is asserted
+    // above; this only documents the scenario it exists to prevent.
+    it('is scoped to the given orgId — a different org calling with the same structure id must not see this user', async () => {
+      const qb = makeCountQb(0);
+      await service.countByPosition('org-2', { cargoId: 'cargo-uuid' });
+      expect(qb.innerJoin).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        { orgId: 'org-2' },
+      );
     });
   });
 });

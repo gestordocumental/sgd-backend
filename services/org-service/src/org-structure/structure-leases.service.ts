@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
+import { AppLogger } from '@sgd/common';
 import { StructureLease, StructureType } from './entities/structure-lease.entity';
 
 /**
@@ -27,6 +28,15 @@ export class StructureLeasesService {
   // 1-in-50 keeps the extra DELETE off the hot path almost always while
   // still running often in aggregate at any real traffic volume.
   private static readonly SWEEP_PROBABILITY = 0.02;
+
+  // Caps how many expired rows a single sweep deletes. Sweeping is
+  // opportunistic and repeats on ~2% of calls, so an unbounded backlog just
+  // takes a few more sweeps to fully drain — no need for one call to finish
+  // the whole job, and every call staying cheap matters more (see
+  // sweepExpired()'s docstring for why an unbounded DELETE is a real risk).
+  private static readonly SWEEP_BATCH_SIZE = 500;
+
+  constructor(private readonly logger: AppLogger) {}
 
   /**
    * Records a short-lived claim that `structureId` was ACTIVE just now.
@@ -95,12 +105,42 @@ export class StructureLeasesService {
       .getCount();
   }
 
+  /**
+   * Best-effort — must never poison reserve()'s caller transaction (this
+   * runs inside resolveStructureById()'s transaction, whose actual job — the
+   * lease insert above — must still commit even if this cleanup fails). A
+   * plain try/catch around the DELETE would NOT be enough on its own: once
+   * any statement inside a Postgres transaction errors (deadlock, lock
+   * timeout, statement_timeout), the whole transaction is marked aborted at
+   * the server level, and every later statement — including the eventual
+   * COMMIT — fails with "current transaction is aborted" regardless of what
+   * application code does with the JS exception. A SAVEPOINT is the actual
+   * mechanism Postgres provides for this: ROLLBACK TO SAVEPOINT un-poisons
+   * the transaction, letting the caller's insert/commit proceed normally.
+   *
+   * Also bounded (SWEEP_BATCH_SIZE) rather than deleting every expired row
+   * in one statement — an unbounded DELETE takes row locks on every matched
+   * row for the rest of this transaction, which under a large backlog could
+   * hold those locks far longer than necessary and contend with concurrent
+   * countActive()/reserve() calls touching the same table.
+   */
   private async sweepExpired(manager: EntityManager): Promise<void> {
-    await manager
-      .getRepository(StructureLease)
-      .createQueryBuilder('lease')
-      .delete()
-      .where('lease.expiresAt < clock_timestamp()')
-      .execute();
+    await manager.query('SAVEPOINT sweep_expired_leases');
+    try {
+      await manager.query(
+        `DELETE FROM "structure_leases" WHERE "id" IN (
+           SELECT "id" FROM "structure_leases" WHERE "expires_at" < clock_timestamp() LIMIT $1
+         )`,
+        [StructureLeasesService.SWEEP_BATCH_SIZE],
+      );
+      await manager.query('RELEASE SAVEPOINT sweep_expired_leases');
+    } catch (err) {
+      await manager.query('ROLLBACK TO SAVEPOINT sweep_expired_leases');
+      this.logger.warn(
+        `Opportunistic structure_leases sweep failed (harmless — best-effort cleanup, caller's ` +
+          `transaction is unaffected): ${err instanceof Error ? err.message : String(err)}`,
+        'StructureLeasesService',
+      );
+    }
   }
 }

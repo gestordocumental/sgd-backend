@@ -9,6 +9,7 @@ import { DepartamentosService } from './departamentos.service';
 import { DocumentClientService } from '../common/document-client/document-client.service';
 import { UserClientService } from '../common/user-client/user-client.service';
 import { StructureLeasesService } from './structure-leases.service';
+import { ExternalReferencesGuard } from './external-references.guard';
 import { KafkaProducerService } from '@sgd/common';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
@@ -86,8 +87,10 @@ describe('CargosService', () => {
         { provide: DataSource, useValue: dataSource },
         { provide: AreasService, useValue: areasService },
         { provide: DepartamentosService, useValue: departamentosService },
-        { provide: DocumentClientService, useValue: documentClient },
-        { provide: UserClientService, useValue: userClient },
+        // Real ExternalReferencesGuard wired to the mocked clients below — keeps
+        // existing assertions on the resulting ConflictException shape valid
+        // without duplicating that shape here.
+        { provide: ExternalReferencesGuard, useValue: new ExternalReferencesGuard(documentClient as unknown as DocumentClientService, userClient as unknown as UserClientService) },
         { provide: StructureLeasesService, useValue: structureLeases },
         { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
@@ -243,7 +246,7 @@ describe('CargosService', () => {
     await service.remove(cargo.orgId, cargo.departamentoId, cargo.areaId!, cargo.id);
 
     expect(documentClient.countOrgStructureReferences).toHaveBeenCalledWith(cargo.orgId, { cargoId: cargo.id });
-    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith({ cargoId: cargo.id });
+    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith(cargo.orgId, { cargoId: cargo.id });
     expect(repo.softRemove).toHaveBeenCalledWith(cargo);
   });
 
@@ -329,7 +332,7 @@ describe('CargosService', () => {
     await service.removeDept(cargo.orgId, cargo.departamentoId, cargo.id);
 
     expect(documentClient.countOrgStructureReferences).toHaveBeenCalledWith(cargo.orgId, { cargoId: cargo.id });
-    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith({ cargoId: cargo.id });
+    expect(userClient.countOrgStructureReferences).toHaveBeenCalledWith(cargo.orgId, { cargoId: cargo.id });
     expect(repo.softRemove).toHaveBeenCalledWith(cargo);
   });
 
