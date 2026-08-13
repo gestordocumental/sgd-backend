@@ -208,17 +208,31 @@ export const TypologySchema = SchemaFactory.createForClass(Typology);
 // Partial unique index: only one ACTIVE typology per (orgId, codigo) is allowed.
 // INCOMPLETE / ARCHIVED / soft-deleted records with the same codigo are permitted.
 //
-// partialFilterExpression only supports a fixed operator allowlist: equality
-// expressions, $exists, $gt/$gte/$lt/$lte, $type, and top-level $and — NOT $ne
-// (MongoDB rewrites `{ $ne: null }` internally to `$not: { $eq: null }`, and
-// $not isn't in that list). Using $ne here made createIndex() fail outright
-// with "Expression not supported in partial index: $not" on every environment
+// partialFilterExpression does NOT support $ne (confirmed by the actual
+// runtime failure below, not just docs — MongoDB rewrites `{ $ne: null }`
+// internally to `$not: { $eq: null }`, and $not isn't accepted there
+// regardless of server version). Using $ne here made createIndex() fail
+// outright with "Expression not supported in partial index: $not" on every
+// environment
 // — the index never actually built, silently under Mongoose's default
 // autoIndex, loudly once onModuleInit() started calling syncIndexes()
 // explicitly (see that method's docstring). $type: 'string' is the
 // MongoDB-documented way to express "not null" in a partial filter: codigo is
 // only ever set to a real string or left null (never any other BSON type), so
 // this excludes exactly the null case $ne was trying to exclude.
+//
+// This index has never successfully built on any deployment (the $ne bug
+// above made every attempt fail), so its uniqueness guarantee has never
+// actually been enforced by MongoDB — only by TypologiesService's app-level
+// assertNoActiveDuplicateCodigo() pre-check, which is a plain read-then-write
+// and does NOT prevent real duplicate ACTIVE (orgId, codigo) rows from having
+// piled up already. Before deploying this fix to an environment with existing
+// data, run `npm run fix:duplicate-active-codigos` (no --fix) against that
+// environment's MONGODB_URI first — if it finds any group, resolve them
+// (`--fix`, or by hand) BEFORE this index's first build attempt, or
+// syncIndexes() will keep failing (now on a genuine E11000 duplicate-key
+// violation instead of the $ne syntax error) and codigoUniquenessEnforced
+// stays false.
 TypologySchema.index(
   { orgId: 1, 'datosDeclarados.codigo': 1 },
   {
