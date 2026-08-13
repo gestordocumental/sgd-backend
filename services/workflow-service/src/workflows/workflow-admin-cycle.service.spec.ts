@@ -21,7 +21,6 @@ import {
 } from './entities/enums';
 import { WorkflowTimelineService } from './workflow-timeline.service';
 import { KafkaProducerService, AppLogger } from '@sgd/common';
-import { DocumentClientService } from '../common/clients/document-client.service';
 
 // ── Factories ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +33,9 @@ function makeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
     createdBy: 'creator-1',
     finalUserIds: ['final-user-1'],
     activeAdminCycleId: null,
+    // Instantánea propia del workflow — por defecto habilitada en los
+    // fixtures para no acoplar cada test que no le concierne a este flag.
+    reviewCycleEnabled: true,
     ...overrides,
   } as unknown as Workflow;
 }
@@ -106,10 +108,6 @@ function buildService() {
     emitSafe: jest.fn(),
   } as unknown as jest.Mocked<KafkaProducerService>;
 
-  const documentClientService: jest.Mocked<DocumentClientService> = {
-    isReviewCycleEnabledForTypology: jest.fn().mockResolvedValue(true),
-  } as unknown as jest.Mocked<DocumentClientService>;
-
   const logger = { log: jest.fn(), error: jest.fn(), warn: jest.fn() } as unknown as AppLogger;
 
   const service = new WorkflowAdminCycleService(
@@ -121,7 +119,6 @@ function buildService() {
     dataSource,
     timelineService,
     kafkaProducer,
-    documentClientService,
     logger,
   );
 
@@ -133,7 +130,6 @@ function buildService() {
     dataSource,
     timelineService,
     kafkaProducer,
-    documentClientService,
   };
 }
 
@@ -188,31 +184,15 @@ describe('WorkflowAdminCycleService', () => {
       await expect(service.createCycle('wf-1', 'not-final-user', 'org-1', validDto)).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws ForbiddenException when the review cycle is disabled for the typology (defense in depth), without touching the locked workflow row', async () => {
-      const { service, workflowRepo, dataSource, documentClientService } = buildService();
-      workflowRepo.findOne.mockResolvedValue({ typologyId: 'typ-1' } as Workflow);
-      documentClientService.isReviewCycleEnabledForTypology.mockResolvedValue(false);
+    it('throws ForbiddenException when the workflow\'s own reviewCycleEnabled snapshot is false (defense in depth), without checking the live typology flag', async () => {
+      const { service, dataSource } = buildService();
+      mockLookups(dataSource, makeWorkflow({ reviewCycleEnabled: false }));
 
       await expect(service.createCycle('wf-1', 'final-user-1', 'org-1', validDto)).rejects.toThrow(
         ForbiddenException,
       );
-      expect(workflowRepo.findOne).toHaveBeenCalledWith({
-        where: { id: 'wf-1', orgId: 'org-1' },
-        select: ['typologyId'],
-      });
-      expect(documentClientService.isReviewCycleEnabledForTypology).toHaveBeenCalledWith('org-1', 'typ-1');
-      expect(dataSource.transaction).not.toHaveBeenCalled();
-    });
-
-    it('skips the review-cycle-enabled check without erroring when the preliminary workflow lookup finds nothing — the locked read inside the transaction surfaces the real not-found', async () => {
-      const { service, workflowRepo, dataSource, documentClientService } = buildService();
-      workflowRepo.findOne.mockResolvedValue(null);
-      dataSource._manager.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.createCycle('wf-1', 'final-user-1', 'org-2', validDto),
-      ).rejects.toThrow(NotFoundException);
-      expect(documentClientService.isReviewCycleEnabledForTypology).not.toHaveBeenCalled();
+      // No creation writes happened past the guard.
+      expect(dataSource._manager.save).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException for non-consecutive step orders, without touching the workflow row', async () => {
@@ -272,10 +252,9 @@ describe('WorkflowAdminCycleService', () => {
       );
     });
 
-    it('refreshes the stale reviewCycleEnabled snapshot with the live-confirmed value when the preliminary lookup resolves', async () => {
-      const { service, cycleRepo, workflowRepo, dataSource } = buildService();
-      workflowRepo.findOne.mockResolvedValue({ typologyId: 'typ-1' } as Workflow);
-      mockLookups(dataSource, makeWorkflow({ reviewCycleEnabled: false }), null);
+    it('does not touch reviewCycleEnabled on success — it stays whatever it already was on the workflow row', async () => {
+      const { service, cycleRepo, dataSource } = buildService();
+      mockLookups(dataSource, makeWorkflow(), null);
       cycleRepo.findOneOrFail.mockResolvedValue(makeCycle());
 
       await service.createCycle('wf-1', 'final-user-1', 'org-1', validDto);
@@ -283,7 +262,7 @@ describe('WorkflowAdminCycleService', () => {
       expect(dataSource._manager.update).toHaveBeenCalledWith(
         Workflow,
         'wf-1',
-        expect.objectContaining({ reviewCycleEnabled: true }),
+        expect.not.objectContaining({ reviewCycleEnabled: expect.anything() }),
       );
     });
 

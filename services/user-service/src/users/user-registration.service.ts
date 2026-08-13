@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
   InternalServerErrorException,
   HttpException,
   Inject,
@@ -18,6 +19,7 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { AuthClientService } from '../auth-client/auth-client.service';
 import { UserOrgRole } from '../roles/entities/user-org-role.entity';
 import { Role, SystemRoleName, RoleScope } from '../roles/entities/role.entity';
+import { OrgClientService } from '../common/org-client/org-client.service';
 import { KafkaProducerService, TOPICS, getClientIp } from '@sgd/common';
 import { userDisplayName, INVITATION_TTL_SECONDS } from './user.helpers';
 
@@ -31,6 +33,7 @@ export class UserRegistrationService {
     @InjectRepository(Role)
     private readonly roleRepository: Repository<Role>,
     private readonly authClientService: AuthClientService,
+    private readonly orgClientService: OrgClientService,
     @Inject('REDIS_CLIENT')
     private readonly redis: Redis,
     private readonly kafkaProducer: KafkaProducerService,
@@ -142,6 +145,31 @@ export class UserRegistrationService {
         });
         if (adminRole) roleId = adminRole.id;
       }
+    }
+
+    // Validates departamentoId/areaId/cargoId against org-service before
+    // persisting — mirrors the guard UserProfileService.update() already
+    // applies on structure changes. Without this, a user could be created
+    // pointing at a departamento/area/cargo that doesn't exist (or that
+    // org-service deletes mid-request) with nothing to catch it — this is
+    // also load-bearing for the cross-service TOCTOU fix (see
+    // BulkStructureService.resolveStructureById() / StructureLease in
+    // org-service): every write path that persists a new org-structure
+    // reference must obtain a lease first, or a concurrent delete can't see
+    // it coming. Prefers dto.orgId — the org the new user is explicitly
+    // being placed into, which can differ from the caller's own org for a
+    // super-admin — but falls back to the caller's own org (the `orgId`
+    // param, e.g. a regular admin whose request doesn't echo their org back
+    // in the body) rather than requiring it to be spelled out in the DTO.
+    if (dto.departamentoId != null || dto.areaId != null || dto.cargoId != null) {
+      if (dto.departamentoId == null) {
+        throw new BadRequestException('departamentoId is required when assigning an area or cargo');
+      }
+      const structureOrgId = dto.orgId ?? orgId;
+      if (!structureOrgId) {
+        throw new BadRequestException('orgId is required when assigning departamentoId/areaId/cargoId');
+      }
+      await this.orgClientService.validateOrgStructure(structureOrgId, dto.departamentoId, dto.areaId, dto.cargoId);
     }
 
     const user = this.usersRepository.create(dto);

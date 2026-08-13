@@ -9,7 +9,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "backfill:review-cycle-enabled": "ts-node src/scripts/backfill-review-cycle-enabled.ts"
+    "backfill:review-cycle-enabled": "ts-node src/scripts/backfill-review-cycle-enabled.ts",
+    "fix:duplicate-active-codigos": "ts-node src/scripts/fix-duplicate-active-codigos.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
