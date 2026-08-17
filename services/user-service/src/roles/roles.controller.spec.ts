@@ -11,7 +11,7 @@ const ORG_ID = 'org-uuid-1';
 
 const makePermission = (overrides: Partial<Permission> = {}): Permission => ({
   id: 'perm-uuid-1',
-  module: PermissionModule.DOCUMENTS,
+  module: PermissionModule.WORKFLOWS,
   action: PermissionAction.READ,
   description: null,
   roles: [],

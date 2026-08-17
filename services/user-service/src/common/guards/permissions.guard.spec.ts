@@ -230,7 +230,7 @@ describe('PermissionsGuard', () => {
         {
           role: {
             permissions: [
-              { module: PermissionModule.DOCUMENTS, action: PermissionAction.READ },
+              { module: PermissionModule.WORKFLOWS, action: PermissionAction.READ },
             ],
           },
         } as unknown as UserOrgRole,
@@ -261,7 +261,7 @@ describe('PermissionsGuard', () => {
       uorRepo.find.mockResolvedValue([
         {
           role: {
-            permissions: [{ module: PermissionModule.DOCUMENTS, action: PermissionAction.READ }],
+            permissions: [{ module: PermissionModule.WORKFLOWS, action: PermissionAction.READ }],
           },
         } as unknown as UserOrgRole,
         {

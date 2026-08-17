@@ -22,7 +22,7 @@ const makeRole = (overrides: Partial<Role> = {}): Role => ({
 
 const makePermission = (overrides: Partial<Permission> = {}): Permission => ({
   id: 'perm-uuid-1',
-  module: PermissionModule.DOCUMENTS,
+  module: PermissionModule.ORG_STRUCTURE,
   action: PermissionAction.READ,
   description: null,
   roles: [],
@@ -165,7 +165,7 @@ describe('RolePolicy', () => {
 
     it('allows independent modules that each carry their own READ', () => {
       const permissions = [
-        makePermission({ id: 'p1', module: PermissionModule.DOCUMENTS, action: PermissionAction.READ }),
+        makePermission({ id: 'p1', module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.READ }),
         makePermission({ id: 'p2', module: PermissionModule.WORKFLOWS, action: PermissionAction.READ }),
         makePermission({ id: 'p3', module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE }),
       ];
@@ -179,8 +179,8 @@ describe('RolePolicy', () => {
 
     it('throws when one module is missing READ even if another module is correctly configured', () => {
       const permissions = [
-        makePermission({ id: 'p1', module: PermissionModule.DOCUMENTS, action: PermissionAction.READ }),
-        makePermission({ id: 'p2', module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE }),
+        makePermission({ id: 'p1', module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.READ }),
+        makePermission({ id: 'p2', module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.WRITE }),
         makePermission({ id: 'p3', module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE }),
       ];
       try {
@@ -196,7 +196,7 @@ describe('RolePolicy', () => {
 
     it('includes every offending module in the error params', () => {
       const permissions = [
-        makePermission({ id: 'p1', module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE }),
+        makePermission({ id: 'p1', module: PermissionModule.ORG_STRUCTURE, action: PermissionAction.WRITE }),
         makePermission({ id: 'p2', module: PermissionModule.WORKFLOWS, action: PermissionAction.APPROVE }),
       ];
       try {
@@ -204,7 +204,7 @@ describe('RolePolicy', () => {
         fail('expected RolePolicy.validatePermissionSet to throw');
       } catch (err) {
         expect((err as BadRequestException).getResponse()).toMatchObject({
-          params: { modules: expect.arrayContaining([PermissionModule.DOCUMENTS, PermissionModule.WORKFLOWS]) },
+          params: { modules: expect.arrayContaining([PermissionModule.ORG_STRUCTURE, PermissionModule.WORKFLOWS]) },
         });
       }
     });
