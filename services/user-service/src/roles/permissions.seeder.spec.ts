@@ -24,9 +24,9 @@ describe('PermissionsSeeder', () => {
     expect(builder.values).toHaveBeenCalledWith(
       expect.arrayContaining([
         {
-          module: PermissionModule.DOCUMENTS,
+          module: PermissionModule.WORKFLOWS,
           action: PermissionAction.READ,
-          description: 'View documents',
+          description: 'View workflows',
         },
         {
           module: PermissionModule.USERS,

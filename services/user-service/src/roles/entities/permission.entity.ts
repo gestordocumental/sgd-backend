@@ -7,8 +7,13 @@ import {
 } from 'typeorm';
 import { Role } from './role.entity';
 
+// DOCUMENTS intentionally not modeled here anymore — see permissions.seeder.ts
+// for why. 'DOCUMENTS' may still be a valid label on the underlying Postgres
+// enum type (dropping a value from a native enum type requires rebuilding it,
+// same as 1776600000000-RemoveSuperAdminRole.ts did for 'PLATFORM' — not done
+// here since zero rows use it and nothing in this codebase can write it
+// anymore) — harmless, just an unused value the DB type still permits.
 export enum PermissionModule {
-  DOCUMENTS     = 'DOCUMENTS',
   WORKFLOWS     = 'WORKFLOWS',
   USERS         = 'USERS',
   ROLES         = 'ROLES',
