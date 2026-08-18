@@ -25,16 +25,16 @@ function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
   const ov = parseDottedVersion(oldVer);
   if (!nv || !ov) return false;
   const len = Math.max(nv.length, ov.length);
-  while (nv.length < len) nv.push(0);
-  while (ov.length < len) ov.push(0);
+  while (nv.length < len) nv.push(0n);
+  while (ov.length < len) ov.push(0n);
   let diffIdx = -1;
   for (let i = 0; i < len; i++) {
     if (nv[i] !== ov[i]) { diffIdx = i; break; }
   }
   if (diffIdx === -1) return false;
-  if (nv[diffIdx] !== ov[diffIdx] + 1) return false;
+  if (nv[diffIdx] !== ov[diffIdx] + 1n) return false;
   for (let i = diffIdx + 1; i < len; i++) {
-    if (nv[i] !== 0) return false;
+    if (nv[i] !== 0n) return false;
   }
   return true;
 }
@@ -44,12 +44,17 @@ function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
  * e.g. `v1.2.0`) into its numeric segments. Returns `null` when the string
  * isn't a plain dotted-numeric version, so callers can fall back to a literal
  * comparison for non-numeric version schemes.
+ *
+ * Segments are parsed as BigInt, not Number — a segment beyond
+ * Number.MAX_SAFE_INTEGER would otherwise silently lose precision, letting
+ * two different large version segments compare as equal or letting the
+ * "+1 increment" check below misfire.
  */
-function parseDottedVersion(v: string): number[] | null {
+function parseDottedVersion(v: string): bigint[] | null {
   const normalized = v.replace(/^v/i, '');
   // eslint-disable-next-line security/detect-unsafe-regex
   if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
-  return normalized.split('.').map((n) => Number(n));
+  return normalized.split('.').map((n) => BigInt(n));
 }
 
 /**
@@ -58,16 +63,29 @@ function parseDottedVersion(v: string): number[] | null {
  * "1.02") are treated as the same version. Falls back to a plain string
  * comparison (after trimming) when either value isn't a dotted-numeric
  * version, so non-numeric version schemes keep comparing exactly as before.
+ *
+ * Segments are compared as strings (after stripping leading zeros), not
+ * converted to Number — a Number round-trip would silently lose precision
+ * past Number.MAX_SAFE_INTEGER and could make two different large version
+ * numbers compare as equal.
  */
 function versionsEqual(a: string | null, b: string | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
-  const av = parseDottedVersion(a);
-  const bv = parseDottedVersion(b);
+
+  const parse = (v: string): string[] | null => {
+    const normalized = v.trim().replace(/^v/i, '');
+    // eslint-disable-next-line security/detect-unsafe-regex
+    if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
+    return normalized.split('.').map((segment) => segment.replace(/^0+(?=\d)/, ''));
+  };
+
+  const av = parse(a);
+  const bv = parse(b);
   if (!av || !bv) return a.trim() === b.trim();
   const len = Math.max(av.length, bv.length);
   for (let i = 0; i < len; i++) {
-    if ((av[i] ?? 0) !== (bv[i] ?? 0)) return false;
+    if ((av[i] ?? '0') !== (bv[i] ?? '0')) return false;
   }
   return true;
 }
