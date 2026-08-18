@@ -766,6 +766,22 @@ describe('TypologiesService', () => {
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
     });
 
+    it('does not flag a version discrepancy when declared and extracted differ only by leading zeros (6 vs 06)', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '6', fuente: DataSource.MANUAL },
+      });
+      const { Model } = makeModel(doc);
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
+
+      const service = makeService(Model);
+      await service.applyExtractedMetadata('org-1', doc.id, {
+        nombre: 'Policy', codigo: 'POL-001', version: '06',
+      });
+
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
+      expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
+    });
+
     it('scenario B — sets PENDING_CONFIRMATION when no declared data', async () => {
       const doc = makeDoc({
         datosDeclarados: { nombre: null, codigo: null, version: null, fuente: DataSource.MANUAL },
@@ -832,6 +848,21 @@ describe('TypologiesService', () => {
       await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED });
 
       expect(doc.datosDeclarados.nombre).toBe('Policy');
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
+    });
+
+    it('KEEP_DECLARED — does not throw when declared and extracted version differ only by leading zeros (6 vs 06)', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '6', fuente: DataSource.MANUAL },
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Policy', codigo: 'POL-001', version: '06', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED });
+
+      expect(doc.datosDeclarados.version).toBe('6');
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
     });
 
