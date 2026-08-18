@@ -492,7 +492,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: '02' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: '02' });
       expect(doc.datosDeclarados.version).toBe('02');
     });
 
@@ -501,7 +501,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: 'v1.1' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: 'v1.1' });
     });
 
     it('rejects version jump of more than one (01 → 03)', async () => {
@@ -517,7 +517,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: '01' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: '01' });
       expect(doc.datosDeclarados.version).toBe('01');
     });
 
@@ -531,9 +531,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(
-        service.update('org-1', doc.id, { version: '9007199254740993' }),
-      ).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: '9007199254740993' });
       expect(doc.datosDeclarados.version).toBe('9007199254740993');
     });
 
@@ -566,7 +564,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: '05' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: '05' });
     });
 
     it('translates mongo 11000 to ConflictException', async () => {
