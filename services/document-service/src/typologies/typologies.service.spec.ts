@@ -492,7 +492,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: '02' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: '02' });
       expect(doc.datosDeclarados.version).toBe('02');
     });
 
@@ -501,7 +501,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: 'v1.1' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: 'v1.1' });
     });
 
     it('rejects version jump of more than one (01 → 03)', async () => {
@@ -517,8 +517,22 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: '01' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: '01' });
       expect(doc.datosDeclarados.version).toBe('01');
+    });
+
+    it('allows a +1 increment for version segments beyond Number.MAX_SAFE_INTEGER', async () => {
+      // A Number round-trip would collapse '9007199254740992' and
+      // '9007199254740993' to the same float, making this either look like
+      // "no change" or an invalid jump instead of a genuine +1 increment.
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'P', codigo: 'C', version: '9007199254740992', fuente: DataSource.MANUAL },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await service.update('org-1', doc.id, { version: '9007199254740993' });
+      expect(doc.datosDeclarados.version).toBe('9007199254740993');
     });
 
     it('rejects decremented version (02 → 01)', async () => {
@@ -550,7 +564,7 @@ describe('TypologiesService', () => {
       const { Model } = makeModel(doc);
 
       const service = makeService(Model);
-      await expect(service.update('org-1', doc.id, { version: '05' })).resolves.not.toThrow();
+      await service.update('org-1', doc.id, { version: '05' });
     });
 
     it('translates mongo 11000 to ConflictException', async () => {
@@ -766,6 +780,61 @@ describe('TypologiesService', () => {
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
     });
 
+    it.each([
+      ['6', '06', 'leading zeros'],
+      ['v1.2', '1.02', 'leading "v" prefix plus leading zeros in a later segment'],
+      ['1', '1.0', 'a missing trailing segment treated as zero'],
+    ])(
+      'does not flag a version discrepancy when declared "%s" and extracted "%s" are the same version (%s)',
+      async (declaredVersion, extractedVersion) => {
+        const doc = makeDoc({
+          datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: declaredVersion, fuente: DataSource.MANUAL },
+        });
+        const { Model } = makeModel(doc);
+        Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
+
+        const service = makeService(Model);
+        await service.applyExtractedMetadata('org-1', doc.id, {
+          nombre: 'Policy', codigo: 'POL-001', version: extractedVersion,
+        });
+
+        expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
+        expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
+      },
+    );
+
+    it('still flags a version discrepancy for non-numeric version schemes that differ literally', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: 'Rev-A', fuente: DataSource.MANUAL },
+      });
+      const { Model } = makeModel(doc);
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
+
+      const service = makeService(Model);
+      await service.applyExtractedMetadata('org-1', doc.id, {
+        nombre: 'Policy', codigo: 'POL-001', version: 'Rev-B',
+      });
+
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.DISCREPANCY);
+      expect(doc.metadataExtraida.discrepancias.map((d: { campo: string }) => d.campo)).toContain('version');
+    });
+
+    it('does not flag a discrepancy for non-numeric version schemes that match literally', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: 'Rev-A', fuente: DataSource.MANUAL },
+      });
+      const { Model } = makeModel(doc);
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
+
+      const service = makeService(Model);
+      await service.applyExtractedMetadata('org-1', doc.id, {
+        nombre: 'Policy', codigo: 'POL-001', version: 'Rev-A',
+      });
+
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
+      expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
+    });
+
     it('scenario B — sets PENDING_CONFIRMATION when no declared data', async () => {
       const doc = makeDoc({
         datosDeclarados: { nombre: null, codigo: null, version: null, fuente: DataSource.MANUAL },
@@ -832,6 +901,57 @@ describe('TypologiesService', () => {
       await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED });
 
       expect(doc.datosDeclarados.nombre).toBe('Policy');
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
+    });
+
+    it.each([
+      ['6', '06', 'leading zeros'],
+      ['v1.2', '1.02', 'leading "v" prefix plus leading zeros in a later segment'],
+      ['1', '1.0', 'a missing trailing segment treated as zero'],
+    ])(
+      'KEEP_DECLARED — does not throw when declared "%s" and extracted "%s" are the same version (%s)',
+      async (declaredVersion, extractedVersion) => {
+        const doc = makeDoc({
+          datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: declaredVersion, fuente: DataSource.MANUAL },
+          documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+          metadataExtraida: { nombre: 'Policy', codigo: 'POL-001', version: extractedVersion, extractedAt: new Date(), discrepancias: [] },
+        });
+        const { Model } = makeModel(doc);
+
+        const service = makeService(Model);
+        await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED });
+
+        expect(doc.datosDeclarados.version).toBe(declaredVersion);
+        expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
+      },
+    );
+
+    it('KEEP_DECLARED — throws when non-numeric version schemes differ literally', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: 'Rev-A', fuente: DataSource.MANUAL },
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Policy', codigo: 'POL-001', version: 'Rev-B', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(
+        service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED }),
+      ).rejects.toThrow(BadRequestException);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.DISCREPANCY);
+    });
+
+    it('KEEP_DECLARED — does not throw when non-numeric version schemes match literally', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: 'Rev-A', fuente: DataSource.MANUAL },
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Policy', codigo: 'POL-001', version: 'Rev-A', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED });
+
       expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
     });
 

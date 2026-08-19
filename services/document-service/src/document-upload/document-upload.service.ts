@@ -20,27 +20,31 @@ import { ClamavService } from '../clamav/clamav.service';
  * @returns `true` if `newVer` increases `oldVer` by exactly one at the first differing numeric segment with all lower segments reset to `0`, `false` otherwise.
  */
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
-  const parse = (v: string): number[] | null => {
+  // Segments are parsed as BigInt, not Number — a segment beyond
+  // Number.MAX_SAFE_INTEGER would otherwise silently lose precision, letting
+  // two different large version segments compare as equal or letting the
+  // "+1 increment" check below misfire.
+  const parse = (v: string): bigint[] | null => {
     const normalized = v.replace(/^v/i, '');
     // eslint-disable-next-line security/detect-unsafe-regex
     if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
-    return normalized.split('.').map((n) => Number(n));
+    return normalized.split('.').map((n) => BigInt(n));
   };
   const nv = parse(newVer);
   const ov = parse(oldVer);
   if (!nv || !ov) return false;
   const len = Math.max(nv.length, ov.length);
-  while (nv.length < len) nv.push(0);
-  while (ov.length < len) ov.push(0);
+  while (nv.length < len) nv.push(0n);
+  while (ov.length < len) ov.push(0n);
 
   let diffIdx = -1;
   for (let i = 0; i < len; i++) {
     if (nv[i] !== ov[i]) { diffIdx = i; break; }
   }
   if (diffIdx === -1) return false;                      // same version
-  if (nv[diffIdx] !== ov[diffIdx] + 1) return false;    // must be exactly +1
+  if (nv[diffIdx] !== ov[diffIdx] + 1n) return false;   // must be exactly +1
   for (let i = diffIdx + 1; i < len; i++) {
-    if (nv[i] !== 0) return false;                       // lower segments must reset to 0
+    if (nv[i] !== 0n) return false;                      // lower segments must reset to 0
   }
   return true;
 }

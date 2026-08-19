@@ -336,4 +336,62 @@ describe('parseXlsxStructured()', () => {
     expect(result.leftCell).toBeNull();
     expect(result.rightCell).toBeNull();
   });
+
+  it('does not filter out a title that contains a slash as ordinary punctuation', async () => {
+    // Regression test: a title like "Formato para Reembolso/Legalización de
+    // Gastos" must not be mistaken for a CELL("filename") path artifact just
+    // because it contains a "/".
+    setupWorkbook([
+      [
+        ['Formato para Reembolso/Legalización de Gastos Caja Menor'],
+        ['Código: FIN-045\nVersión: 2.0'],
+      ],
+    ]);
+
+    const result = await parseXlsxStructured(buf);
+
+    expect(result.titleCell).toBe('Formato para Reembolso/Legalización de Gastos Caja Menor');
+  });
+
+  it('filters out a cached CELL("filename") result with a bracket-wrapped workbook name', async () => {
+    setupWorkbook([
+      [
+        ['C:\\Docs\\[Formato de requisición.xlsx]Sheet1'],
+        ['Real Document Title'],
+        ['Código: DOC-001'],
+      ],
+    ]);
+
+    const result = await parseXlsxStructured(buf);
+
+    expect(result.titleCell).toBe('Real Document Title');
+  });
+
+  it('filters out a cached CELL("filename") result on a UNC path', async () => {
+    setupWorkbook([
+      [
+        ['\\\\server\\share\\[Formato.xlsx]Sheet1'],
+        ['Real Document Title'],
+        ['Código: DOC-002'],
+      ],
+    ]);
+
+    const result = await parseXlsxStructured(buf);
+
+    expect(result.titleCell).toBe('Real Document Title');
+  });
+
+  it('filters out a plain filename with a known document extension', async () => {
+    setupWorkbook([
+      [
+        ['requisicion.xlsx'],
+        ['Real Document Title'],
+        ['Código: DOC-003'],
+      ],
+    ]);
+
+    const result = await parseXlsxStructured(buf);
+
+    expect(result.titleCell).toBe('Real Document Title');
+  });
 });

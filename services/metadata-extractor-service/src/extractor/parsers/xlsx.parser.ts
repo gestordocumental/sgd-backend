@@ -140,11 +140,22 @@ function looksLikeCompany(text: string): boolean {
 
 /**
  * Returns true when the cell value looks like a file path or filename.
- * Catches results from Excel's CELL("filename") formula which caches the full
- * file path (e.g. "C:\Docs\Formato de requisición.xlsx") or just the filename.
+ * Catches results from Excel's CELL("filename") formula, which caches the full
+ * workbook path in one of these shapes:
+ *   - "C:\Docs\[Formato de requisición.xlsx]Sheet1"  (saved workbook)
+ *   - "C:\Docs\Formato de requisición.xlsx"           (some Excel/locale variants)
+ *   - "\\server\share\[Formato.xlsx]Sheet1"           (UNC path)
+ *
+ * Deliberately requires an actual path-like structure (drive letter, UNC
+ * prefix, or a bracket-wrapped workbook name) rather than "contains a slash
+ * anywhere" — a plain title such as "Formato para Reembolso/Legalización de
+ * Gastos" also contains a slash as ordinary punctuation and must not be
+ * filtered out.
  */
 function looksLikeFilePath(text: string): boolean {
+  if (/\[[^[\]]+\.(xlsx?|docx?|pdf|csv|txt)\]/i.test(text)) return true;
+  if (/^[a-z]:[\\/]/i.test(text)) return true;
+  if (/^\\\\/.test(text)) return true;
   if (/\.(xlsx?|docx?|pdf|csv|txt)$/i.test(text)) return true;
-  if (/[/\\]/.test(text)) return true;
   return false;
 }
