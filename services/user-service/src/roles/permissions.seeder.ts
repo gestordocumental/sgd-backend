@@ -13,12 +13,15 @@ const PERMISSIONS_CATALOG: {
   action: PermissionAction;
   description: string;
 }[] = [
-  // DOCUMENTS
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.READ,     description: 'View documents' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.WRITE,    description: 'Create and edit documents' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DELETE,   description: 'Delete documents' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.UPLOAD,   description: 'Upload documents' },
-  { module: PermissionModule.DOCUMENTS, action: PermissionAction.DOWNLOAD, description: 'Download documents' },
+  // DOCUMENTS intentionally omitted — document-service has no RequirePermission
+  // guard on any endpoint (only JwtGuard/OrgMember), so this module was pure
+  // dead weight in the roles editor: assignable, but never actually checked
+  // anywhere. 1776400000000-CleanupUnusedPermissions.ts already deleted the
+  // existing rows once, but this seeder re-inserted them on every subsequent
+  // boot (onApplicationBootstrap runs an upsert of the whole catalog below,
+  // unconditionally) — see 1776900000000-RemoveDocumentsPermissionsForGood.ts
+  // for the migration that removes them again, this time for good now that
+  // they're no longer in this catalog to be re-seeded.
 
   // WORKFLOWS
   { module: PermissionModule.WORKFLOWS, action: PermissionAction.READ,    description: 'View workflows' },

@@ -249,9 +249,7 @@ describe('DocumentUploadService', () => {
       const { model, storage, kafka, logger, clamav } = makeDeps(doc);
       const service = new DocumentUploadService(model, storage as any, kafka as any, logger as any, clamav as any);
 
-      await expect(
-        service.upload('org-1', doc.id, makeFile({ mimetype: DOCX_MIME, originalname: 'test.docx' })),
-      ).resolves.not.toThrow();
+      await service.upload('org-1', doc.id, makeFile({ mimetype: DOCX_MIME, originalname: 'test.docx' }));
     });
 
     it('emits audit log when actorId is provided', async () => {

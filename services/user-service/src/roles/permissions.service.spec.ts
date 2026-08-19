@@ -8,7 +8,7 @@ import { User } from '../users/entities/user.entity';
 
 const makePermission = (overrides: Partial<Permission> = {}): Permission => ({
   id: 'perm-uuid-1',
-  module: PermissionModule.DOCUMENTS,
+  module: PermissionModule.WORKFLOWS,
   action: PermissionAction.READ,
   description: null,
   roles: [],
@@ -50,7 +50,7 @@ describe('PermissionsService', () => {
     it('returns all permissions ordered by module and action', async () => {
       const permissions = [
         makePermission({ module: PermissionModule.AUDIT, action: PermissionAction.READ }),
-        makePermission({ module: PermissionModule.DOCUMENTS, action: PermissionAction.READ }),
+        makePermission({ module: PermissionModule.WORKFLOWS, action: PermissionAction.READ }),
       ];
       permissionsRepo.find.mockResolvedValue(permissions);
 
@@ -127,7 +127,7 @@ describe('PermissionsService', () => {
 
     it('returns false when no role contains the requested permission', async () => {
       userOrgRoleRepo.find.mockResolvedValue([
-        { role: { permissions: [{ module: PermissionModule.DOCUMENTS, action: PermissionAction.READ }] } },
+        { role: { permissions: [{ module: PermissionModule.WORKFLOWS, action: PermissionAction.READ }] } },
         { role: null },
       ] as UserOrgRole[]);
 

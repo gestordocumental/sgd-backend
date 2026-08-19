@@ -21,26 +21,71 @@ import { KafkaProducerService, TOPICS, getClientIp, getCorrelationId, AppLogger 
  * @returns `true` if the first differing segment in `newVer` equals the corresponding segment in `oldVer` plus one and every following segment in `newVer` is `0`, `false` otherwise.
  */
 function isExactlyOneIncrement(newVer: string, oldVer: string): boolean {
-  const parse = (v: string): number[] | null => {
-    const normalized = v.replace(/^v/i, '');
-    // eslint-disable-next-line security/detect-unsafe-regex
-    if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
-    return normalized.split('.').map((n) => Number(n));
-  };
-  const nv = parse(newVer);
-  const ov = parse(oldVer);
+  const nv = parseDottedVersion(newVer);
+  const ov = parseDottedVersion(oldVer);
   if (!nv || !ov) return false;
   const len = Math.max(nv.length, ov.length);
-  while (nv.length < len) nv.push(0);
-  while (ov.length < len) ov.push(0);
+  while (nv.length < len) nv.push(0n);
+  while (ov.length < len) ov.push(0n);
   let diffIdx = -1;
   for (let i = 0; i < len; i++) {
     if (nv[i] !== ov[i]) { diffIdx = i; break; }
   }
   if (diffIdx === -1) return false;
-  if (nv[diffIdx] !== ov[diffIdx] + 1) return false;
+  if (nv[diffIdx] !== ov[diffIdx] + 1n) return false;
   for (let i = diffIdx + 1; i < len; i++) {
-    if (nv[i] !== 0) return false;
+    if (nv[i] !== 0n) return false;
+  }
+  return true;
+}
+
+/**
+ * Parses a dotted-numeric version string (optionally prefixed with `v`/`V`,
+ * e.g. `v1.2.0`) into its numeric segments. Returns `null` when the string
+ * isn't a plain dotted-numeric version, so callers can fall back to a literal
+ * comparison for non-numeric version schemes.
+ *
+ * Segments are parsed as BigInt, not Number — a segment beyond
+ * Number.MAX_SAFE_INTEGER would otherwise silently lose precision, letting
+ * two different large version segments compare as equal or letting the
+ * "+1 increment" check below misfire.
+ */
+function parseDottedVersion(v: string): bigint[] | null {
+  const normalized = v.replace(/^v/i, '');
+  // eslint-disable-next-line security/detect-unsafe-regex
+  if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
+  return normalized.split('.').map((n) => BigInt(n));
+}
+
+/**
+ * Compares two version strings for equality, ignoring leading zeros in each
+ * dotted segment and an optional leading `v` — so "6" and "06" (or "v1.2" and
+ * "1.02") are treated as the same version. Falls back to a plain string
+ * comparison (after trimming) when either value isn't a dotted-numeric
+ * version, so non-numeric version schemes keep comparing exactly as before.
+ *
+ * Segments are compared as strings (after stripping leading zeros), not
+ * converted to Number — a Number round-trip would silently lose precision
+ * past Number.MAX_SAFE_INTEGER and could make two different large version
+ * numbers compare as equal.
+ */
+function versionsEqual(a: string | null, b: string | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+
+  const parse = (v: string): string[] | null => {
+    const normalized = v.trim().replace(/^v/i, '');
+    // eslint-disable-next-line security/detect-unsafe-regex
+    if (!/^\d+(\.\d+)*$/.test(normalized)) return null;
+    return normalized.split('.').map((segment) => segment.replace(/^0+(?=\d)/, ''));
+  };
+
+  const av = parse(a);
+  const bv = parse(b);
+  if (!av || !bv) return a.trim() === b.trim();
+  const len = Math.max(av.length, bv.length);
+  for (let i = 0; i < len; i++) {
+    if ((av[i] ?? '0') !== (bv[i] ?? '0')) return false;
   }
   return true;
 }
@@ -476,7 +521,7 @@ export class TypologiesService implements OnModuleInit {
       const discrepancias = [];
       if (nombre  && nombre  !== doc.datosDeclarados.nombre)  discrepancias.push({ campo: 'nombre',  valorDeclarado: doc.datosDeclarados.nombre!,  valorExtraido: nombre });
       if (codigo  && codigo  !== doc.datosDeclarados.codigo)  discrepancias.push({ campo: 'codigo',  valorDeclarado: doc.datosDeclarados.codigo!,  valorExtraido: codigo });
-      if (version && version !== doc.datosDeclarados.version) discrepancias.push({ campo: 'version', valorDeclarado: doc.datosDeclarados.version!, valorExtraido: version });
+      if (version && !versionsEqual(version, doc.datosDeclarados.version!)) discrepancias.push({ campo: 'version', valorDeclarado: doc.datosDeclarados.version!, valorExtraido: version });
 
       doc.metadataExtraida.discrepancias = discrepancias;
       doc.documento.extractionStatus = discrepancias.length > 0 ? ExtractionStatus.DISCREPANCY : ExtractionStatus.COMPLETED;
@@ -570,7 +615,7 @@ export class TypologiesService implements OnModuleInit {
       const mismatchedFields: string[] = [];
       if (extracted.nombre  && extracted.nombre  !== declared.nombre)  mismatchedFields.push('nombre');
       if (extracted.codigo  && extracted.codigo  !== declared.codigo)  mismatchedFields.push('codigo');
-      if (extracted.version && extracted.version !== declared.version) mismatchedFields.push('version');
+      if (extracted.version && !versionsEqual(extracted.version, declared.version)) mismatchedFields.push('version');
 
       if (mismatchedFields.length > 0) {
         throw new BadRequestException({
