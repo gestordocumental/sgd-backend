@@ -1,6 +1,16 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsOptional, IsInt, Min, Max, IsUUID, IsString, MaxLength } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsInt,
+  Min,
+  Max,
+  IsUUID,
+  IsString,
+  IsNotEmpty,
+  MaxLength,
+} from 'class-validator';
 import { WorkflowStatus } from '../entities/enums';
 
 export class ListWorkflowsDto {
@@ -23,6 +33,7 @@ export class ListWorkflowsDto {
   @ApiPropertyOptional({ description: 'Filtrar por tipología' })
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(24)
   typologyId?: string;
 
