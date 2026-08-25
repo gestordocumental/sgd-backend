@@ -20,6 +20,12 @@ export class ListWorkflowsDto {
   @IsUUID()
   createdBy?: string;
 
+  @ApiPropertyOptional({ description: 'Filtrar por tipología' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  typologyId?: string;
+
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()
   @Type(() => Number)
