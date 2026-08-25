@@ -306,6 +306,18 @@ describe('WorkflowsService', () => {
         expect.objectContaining({ status: WorkflowStatus.DRAFT }),
       );
     });
+
+    it('applies typologyId filter when provided', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [], total: 0 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.findAll({ typologyId: 'TYP-001' }, makeUser());
+
+      expect(qb.andWhere).toHaveBeenCalledWith('w.typology_id = :typologyId', {
+        typologyId: 'TYP-001',
+      });
+    });
   });
 
   describe('findOne()', () => {
