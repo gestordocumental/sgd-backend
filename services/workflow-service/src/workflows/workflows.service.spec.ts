@@ -314,10 +314,9 @@ describe('WorkflowsService', () => {
 
       await service.findAll({ typologyId: 'TYP-001' }, makeUser());
 
-      expect(qb.andWhere).toHaveBeenCalledWith(
-        expect.stringContaining('typology_id'),
-        expect.objectContaining({ typologyId: 'TYP-001' }),
-      );
+      expect(qb.andWhere).toHaveBeenCalledWith('w.typology_id = :typologyId', {
+        typologyId: 'TYP-001',
+      });
     });
   });
 
