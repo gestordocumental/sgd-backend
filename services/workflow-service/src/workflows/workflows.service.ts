@@ -169,8 +169,9 @@ export class WorkflowsService {
       .where('w.org_id = :orgId', { orgId })
       .andWhere('w.deleted_at IS NULL');
 
-    if (dto.status)    qb.andWhere('w.status = :status', { status: dto.status });
-    if (dto.createdBy) qb.andWhere('w.created_by = :createdBy', { createdBy: dto.createdBy });
+    if (dto.status)     qb.andWhere('w.status = :status', { status: dto.status });
+    if (dto.createdBy)  qb.andWhere('w.created_by = :createdBy', { createdBy: dto.createdBy });
+    if (dto.typologyId) qb.andWhere('w.typology_id = :typologyId', { typologyId: dto.typologyId });
     if (dto.search) {
       const trimmed = dto.search.trim();
       if (trimmed) {
