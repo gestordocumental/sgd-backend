@@ -467,6 +467,18 @@ export class WorkflowAdminCycleService {
         );
       }
 
+      // El paso que ya ocupa el siguiente stepOrder es quien quedaría justo
+      // después del nuevo paso insertado (ver el desplazamiento +1 más abajo).
+      // Si es la misma persona que se está seleccionando, el ciclo terminaría
+      // con dos pasos consecutivos del mismo revisor — redundante y confuso —
+      // así que se rechaza antes de insertar nada.
+      const nextStep = cycle.steps.find((s) => s.stepOrder === step.stepOrder + 1);
+      if (nextStep && nextStep.userId === dto.optionalReviewerId) {
+        throw new BadRequestException(
+          'The next reviewer in the sequence is already the selected optional reviewer',
+        );
+      }
+
       workflowOrgId = workflow.orgId;
       workflowTitle = workflow.title;
       stepOrder     = step.stepOrder;

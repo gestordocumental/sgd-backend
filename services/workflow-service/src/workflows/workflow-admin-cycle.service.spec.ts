@@ -645,6 +645,47 @@ describe('WorkflowAdminCycleService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('throws BadRequestException when the next step in the sequence is already the selected optional reviewer', async () => {
+      const { service, dataSource } = buildService();
+      mockLookups(
+        dataSource,
+        makeWfForForward(),
+        makeCycleForForward({
+          steps: [
+            makeAdminStep({ stepOrder: 1 }),
+            makeAdminStep({ id: 'astep-2', stepOrder: 2, userId: 'optional-user-1' }),
+          ],
+        }),
+      );
+      await expect(
+        service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', 'org-1', validDto),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows forwarding when the next step in the sequence belongs to a different user', async () => {
+      const { service, dataSource, stepRepo } = buildService();
+      mockLookups(
+        dataSource,
+        makeWfForForward(),
+        makeCycleForForward({
+          steps: [
+            makeAdminStep({ stepOrder: 1 }),
+            makeAdminStep({ id: 'astep-2', stepOrder: 2, userId: 'someone-else' }),
+          ],
+        }),
+      );
+      addQbToManager(dataSource);
+      const insertedStep = makeAdminStep({ id: 'new-step-1', isOptional: true });
+      dataSource._manager.save
+        .mockResolvedValueOnce({ id: 'note-1' })
+        .mockResolvedValueOnce(insertedStep);
+      stepRepo.findOneOrFail.mockResolvedValue(insertedStep);
+
+      const result = await service.forwardStep('wf-1', 'cycle-1', 'astep-1', 'admin-user-1', 'org-1', validDto);
+
+      expect(result.id).toBe(insertedStep.id);
+    });
+
     it('inserts optional step, completes current step and emits kafka event on success', async () => {
       const { service, dataSource, stepRepo, kafkaProducer } = buildService();
       mockLookups(dataSource, makeWfForForward(), makeCycleForForward());
