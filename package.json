@@ -35,7 +35,7 @@
   },
   "devDependencies": {
     "@nestjs/mongoose": "^11.0.4",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "eslint-plugin-security": "^3.0.0",
