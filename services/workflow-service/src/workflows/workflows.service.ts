@@ -305,7 +305,10 @@ export class WorkflowsService {
             //    notificados, incluso ya finalizados.
             .where(
               new Brackets((q) => {
-                q.where(':userId = ANY(w.final_user_ids)', { userId }).andWhere(
+                // GIN sobre final_user_ids (ver migración AddWorkflowListingIndexes)
+                // solo es usable por el planner con @>/<@/&&/= — "x = ANY(array)"
+                // no lo activa y degrada a seq scan, aunque el resultado sea el mismo.
+                q.where('w.final_user_ids @> ARRAY[CAST(:userId AS uuid)]', { userId }).andWhere(
                   'w.status IN (:...statuses)',
                   {
                     statuses: [
