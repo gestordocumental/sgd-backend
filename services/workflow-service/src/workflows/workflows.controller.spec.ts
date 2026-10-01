@@ -48,8 +48,8 @@ function makeWorkflowsService(): jest.Mocked<WorkflowsService> {
     findOne: jest.fn().mockResolvedValue(makeWorkflowDto()),
     update: jest.fn().mockResolvedValue(makeWorkflowDto()),
     remove: jest.fn().mockResolvedValue(undefined),
-    getMyTasks: jest.fn().mockResolvedValue([makeWorkflowDto()]),
-    getMyAvailable: jest.fn().mockResolvedValue([makeWorkflowDto()]),
+    getMyTasks: jest.fn().mockResolvedValue({ data: [makeWorkflowDto()], total: 1, page: 1, limit: 20, totalPages: 1 }),
+    getMyAvailable: jest.fn().mockResolvedValue({ data: [makeWorkflowDto()], total: 1, page: 1, limit: 20, totalPages: 1 }),
     notifyNoFinalUsers: jest.fn().mockResolvedValue(undefined),
     getTimeline: jest.fn().mockResolvedValue([]),
   } as unknown as jest.Mocked<WorkflowsService>;
@@ -111,10 +111,10 @@ describe('WorkflowsController', () => {
       const { controller, workflowsService } = buildController();
       const user = makeUser();
 
-      const result = await controller.getMyTasks(user);
+      const result = await controller.getMyTasks({}, user);
 
-      expect(workflowsService.getMyTasks).toHaveBeenCalledWith(user);
-      expect(result).toHaveLength(1);
+      expect(workflowsService.getMyTasks).toHaveBeenCalledWith({}, user);
+      expect(result.data).toHaveLength(1);
     });
   });
 
@@ -123,10 +123,10 @@ describe('WorkflowsController', () => {
       const { controller, workflowsService } = buildController();
       const user = makeUser();
 
-      const result = await controller.getMyAvailable(user);
+      const result = await controller.getMyAvailable({}, user);
 
-      expect(workflowsService.getMyAvailable).toHaveBeenCalledWith(user);
-      expect(result).toHaveLength(1);
+      expect(workflowsService.getMyAvailable).toHaveBeenCalledWith({}, user);
+      expect(result.data).toHaveLength(1);
     });
   });
 
