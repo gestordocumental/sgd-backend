@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, Brackets, SelectQueryBuilder } from 'typeorm';
 import { Workflow } from './entities/workflow.entity';
 import { WorkflowApprovalStep } from './entities/workflow-approval-step.entity';
 import { WorkflowApprovalAction } from './entities/workflow-approval-action.entity';
@@ -22,6 +22,7 @@ import {
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { ListWorkflowsDto } from './dto/list-workflows.dto';
+import { ListMyWorkflowsDto } from './dto/list-my-workflows.dto';
 import { NotifyNoFinalUsersDto } from './dto/notify-no-final-users.dto';
 import {
   WorkflowResponseDto,
@@ -200,44 +201,68 @@ export class WorkflowsService {
   }
 
   // ── Tareas pendientes del usuario autenticado ─────────────────────────────────
+  //
+  // Antes era 2 queries (asignado actual + DRAFTs propios) acotadas a los 100
+  // registros más recientes por updatedAt y fusionadas en JS — por lo que un
+  // usuario con más de 100 tareas podía tener una tarea puntual invisible sin
+  // importar que cumpliera las reglas. Ahora es UNA sola query paginada con
+  // ambas condiciones unidas por OR, que además acepta los mismos filtros
+  // (status/typologyId/search) que "Todos" — resueltos en SQL antes de
+  // paginar, no sobre un array ya truncado — así buscar una tarea puntual no
+  // depende de su posición por fecha.
 
-  async getMyTasks(user: JwtPayload): Promise<WorkflowResponseDto[]> {
+  async getMyTasks(dto: ListMyWorkflowsDto, user: JwtPayload): Promise<PaginatedWorkflowsDto> {
     const userId = user.sub!;
     const orgId  = user.companyId!;
+    const page   = dto.page ?? 1;
+    const limit  = dto.limit ?? 20;
+    const skip   = (page - 1) * limit;
 
-    const [assignedWorkflows, draftWorkflows] = await Promise.all([
-      this.workflowRepo
-        .createQueryBuilder('w')
-        .leftJoinAndSelect('w.approvalSteps', 'steps')
-        .where('w.org_id = :orgId', { orgId })
-        .andWhere('w.current_assigned_user_id = :userId', { userId })
-        .andWhere('w.status IN (:...statuses)', {
-          statuses: [WorkflowStatus.PENDING_APPROVAL, WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS, WorkflowStatus.PENDING_REVIEW_CYCLE],
-        })
-        .andWhere('w.deleted_at IS NULL')
-        .orderBy('w.updatedAt', 'DESC')
-        .take(100)
-        .getMany(),
+    const qb = this.workflowRepo
+      .createQueryBuilder('w')
+      .leftJoinAndSelect('w.approvalSteps', 'steps')
+      .where('w.org_id = :orgId', { orgId })
+      .andWhere('w.deleted_at IS NULL')
+      .andWhere(
+        new Brackets((qb2) => {
+          qb2
+            .where(
+              new Brackets((q) => {
+                q.where('w.current_assigned_user_id = :userId', { userId }).andWhere(
+                  'w.status IN (:...statuses)',
+                  {
+                    statuses: [
+                      WorkflowStatus.PENDING_APPROVAL,
+                      WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+                      WorkflowStatus.PENDING_REVIEW_CYCLE,
+                    ],
+                  },
+                );
+              }),
+            )
+            // El creador ve sus DRAFT en "Mis tareas" para poder enviarlos a aprobación
+            .orWhere(
+              new Brackets((q) => {
+                q.where('w.created_by = :userId', { userId }).andWhere('w.status = :draft', {
+                  draft: WorkflowStatus.DRAFT,
+                });
+              }),
+            );
+        }),
+      );
 
-      // El creador ve sus DRAFT en "Mis tareas" para poder enviarlos a aprobación
-      this.workflowRepo
-        .createQueryBuilder('w')
-        .leftJoinAndSelect('w.approvalSteps', 'steps')
-        .where('w.org_id = :orgId', { orgId })
-        .andWhere('w.created_by = :userId', { userId })
-        .andWhere('w.status = :draft', { draft: WorkflowStatus.DRAFT })
-        .andWhere('w.deleted_at IS NULL')
-        .orderBy('w.updatedAt', 'DESC')
-        .take(100)
-        .getMany(),
-    ]);
+    this.applyMyWorkflowsFilters(qb, dto);
+    qb.orderBy('w.updatedAt', 'DESC').skip(skip).take(limit);
 
-    const merged = new Map<string, Workflow>();
-    for (const w of [...assignedWorkflows, ...draftWorkflows]) {
-      merged.set(w.id, w);
-    }
+    const [workflows, total] = await qb.getManyAndCount();
 
-    return Array.from(merged.values()).map((w) => WorkflowResponseDto.from(w));
+    return {
+      data:       workflows.map((w) => WorkflowResponseDto.from(w)),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
   }
 
   // ── Historial de workflows del usuario ("Mis flujos") ─────────────────────────
@@ -245,180 +270,188 @@ export class WorkflowsService {
   // haya participado (usuario final, revisor de ciclo, aprobador o creador), en
   // cualquier desenlace — disponible, en ciclo, rechazado o cerrado — para que
   // pueda ver el resultado sin depender de otra pestaña.
+  //
+  // Antes eran 6 queries independientes (una por "razón" de pertenencia),
+  // cada una acotada a los 100 registros más recientes por updatedAt y
+  // fusionadas/deduplicadas en JS — con 6×100 posibles filas hidratadas en
+  // cada carga. Un usuario con más de 100 flujos en una sola categoría (p.ej.
+  // usuario final) podía tener un flujo puntual fuera de esos 100 y por lo
+  // tanto invisible, sin importar que cumpliera las reglas de "Mis flujos".
+  //
+  // Ahora es UNA sola query: las 6 condiciones de pertenencia se unen con OR
+  // dentro de un único WHERE, y status/typologyId/search (mismos filtros que
+  // "Todos") se aplican en SQL sobre esa unión antes de paginar — así un
+  // flujo puntual se encuentra sin importar su posición por fecha, y el costo
+  // de la consulta queda acotado por LIMIT, no por cuántos flujos tenga el
+  // usuario en total.
 
-  async getMyAvailable(user: JwtPayload): Promise<WorkflowResponseDto[]> {
+  async getMyAvailable(dto: ListMyWorkflowsDto, user: JwtPayload): Promise<PaginatedWorkflowsDto> {
     const userId = user.sub!;
     const orgId  = user.companyId!;
+    const page   = dto.page ?? 1;
+    const limit  = dto.limit ?? 20;
+    const skip   = (page - 1) * limit;
 
-    // 1. Workflows donde el usuario es usuario final
-    // REJECTED y CLOSED se incluyen para que el usuario final pueda ver el
-    // desenlace de flujos que le fueron notificados, incluso ya finalizados.
-    const finalUserWorkflows = await this.workflowRepo
+    const qb = this.workflowRepo
       .createQueryBuilder('w')
       .leftJoinAndSelect('w.approvalSteps', 'steps')
       .where('w.org_id = :orgId', { orgId })
-      .andWhere(':userId = ANY(w.final_user_ids)', { userId })
-      .andWhere('w.status IN (:...statuses)', {
-        statuses: [
-          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
-          WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
-          WorkflowStatus.REJECTED,
-          WorkflowStatus.CLOSED,
-        ],
-      })
-      .andWhere('w.deleted_at IS NULL')
-      .orderBy('w.updatedAt', 'DESC')
-      .take(100)
-      .getMany();
-
-    // 2. Workflows donde el usuario tiene un paso opcional PENDING en un ciclo activo
-    const optionalReviewerWorkflows = await this.workflowRepo
-      .createQueryBuilder('w')
-      .leftJoinAndSelect('w.approvalSteps', 'steps')
-      .where('w.org_id = :orgId', { orgId })
-      .andWhere('w.status = :wStatus', { wStatus: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS })
       .andWhere('w.deleted_at IS NULL')
       .andWhere(
-        `EXISTS (
-          SELECT 1 FROM workflow_admin_cycles c
-          INNER JOIN workflow_admin_steps s ON s.cycle_id = c.id
-          WHERE c.workflow_id = w.id
-            AND c.status = 'IN_PROGRESS'
-            AND s.user_id = :userId
-            AND s.status = 'PENDING'
-            AND s.is_optional = true
-        )`,
-        { userId },
-      )
-      .orderBy('w.updatedAt', 'DESC')
-      .take(100)
-      .getMany();
+        new Brackets((qb2) => {
+          qb2
+            // 1. Workflows donde el usuario es usuario final. REJECTED y CLOSED se
+            //    incluyen para que pueda ver el desenlace de flujos que le fueron
+            //    notificados, incluso ya finalizados.
+            .where(
+              new Brackets((q) => {
+                q.where(':userId = ANY(w.final_user_ids)', { userId }).andWhere(
+                  'w.status IN (:...statuses)',
+                  {
+                    statuses: [
+                      WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+                      WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+                      WorkflowStatus.REJECTED,
+                      WorkflowStatus.CLOSED,
+                    ],
+                  },
+                );
+              }),
+            )
+            // 2. Workflows donde el usuario tiene un paso opcional PENDING en un ciclo activo
+            .orWhere(
+              new Brackets((q) => {
+                q.where('w.status = :wStatus', { wStatus: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS }).andWhere(
+                  `EXISTS (
+                    SELECT 1 FROM workflow_admin_cycles c
+                    INNER JOIN workflow_admin_steps s ON s.cycle_id = c.id
+                    WHERE c.workflow_id = w.id
+                      AND c.status = 'IN_PROGRESS'
+                      AND s.user_id = :userId
+                      AND s.status = 'PENDING'
+                      AND s.is_optional = true
+                  )`,
+                  { userId },
+                );
+              }),
+            )
+            // 3. Workflows donde el usuario está en allowedOptionalReviewerIds de un
+            //    ciclo activo (puede ser llamado como revisor opcional en cualquier
+            //    momento del ciclo)
+            .orWhere(
+              new Brackets((q) => {
+                q.where('w.status = :wStatus', { wStatus: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS }).andWhere(
+                  `EXISTS (
+                    SELECT 1 FROM workflow_admin_cycles c
+                    WHERE c.workflow_id = w.id
+                      AND c.status = 'IN_PROGRESS'
+                      AND CAST(:userId2 AS UUID) = ANY(c.allowed_optional_reviewer_ids)
+                  )`,
+                  { userId2: userId },
+                );
+              }),
+            )
+            // 4. Workflows donde el usuario participó como revisor (obligatorio u
+            //    opcional) en algún ciclo administrativo — cubre tanto el ciclo aún
+            //    activo tras completar su paso como el desenlace final del workflow,
+            //    sin importar si terminó disponible, rechazado o cerrado.
+            .orWhere(
+              new Brackets((q) => {
+                q.where('w.status IN (:...visibleStatuses)', {
+                  visibleStatuses: [
+                    WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+                    WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+                    WorkflowStatus.REJECTED,
+                    WorkflowStatus.CLOSED,
+                  ],
+                }).andWhere(
+                  `EXISTS (
+                    SELECT 1 FROM workflow_admin_cycles c
+                    INNER JOIN workflow_admin_steps s ON s.cycle_id = c.id
+                    WHERE c.workflow_id = w.id
+                      AND s.user_id = :userId
+                  )`,
+                  { userId },
+                );
+              }),
+            )
+            // 5. Workflows creados por el usuario (el creador siempre ve sus propios
+            //    workflows en cualquier estado activo o terminal relevante para él,
+            //    incluyendo rechazados, devueltos y cerrados, para que pueda ver el
+            //    resultado sin necesitar WORKFLOWS:MANAGE).
+            .orWhere(
+              new Brackets((q) => {
+                q.where('w.created_by = :userId', { userId }).andWhere('w.status IN (:...creatorStatuses)', {
+                  creatorStatuses: [
+                    WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+                    WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
+                    WorkflowStatus.REJECTED,
+                    WorkflowStatus.RETURNED_TO_CREATOR,
+                    WorkflowStatus.CLOSED,
+                  ],
+                });
+              }),
+            )
+            // 6. Workflows donde el usuario es un aprobador definido
+            //    (workflow_approval_steps). Una vez que el flujo llega a
+            //    AVAILABLE_FOR_FINAL_USERS, REJECTED o CLOSED, el aprobador debe
+            //    poder ver el resultado en "Mis flujos".
+            .orWhere(
+              new Brackets((q) => {
+                q.where('w.status IN (:...approverStatuses)', {
+                  approverStatuses: [
+                    WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+                    WorkflowStatus.REJECTED,
+                    WorkflowStatus.CLOSED,
+                  ],
+                }).andWhere(
+                  `EXISTS (
+                    SELECT 1 FROM workflow_approval_steps s
+                    WHERE s.workflow_id = w.id
+                      AND s.user_id = :userId
+                  )`,
+                  { userId },
+                );
+              }),
+            );
+        }),
+      );
 
-    // 3. Workflows donde el usuario está en allowedOptionalReviewerIds de un ciclo activo
-    //    (puede ser llamado como revisor opcional en cualquier momento del ciclo)
-    const allowedOptionalWorkflows = await this.workflowRepo
-      .createQueryBuilder('w')
-      .leftJoinAndSelect('w.approvalSteps', 'steps')
-      .where('w.org_id = :orgId', { orgId })
-      .andWhere('w.status = :wStatus', { wStatus: WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS })
-      .andWhere('w.deleted_at IS NULL')
-      .andWhere(
-        `EXISTS (
-          SELECT 1 FROM workflow_admin_cycles c
-          WHERE c.workflow_id = w.id
-            AND c.status = 'IN_PROGRESS'
-            AND CAST(:userId2 AS UUID) = ANY(c.allowed_optional_reviewer_ids)
-        )`,
-        { userId2: userId },
-      )
-      .orderBy('w.updatedAt', 'DESC')
-      .take(100)
-      .getMany();
+    this.applyMyWorkflowsFilters(qb, dto);
+    qb.orderBy('w.updatedAt', 'DESC').skip(skip).take(limit);
 
-    // 4. Workflows donde el usuario participó como revisor (obligatorio u opcional)
-    //    en algún ciclo administrativo — cubre tanto el ciclo aún activo tras
-    //    completar su paso como el desenlace final del workflow, sin importar
-    //    si terminó disponible, rechazado o cerrado.
-    const pastAdminReviewerWorkflows = await this.workflowRepo
-      .createQueryBuilder('w')
-      .leftJoinAndSelect('w.approvalSteps', 'steps')
-      .where('w.org_id = :orgId', { orgId })
-      .andWhere('w.status IN (:...visibleStatuses)', {
-        visibleStatuses: [
-          WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
-          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
-          WorkflowStatus.REJECTED,
-          WorkflowStatus.CLOSED,
-        ],
-      })
-      .andWhere('w.deleted_at IS NULL')
-      .andWhere(
-        `EXISTS (
-          SELECT 1 FROM workflow_admin_cycles c
-          INNER JOIN workflow_admin_steps s ON s.cycle_id = c.id
-          WHERE c.workflow_id = w.id
-            AND s.user_id = :userId
-        )`,
-        { userId },
-      )
-      .orderBy('w.updatedAt', 'DESC')
-      .take(100)
-      .getMany();
+    const [workflows, total] = await qb.getManyAndCount();
 
-    // 5. Workflows creados por el usuario (el creador siempre ve sus propios workflows
-    //    en cualquier estado activo o terminal relevante para él, incluyendo rechazados,
-    //    devueltos y cerrados, para que pueda ver el resultado sin necesitar WORKFLOWS:MANAGE).
-    const createdByUserWorkflows = await this.workflowRepo
-      .createQueryBuilder('w')
-      .leftJoinAndSelect('w.approvalSteps', 'steps')
-      .where('w.org_id = :orgId', { orgId })
-      .andWhere('w.created_by = :userId', { userId })
-      .andWhere('w.status IN (:...creatorStatuses)', {
-        creatorStatuses: [
-          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
-          WorkflowStatus.ADMIN_CYCLE_IN_PROGRESS,
-          WorkflowStatus.REJECTED,
-          WorkflowStatus.RETURNED_TO_CREATOR,
-          WorkflowStatus.CLOSED,
-        ],
-      })
-      .andWhere('w.deleted_at IS NULL')
-      .orderBy('w.updatedAt', 'DESC')
-      .take(100)
-      .getMany();
+    this.logger.log(`getMyAvailable userId=${userId} page=${page} limit=${limit} total=${total}`);
 
-    // 6. Workflows donde el usuario es un aprobador definido (workflow_approval_steps)
-    //    Una vez que el flujo llega a AVAILABLE_FOR_FINAL_USERS, REJECTED o CLOSED, el
-    //    aprobador debe poder ver el resultado en la pestaña "Mis flujos".
-    const approverWorkflows = await this.workflowRepo
-      .createQueryBuilder('w')
-      .leftJoinAndSelect('w.approvalSteps', 'steps')
-      .where('w.org_id = :orgId', { orgId })
-      .andWhere('w.status IN (:...approverStatuses)', {
-        approverStatuses: [
-          WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
-          WorkflowStatus.REJECTED,
-          WorkflowStatus.CLOSED,
-        ],
-      })
-      .andWhere('w.deleted_at IS NULL')
-      .andWhere(
-        `EXISTS (
-          SELECT 1 FROM workflow_approval_steps s
-          WHERE s.workflow_id = w.id
-            AND s.user_id = :userId
-        )`,
-        { userId },
-      )
-      .orderBy('w.updatedAt', 'DESC')
-      .take(100)
-      .getMany();
+    return {
+      data:       workflows.map((w) => WorkflowResponseDto.from(w)),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
 
-    // Combinar y deduplicar por id
-    const merged = new Map<string, Workflow>();
-    for (const w of [
-      ...finalUserWorkflows,
-      ...optionalReviewerWorkflows,
-      ...allowedOptionalWorkflows,
-      ...pastAdminReviewerWorkflows,
-      ...createdByUserWorkflows,
-      ...approverWorkflows,
-    ]) {
-      merged.set(w.id, w);
+  /**
+   * Filtros opcionales compartidos por getMyTasks/getMyAvailable — mismos
+   * nombres/semántica que ListWorkflowsDto (findAll) para que "Mis tareas" y
+   * "Mis flujos" se comporten igual que "Todos": el filtro se resuelve en SQL
+   * antes de paginar, no sobre un array ya cargado en el cliente.
+   */
+  private applyMyWorkflowsFilters(
+    qb: SelectQueryBuilder<Workflow>,
+    dto: ListMyWorkflowsDto,
+  ): void {
+    if (dto.status) qb.andWhere('w.status = :statusFilter', { statusFilter: dto.status });
+    if (dto.typologyId) qb.andWhere('w.typology_id = :typologyIdFilter', { typologyIdFilter: dto.typologyId });
+    if (dto.search) {
+      const trimmed = dto.search.trim();
+      if (trimmed) {
+        const term = `%${trimmed}%`;
+        qb.andWhere('(w.title ILIKE :term OR w.description ILIKE :term)', { term });
+      }
     }
-
-    this.logger.log(
-      `getMyAvailable userId=${userId} ` +
-      `finalUser=${finalUserWorkflows.length} ` +
-      `optionalStep=${optionalReviewerWorkflows.length} ` +
-      `allowedOptional=${allowedOptionalWorkflows.length} ` +
-      `pastAdminReviewer=${pastAdminReviewerWorkflows.length} ` +
-      `createdBy=${createdByUserWorkflows.length} ` +
-      `approver=${approverWorkflows.length} ` +
-      `total=${merged.size}`,
-    );
-
-    return Array.from(merged.values()).map((w) => WorkflowResponseDto.from(w));
   }
 
   // ── Actualizar workflow (solo en DRAFT) ───────────────────────────────────────

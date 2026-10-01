@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, Repository, SelectQueryBuilder, ObjectLiteral } from 'typeorm';
+import { DataSource, Repository, SelectQueryBuilder, ObjectLiteral, Brackets, WhereExpressionBuilder } from 'typeorm';
 import { WorkflowsService } from './workflows.service';
 import { Workflow } from './entities/workflow.entity';
 import { WorkflowApprovalStep } from './entities/workflow-approval-step.entity';
@@ -78,18 +78,31 @@ function makeRepo<T extends ObjectLiteral>(): jest.Mocked<Repository<T>> {
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
+// A `where`/`andWhere`/`orWhere` call whose first argument is a `Brackets`
+// instance (the service groups each "membership reason" OR-branch that way)
+// runs that Brackets' callback against this SAME mock object — so nested
+// conditions still land in the flat `qb.where/andWhere/orWhere.mock.calls`
+// arrays the tests below inspect, instead of disappearing into a callback
+// real TypeORM would normally invoke internally.
 function makeQb(results: { data: Workflow[]; total: number }) {
-  const qb = {
-    leftJoinAndSelect: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    andWhere: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    skip: jest.fn().mockReturnThis(),
-    take: jest.fn().mockReturnThis(),
-    getManyAndCount: jest.fn().mockResolvedValue([results.data, results.total]),
-    getMany: jest.fn().mockResolvedValue(results.data),
-  } as unknown as jest.Mocked<SelectQueryBuilder<Workflow>>;
-  return qb;
+  const qb: Record<string, jest.Mock> = {};
+  const recordingWhere = () =>
+    jest.fn((condition: unknown, _params?: unknown) => {
+      if (condition instanceof Brackets) {
+        condition.whereFactory(qb as unknown as WhereExpressionBuilder);
+      }
+      return qb;
+    });
+  qb.leftJoinAndSelect = jest.fn().mockReturnThis();
+  qb.where = recordingWhere();
+  qb.andWhere = recordingWhere();
+  qb.orWhere = recordingWhere();
+  qb.orderBy = jest.fn().mockReturnThis();
+  qb.skip = jest.fn().mockReturnThis();
+  qb.take = jest.fn().mockReturnThis();
+  qb.getManyAndCount = jest.fn().mockResolvedValue([results.data, results.total]);
+  qb.getMany = jest.fn().mockResolvedValue(results.data);
+  return qb as unknown as jest.Mocked<SelectQueryBuilder<Workflow>>;
 }
 
 function makeDataSource() {
@@ -624,8 +637,45 @@ describe('WorkflowsService', () => {
       const qb = makeQb({ data: [wf], total: 1 });
       workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
-      const result = await service.getMyTasks(makeUser());
-      expect(result).toHaveLength(1);
+      const result = await service.getMyTasks({}, makeUser());
+      expect(result.data).toHaveLength(1);
+      expect(result.total).toBe(1);
+    });
+
+    it('paginates using page/limit from the DTO instead of a fixed 100-row cap', async () => {
+      const { service, workflowRepo } = buildService();
+      // total=150 simulates a user with more pending tasks than the old
+      // hard-coded .take(100) — pagination (not a bigger cap) is what makes
+      // every one of them reachable now.
+      const qb = makeQb({ data: [makeWorkflow()], total: 150 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.getMyTasks({ page: 3, limit: 20 }, makeUser());
+
+      expect(qb.skip).toHaveBeenCalledWith(40);
+      expect(qb.take).toHaveBeenCalledWith(20);
+      expect(result).toEqual({ data: expect.any(Array), total: 150, page: 3, limit: 20, totalPages: 8 });
+    });
+
+    it('applies status/typologyId/search filters in SQL, the same as findAll', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [], total: 0 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.getMyTasks(
+        { status: WorkflowStatus.DRAFT, typologyId: 'typ-1', search: 'contrato' },
+        makeUser(),
+      );
+
+      expect(qb.andWhere).toHaveBeenCalledWith('w.status = :statusFilter', {
+        statusFilter: WorkflowStatus.DRAFT,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('w.typology_id = :typologyIdFilter', {
+        typologyIdFilter: 'typ-1',
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('(w.title ILIKE :term OR w.description ILIKE :term)', {
+        term: '%contrato%',
+      });
     });
   });
 
@@ -636,8 +686,46 @@ describe('WorkflowsService', () => {
       const qb = makeQb({ data: [wf], total: 1 });
       workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
-      const result = await service.getMyAvailable(makeUser());
-      expect(result).toHaveLength(1);
+      const result = await service.getMyAvailable({}, makeUser());
+      expect(result.data).toHaveLength(1);
+      expect(result.total).toBe(1);
+    });
+
+    it('paginates with a single query instead of 6 separately-capped ones', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [makeWorkflow()], total: 115 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.getMyAvailable({ page: 2, limit: 20 }, makeUser());
+
+      // A single createQueryBuilder() call for the whole method — the 6
+      // membership reasons are OR'd in one query (via Brackets), not fetched
+      // as 6 independent, separately-capped queries merged in JS.
+      expect(workflowRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(qb.skip).toHaveBeenCalledWith(20);
+      expect(qb.take).toHaveBeenCalledWith(20);
+      expect(result).toEqual({ data: expect.any(Array), total: 115, page: 2, limit: 20, totalPages: 6 });
+    });
+
+    it('applies status/typologyId/search filters in SQL on top of the OR-combined membership reasons', async () => {
+      const { service, workflowRepo } = buildService();
+      const qb = makeQb({ data: [], total: 0 });
+      workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.getMyAvailable(
+        { status: WorkflowStatus.CLOSED, typologyId: 'typ-2', search: 'factura' },
+        makeUser(),
+      );
+
+      expect(qb.andWhere).toHaveBeenCalledWith('w.status = :statusFilter', {
+        statusFilter: WorkflowStatus.CLOSED,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('w.typology_id = :typologyIdFilter', {
+        typologyIdFilter: 'typ-2',
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('(w.title ILIKE :term OR w.description ILIKE :term)', {
+        term: '%factura%',
+      });
     });
 
     it('includes CLOSED in every status filter — final user, past reviewer, creator and approver — so closed workflows the user participated in remain visible', async () => {
@@ -645,9 +733,15 @@ describe('WorkflowsService', () => {
       const qb = makeQb({ data: [], total: 0 });
       workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
-      await service.getMyAvailable(makeUser());
+      await service.getMyAvailable({}, makeUser());
 
-      const statusParams = (qb.andWhere as jest.Mock).mock.calls
+      // Each OR-branch is its own Brackets — the first condition inside one is
+      // recorded via `.where()`, the second via `.andWhere()` (both compile to
+      // the same AND within that bracket), so both must be inspected here.
+      const statusParams = [
+        ...(qb.where as jest.Mock).mock.calls,
+        ...(qb.andWhere as jest.Mock).mock.calls,
+      ]
         .map(([, params]: [string, Record<string, unknown> | undefined]) => params)
         .filter((params): params is Record<string, unknown> => params !== undefined);
 
@@ -681,7 +775,7 @@ describe('WorkflowsService', () => {
       const qb = makeQb({ data: [], total: 0 });
       workflowRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
 
-      await service.getMyAvailable(makeUser());
+      await service.getMyAvailable({}, makeUser());
 
       const rawSqlCalls = (qb.andWhere as jest.Mock).mock.calls
         .map(([sql]: [unknown]) => sql)
