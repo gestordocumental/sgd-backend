@@ -50,6 +50,7 @@ import { CancelWorkflowDto } from './dto/cancel-workflow.dto';
 import { AddWorkflowNoteDto } from './dto/add-workflow-note.dto';
 import { ForwardAdminStepDto } from './dto/forward-admin-step.dto';
 import { ListWorkflowsDto } from './dto/list-workflows.dto';
+import { ListMyWorkflowsDto } from './dto/list-my-workflows.dto';
 import {
   WorkflowResponseDto,
   PaginatedWorkflowsDto,
@@ -118,19 +119,25 @@ export class WorkflowsController {
   @Get('my-tasks')
   @OrgMember()
   @RequirePermission('WORKFLOWS', 'READ')
-  @ApiOperation({ summary: 'Tareas pendientes del usuario autenticado (aprobador o paso admin)' })
-  @ApiResponse({ status: 200, type: [WorkflowResponseDto] })
-  getMyTasks(@JwtPayloadParam() user: JwtPayload): Promise<WorkflowResponseDto[]> {
-    return this.workflowsService.getMyTasks(user);
+  @ApiOperation({ summary: 'Tareas pendientes del usuario autenticado (aprobador o paso admin), paginado' })
+  @ApiResponse({ status: 200, type: PaginatedWorkflowsDto })
+  getMyTasks(
+    @Query() dto: ListMyWorkflowsDto,
+    @JwtPayloadParam() user: JwtPayload,
+  ): Promise<PaginatedWorkflowsDto> {
+    return this.workflowsService.getMyTasks(dto, user);
   }
 
   @Get('my-available')
   @OrgMember()
   @RequirePermission('WORKFLOWS', 'READ')
-  @ApiOperation({ summary: 'Historial de workflows en los que el usuario ha participado (usuario final, revisor, aprobador o creador), en cualquier desenlace' })
-  @ApiResponse({ status: 200, type: [WorkflowResponseDto] })
-  getMyAvailable(@JwtPayloadParam() user: JwtPayload): Promise<WorkflowResponseDto[]> {
-    return this.workflowsService.getMyAvailable(user);
+  @ApiOperation({ summary: 'Historial paginado de workflows en los que el usuario ha participado (usuario final, revisor, aprobador o creador), en cualquier desenlace' })
+  @ApiResponse({ status: 200, type: PaginatedWorkflowsDto })
+  getMyAvailable(
+    @Query() dto: ListMyWorkflowsDto,
+    @JwtPayloadParam() user: JwtPayload,
+  ): Promise<PaginatedWorkflowsDto> {
+    return this.workflowsService.getMyAvailable(dto, user);
   }
 
   @Post('notify-no-final-users')
