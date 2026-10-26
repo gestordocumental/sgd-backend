@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { assertValidTransition } from './workflow-state-machine';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -127,6 +128,31 @@ export class WorkflowApprovalService {
     });
   }
 
+  /**
+   * Consulta en vivo el flag de ciclo de revisión para la aprobación final.
+   * Si document-service responde 404 (la tipología referenciada ya no
+   * existe), se usa la instantánea guardada en el workflow al crearse en vez
+   * de bloquear la aprobación: un 404 es una respuesta definitiva que no se
+   * arregla reintentando, y antes dejaba el workflow atascado para siempre
+   * en el último aprobador. Cualquier otro error (timeout, 5xx, circuito
+   * abierto) se sigue propagando — ahí no sabemos el valor real y asumir uno
+   * podría saltarse un ciclo de revisión habilitado.
+   */
+  private async resolveReviewCycleEnabledForFinalApproval(workflow: Workflow): Promise<boolean> {
+    try {
+      return await this.documentClientService.isReviewCycleEnabledForTypology(workflow.orgId, workflow.typologyId);
+    } catch (err) {
+      if (!(err instanceof NotFoundException)) throw err;
+      this.logger.warn(
+        `Typology ${workflow.typologyId} not found in document-service during final approval of ` +
+          `workflowId=${workflow.id}; falling back to the workflow's reviewCycleEnabled snapshot ` +
+          `(${workflow.reviewCycleEnabled})`,
+        'WorkflowApprovalService',
+      );
+      return workflow.reviewCycleEnabled;
+    }
+  }
+
   // ── Aprobar ──────────────────────────────────────────────────────────────────
 
   async approve(
@@ -166,7 +192,7 @@ export class WorkflowApprovalService {
     // Llamada fuera de la transacción a propósito: es un HTTP externo y no debe
     // mantener abierta una transacción de base de datos mientras espera respuesta.
     const reviewCycleEnabled = isLast
-      ? await this.documentClientService.isReviewCycleEnabledForTypology(workflow.orgId, workflow.typologyId)
+      ? await this.resolveReviewCycleEnabledForFinalApproval(workflow)
       : true;
 
     // Declarado fuera de la transacción para que esté disponible en los eventos Kafka/notificaciones

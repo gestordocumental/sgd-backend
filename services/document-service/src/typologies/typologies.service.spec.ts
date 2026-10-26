@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Types } from 'mongoose';
-import { TypologiesService } from './typologies.service';
+import { TypologiesService, namesEqual } from './typologies.service';
 import {
   CreationSource,
   DataSource,
@@ -82,6 +82,35 @@ function makeModel(docOrNull: TypologyDocument | null = null) {
 
 let mockKafkaProducer: { emitSafe: jest.Mock };
 let mockLogger: { log: jest.Mock; error: jest.Mock; warn: jest.Mock; debug: jest.Mock };
+
+// ── namesEqual ─────────────────────────────────────────────────────────────
+
+describe('namesEqual()', () => {
+  it.each([
+    ['Formato de Viaticos', 'formato de viáticos', 'case and accents'],
+    ['  Manual   de calidad ', 'Manual de calidad', 'surrounding and repeated whitespace'],
+    ['POLÍTICA DE SEGURIDAD', 'política de seguridad', 'uppercase accented letters'],
+    ['INFORME DEL AÑO', 'informe del año', 'Ñ/ñ casing'],
+    ['Año', 'Año', 'decomposed ñ (n + U+0303)'],
+  ])('treats "%s" and "%s" as equal (%s)', (a, b) => {
+    expect(namesEqual(a, b)).toBe(true);
+  });
+
+  it.each([
+    ['Formato de viáticos', 'Formato de anticipos'],
+    ['Reembolso/Legalización', 'Reembolso Legalización'],
+    ['Informe del Año', 'Informe del Ano'],
+    ['Año', 'Ano'],
+  ])('treats "%s" and "%s" as different', (a, b) => {
+    expect(namesEqual(a, b)).toBe(false);
+  });
+
+  it('handles nulls', () => {
+    expect(namesEqual(null, null)).toBe(true);
+    expect(namesEqual('A', null)).toBe(false);
+    expect(namesEqual(null, 'A')).toBe(false);
+  });
+});
 
 // ── TypologiesService ──────────────────────────────────────────────────────
 
@@ -641,6 +670,89 @@ describe('TypologiesService', () => {
     });
   });
 
+  // ── resolveReviewCycleEnabled ───────────────────────────────────────────────
+
+  describe('resolveReviewCycleEnabled()', () => {
+    it('returns the flag of the referenced typology when it is the live ACTIVE version', async () => {
+      const doc = makeDoc({ reviewCycleEnabled: true });
+      const { Model } = makeModel(doc);
+      const service = makeService(Model);
+
+      const result = await service.resolveReviewCycleEnabled('org-1', doc.id);
+
+      expect(result).toEqual({ resolvedTypologyId: doc.id, reviewCycleEnabled: true });
+      expect(Model.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: a workflow created against v7 whose v7 was later archived
+    // (v8 created) and then deleted used to 404 here, blocking the last
+    // approver's approve() permanently.
+    it('does not filter out soft-deleted versions and resolves the flag from the ACTIVE version with the same codigo', async () => {
+      const deletedV7 = makeDoc({
+        typologyStatus: TypologyStatus.DELETED,
+        deletedAt: new Date(),
+        reviewCycleEnabled: false,
+        datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '07', fuente: DataSource.MANUAL },
+      });
+      const activeV8 = makeDoc({ reviewCycleEnabled: true });
+      const { Model } = makeModel(deletedV7);
+      Model.findOne.mockImplementation((filter: any = {}) => ({
+        exec: jest.fn().mockResolvedValue('typologyStatus' in filter ? activeV8 : deletedV7),
+      }));
+      const service = makeService(Model);
+
+      const result = await service.resolveReviewCycleEnabled('org-1', deletedV7.id);
+
+      expect(Model.findOne).toHaveBeenNthCalledWith(1, { _id: deletedV7.id, orgId: 'org-1' });
+      expect(Model.findOne).toHaveBeenNthCalledWith(2, {
+        orgId: 'org-1',
+        'datosDeclarados.codigo': 'POL-001',
+        typologyStatus: TypologyStatus.ACTIVE,
+        deletedAt: null,
+      });
+      expect(result).toEqual({ resolvedTypologyId: activeV8.id, reviewCycleEnabled: true });
+    });
+
+    it('resolves an ARCHIVED (not deleted) version through the ACTIVE one too', async () => {
+      const archived = makeDoc({ typologyStatus: TypologyStatus.ARCHIVED, reviewCycleEnabled: true });
+      const active = makeDoc({ reviewCycleEnabled: false });
+      const { Model } = makeModel(archived);
+      Model.findOne.mockImplementation((filter: any = {}) => ({
+        exec: jest.fn().mockResolvedValue('typologyStatus' in filter ? active : archived),
+      }));
+      const service = makeService(Model);
+
+      const result = await service.resolveReviewCycleEnabled('org-1', archived.id);
+
+      expect(result).toEqual({ resolvedTypologyId: active.id, reviewCycleEnabled: false });
+    });
+
+    it("falls back to the referenced version's own flag when no ACTIVE version exists for the codigo", async () => {
+      const deleted = makeDoc({ typologyStatus: TypologyStatus.DELETED, deletedAt: new Date(), reviewCycleEnabled: true });
+      const { Model } = makeModel(deleted);
+      const service = makeService(Model);
+
+      const result = await service.resolveReviewCycleEnabled('org-1', deleted.id);
+
+      expect(result).toEqual({ resolvedTypologyId: deleted.id, reviewCycleEnabled: true });
+    });
+
+    it('throws BadRequestException for invalid ObjectId', async () => {
+      const { Model } = makeModel();
+      const service = makeService(Model);
+
+      await expect(service.resolveReviewCycleEnabled('org-1', 'not-an-id')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when the typology never existed in this org', async () => {
+      const { Model } = makeModel();
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      const service = makeService(Model);
+
+      await expect(service.resolveReviewCycleEnabled('org-1', makeId())).rejects.toThrow(NotFoundException);
+    });
+  });
+
   // ── countOrgStructureReferences ─────────────────────────────────────────────
 
   describe('countOrgStructureReferences()', () => {
@@ -728,6 +840,29 @@ describe('TypologiesService', () => {
   // ── applyExtractedMetadata ────────────────────────────────────────────────
 
   describe('applyExtractedMetadata()', () => {
+    // Regression: F-F-002 V8's Excel title cell is Title Case and writes
+    // "Viaticos" without the accent, while the declared name is lowercase
+    // with "viáticos" — strict === flagged the typology's own document.
+    it('scenario A — does not flag a nombre discrepancy that differs only in case, accents or spacing', async () => {
+      const doc = makeDoc({
+        datosDeclarados: {
+          nombre: 'Formato para reembolso/legalización de gastos caja menor, anticipos, viáticos y transportes',
+          codigo: 'F-F-002', version: '08', fuente: DataSource.MANUAL,
+        },
+      });
+      const { Model } = makeModel(doc);
+      Model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
+
+      const service = makeService(Model);
+      await service.applyExtractedMetadata('org-1', doc.id, {
+        nombre: 'Formato para Reembolso/Legalización de Gastos  Caja Menor, Anticipos, Viaticos y Transportes',
+        codigo: 'F-F-002', version: '08',
+      });
+
+      expect(doc.metadataExtraida.discrepancias).toHaveLength(0);
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.COMPLETED);
+    });
+
     it('scenario A — sets DISCREPANCY when extracted data differs from declared', async () => {
       const doc = makeDoc({
         datosDeclarados: { nombre: 'Policy', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
@@ -925,6 +1060,34 @@ describe('TypologiesService', () => {
         expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
       },
     );
+
+    it('KEEP_DECLARED — does not throw when the nombre differs only in case and accents', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Formato de viáticos', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'FORMATO DE VIATICOS', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED });
+
+      expect(doc.documento.extractionStatus).toBe(ExtractionStatus.CONFIRMED);
+    });
+
+    it('KEEP_DECLARED — still throws when the nombre has different words', async () => {
+      const doc = makeDoc({
+        datosDeclarados: { nombre: 'Formato de viáticos', codigo: 'POL-001', version: '01', fuente: DataSource.MANUAL },
+        documento: { extractionStatus: ExtractionStatus.DISCREPANCY, r2Key: null, originalName: null, mimeType: null, uploadedAt: null },
+        metadataExtraida: { nombre: 'Formato de anticipos', codigo: 'POL-001', version: '01', extractedAt: new Date(), discrepancias: [] },
+      });
+      const { Model } = makeModel(doc);
+
+      const service = makeService(Model);
+      await expect(
+        service.resolveDiscrepancy('org-1', doc.id, { action: ResolveAction.KEEP_DECLARED }),
+      ).rejects.toThrow(BadRequestException);
+    });
 
     it('KEEP_DECLARED — throws when non-numeric version schemes differ literally', async () => {
       const doc = makeDoc({

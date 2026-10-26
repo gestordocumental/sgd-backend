@@ -52,18 +52,12 @@ export class Workflow {
   typologyName!: string;
 
   /**
-   * Snapshot of the typology's reviewCycleEnabled flag, denormalized for the
-   * same reason as typologyCode/Name/Version — only used for frontend
-   * display, never for authorization (approve()/createCycle() always
-   * re-check document-service live). Refreshed opportunistically whenever a
-   * live check already happens elsewhere for another reason (final approval,
-   * createCycle's RN-17 guard) and, for single-workflow reads specifically
-   * (never list/paginated reads, to avoid N+1), in
-   * WorkflowsService.findOneOrFail — so the "start review cycle" button in
-   * the detail view stays accurate even if the typology's setting changed
-   * after this workflow was created or last transitioned. List/paginated
-   * views may still show a snapshot that's briefly behind the typology's
-   * live setting.
+   * Snapshot of the typology's reviewCycleEnabled flag, taken at creation
+   * and overwritten one last time by approve() at final approval, from a
+   * live check against document-service — fixed from then on and never
+   * refreshed on reads (see MGESTDOC-58). If that live check 404s (the
+   * typology version was deleted), approve() falls back to this creation-time
+   * value instead of blocking the workflow.
    */
   @Column({ name: 'review_cycle_enabled', type: 'boolean', default: false })
   reviewCycleEnabled!: boolean;
