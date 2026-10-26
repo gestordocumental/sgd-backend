@@ -112,6 +112,16 @@ describe('MetadataRulesService', () => {
       expect(result.codigo).toBe('F-F-002');
     });
 
+    it('extracts a label glued to the previous cell text ("POL-001Versión: 08")', () => {
+      const result = rules.extract({ text: 'Código: POL-001Versión: 08' });
+      expect(result.version).toBe('08');
+    });
+
+    it('does not read a label embedded in a longer word ("Previsión 3")', () => {
+      const result = rules.extract({ text: 'Previsión 3 de gastos' });
+      expect(result.version).toBeNull();
+    });
+
     it('does not take a "v" inside a word as the shorthand (AV 22, FEV-1993)', () => {
       const result = rules.extract({
         text: 'ALMACENES EXITO S.A.AV 22 NO 41 43\nFEV-1993 35.000',

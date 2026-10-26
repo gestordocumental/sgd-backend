@@ -95,13 +95,20 @@ function versionsEqual(a: string | null, b: string | null): boolean {
  * whitespace — "Formato para Reembolso … Viaticos" and "Formato para
  * reembolso … viáticos" are the same document title. Punctuation and words
  * are NOT normalized, so a genuinely different title still mismatches.
+ * "ñ" is a distinct letter in Spanish, not an accented "n" ("Año" ≠ "Ano"),
+ * so it's kept: accents are stripped per character, skipping ñ/Ñ.
  * Keep in sync with namesEqual() in the frontend (workflow-schemas.ts).
  */
 export function namesEqual(a: string | null, b: string | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
   const normalize = (s: string) =>
-    s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    s
+      .normalize('NFC')
+      .replace(/[^\x20-\x7eñÑ]/g, (c) => c.normalize('NFD').replace(/[̀-ͯ]/g, ''))
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
   return normalize(a) === normalize(b);
 }
 

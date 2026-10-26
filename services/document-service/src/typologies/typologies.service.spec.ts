@@ -90,6 +90,8 @@ describe('namesEqual()', () => {
     ['Formato de Viaticos', 'formato de viáticos', 'case and accents'],
     ['  Manual   de calidad ', 'Manual de calidad', 'surrounding and repeated whitespace'],
     ['POLÍTICA DE SEGURIDAD', 'política de seguridad', 'uppercase accented letters'],
+    ['INFORME DEL AÑO', 'informe del año', 'Ñ/ñ casing'],
+    ['Año', 'Año', 'decomposed ñ (n + U+0303)'],
   ])('treats "%s" and "%s" as equal (%s)', (a, b) => {
     expect(namesEqual(a, b)).toBe(true);
   });
@@ -97,6 +99,8 @@ describe('namesEqual()', () => {
   it.each([
     ['Formato de viáticos', 'Formato de anticipos'],
     ['Reembolso/Legalización', 'Reembolso Legalización'],
+    ['Informe del Año', 'Informe del Ano'],
+    ['Año', 'Ano'],
   ])('treats "%s" and "%s" as different', (a, b) => {
     expect(namesEqual(a, b)).toBe(false);
   });
