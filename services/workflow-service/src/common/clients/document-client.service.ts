@@ -30,6 +30,8 @@ export interface TypologyPublicInfo {
 
 export interface ReviewCycleEnabledResult {
   id: string;
+  /** Typology whose flag was used — the ACTIVE version of the same codigo when `id` was archived/deleted. */
+  resolvedTypologyId?: string;
   reviewCycleEnabled: boolean;
 }
 

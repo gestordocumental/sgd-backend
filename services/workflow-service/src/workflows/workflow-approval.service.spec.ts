@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { DataSource, Repository, ObjectLiteral } from 'typeorm';
 import { WorkflowApprovalService } from './workflow-approval.service';
@@ -299,6 +300,40 @@ describe('WorkflowApprovalService', () => {
       expect(dataSource.transaction).not.toHaveBeenCalled();
       expect(dataSource._manager.update).not.toHaveBeenCalled();
     });
+
+    // Regression: the workflow's typology version was deleted while the
+    // workflow was mid-approval — the 404 used to block the last approver
+    // forever.
+    it.each([true, false])(
+      'falls back to the workflow snapshot (reviewCycleEnabled=%s) instead of failing when the typology is not found',
+      async (snapshot) => {
+        const { service, workflowRepo, dataSource, documentClientService } = buildService();
+        documentClientService.isReviewCycleEnabledForTypology.mockRejectedValue(
+          new NotFoundException('Resource not found'),
+        );
+        const wf = pendingWorkflow({
+          reviewCycleEnabled: snapshot,
+          mainDocumentMetadata: {
+            typologyOrgStructure: { cargoId: 'cargo-1' },
+          } as unknown as Record<string, unknown>,
+        });
+        workflowRepo.findOne.mockResolvedValue(wf);
+        workflowRepo.findOneOrFail.mockResolvedValue(wf);
+
+        await service.approve('wf-1', 'approver-1', {});
+
+        expect(dataSource._manager.update).toHaveBeenCalledWith(
+          Workflow,
+          'wf-1',
+          expect.objectContaining({
+            status: snapshot
+              ? WorkflowStatus.PENDING_REVIEW_CYCLE
+              : WorkflowStatus.AVAILABLE_FOR_FINAL_USERS,
+            reviewCycleEnabled: snapshot,
+          }),
+        );
+      },
+    );
 
     it('does not call document-service when there are more approval steps left', async () => {
       const step1 = makeStep({ id: 'step-1', stepOrder: 1, status: ApprovalStepStatus.PENDING });

@@ -29,11 +29,21 @@ export class MetadataRulesService {
   ];
 
   // ─── Versión / Version ───────────────────────────────────────────────────
+  // Tried in order against the whole search scope — so an explicit label
+  // anywhere in the document always wins over the bare "v" shorthand. The
+  // shorthand used to share one alternation with the labels and had no word
+  // boundary, so the first "v<digits>" in the text won: in PDFs whose header
+  // is emitted after the body (e.g. "Microsoft Print to PDF" of an Excel),
+  // an address like "AV 22" in a table row was extracted as version 22.
+  // The leading \b is what rejects "AV 22" / "FEV-1993" for the shorthand.
+  // Explicit labels only reject a preceding *letter* (so "Previsión 3" isn't
+  // read as "Revisión 3"), not a digit or symbol: PDF text extraction often
+  // glues cells together, e.g. "Código: POL-001Versión: 08".
   private readonly versionPatterns = [
     // eslint-disable-next-line no-useless-escape, security/detect-unsafe-regex
-    /(?:versi[oó]n|version|rev(?:isi[oó]n)?|v\.?)\s*[:\-]?\s*([\d]+(?:[.,]\d+)?)/i,
+    /(?<![a-záéíóúñ])(?:versi[oó]n|version|rev(?:isi[oó]n)?)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\b/i,
     // eslint-disable-next-line security/detect-unsafe-regex
-    /\bv([\d]+(?:[.,]\d+)?)\b/i,
+    /\bv\.?\s*(\d+(?:[.,]\d+)?)\b/i,
   ];
 
   // ─── Nombre / Title — document-type words used in pass 2 of header analysis ─
