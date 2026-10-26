@@ -32,6 +32,10 @@ function makeService() {
   return {
     findByIdPublic: jest.fn().mockResolvedValue(makeDoc()),
     countOrgStructureReferences: jest.fn().mockResolvedValue(0),
+    resolveReviewCycleEnabled: jest.fn().mockResolvedValue({
+      resolvedTypologyId: 'typo-id-1',
+      reviewCycleEnabled: false,
+    }),
   };
 }
 
@@ -63,9 +67,21 @@ describe('InternalTypologiesController', () => {
     });
 
     it('returns the reviewCycleEnabled flag', async () => {
-      const result = await controller.getReviewCycleEnabled('typo-1', 'org-1');
+      const result = await controller.getReviewCycleEnabled('typo-id-1', 'org-1');
 
-      expect(result).toEqual({ id: 'typo-id-1', reviewCycleEnabled: false });
+      expect(result).toEqual({ id: 'typo-id-1', resolvedTypologyId: 'typo-id-1', reviewCycleEnabled: false });
+    });
+
+    // Regression: used findByIdPublic(), which 404s on soft-deleted versions
+    // and blocked the last approver of workflows pointing at a deleted version.
+    it('resolves through resolveReviewCycleEnabled (accepts deleted versions), not findByIdPublic', async () => {
+      service.resolveReviewCycleEnabled.mockResolvedValue({ resolvedTypologyId: 'typo-v8', reviewCycleEnabled: true });
+
+      const result = await controller.getReviewCycleEnabled('typo-v7', 'org-1');
+
+      expect(service.resolveReviewCycleEnabled).toHaveBeenCalledWith('org-1', 'typo-v7');
+      expect(service.findByIdPublic).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: 'typo-v7', resolvedTypologyId: 'typo-v8', reviewCycleEnabled: true });
     });
   });
 

@@ -41,6 +41,9 @@ export class InternalTypologiesController {
     };
   }
 
+  // Accepts archived/soft-deleted versions (unlike public-info): an in-flight
+  // workflow may reference a version deleted after it was created — see
+  // TypologiesService.resolveReviewCycleEnabled().
   @Get(':id/review-cycle-enabled')
   async getReviewCycleEnabled(
     @Param('id') id: string,
@@ -48,12 +51,10 @@ export class InternalTypologiesController {
   ) {
     if (!orgId) throw new BadRequestException('orgId query param is required');
 
-    const doc = await this.typologiesService.findByIdPublic(orgId, id);
+    const { resolvedTypologyId, reviewCycleEnabled } =
+      await this.typologiesService.resolveReviewCycleEnabled(orgId, id);
 
-    return {
-      id: (doc._id as { toString(): string }).toString(),
-      reviewCycleEnabled: doc.reviewCycleEnabled ?? false,
-    };
+    return { id, resolvedTypologyId, reviewCycleEnabled };
   }
 
   // Called by org-service before deleting a departamento/area/cargo, to block

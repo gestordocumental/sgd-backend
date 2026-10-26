@@ -91,6 +91,21 @@ function versionsEqual(a: string | null, b: string | null): boolean {
 }
 
 /**
+ * Compares two document names ignoring case, accents and surrounding/repeated
+ * whitespace — "Formato para Reembolso … Viaticos" and "Formato para
+ * reembolso … viáticos" are the same document title. Punctuation and words
+ * are NOT normalized, so a genuinely different title still mismatches.
+ * Keep in sync with namesEqual() in the frontend (workflow-schemas.ts).
+ */
+export function namesEqual(a: string | null, b: string | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  const normalize = (s: string) =>
+    s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return normalize(a) === normalize(b);
+}
+
+/**
  * Trims a string value, collapsing an empty result to null. Used to normalize
  * metadata coming from the extractor/upload paths, which — unlike the
  * create/update DTOs — aren't run through class-transformer's @Transform.
@@ -519,7 +534,7 @@ export class TypologiesService implements OnModuleInit {
     if (hasDeclared) {
       // Scenario A — compare with declared data
       const discrepancias = [];
-      if (nombre  && nombre  !== doc.datosDeclarados.nombre)  discrepancias.push({ campo: 'nombre',  valorDeclarado: doc.datosDeclarados.nombre!,  valorExtraido: nombre });
+      if (nombre  && !namesEqual(nombre, doc.datosDeclarados.nombre))  discrepancias.push({ campo: 'nombre',  valorDeclarado: doc.datosDeclarados.nombre!,  valorExtraido: nombre });
       if (codigo  && codigo  !== doc.datosDeclarados.codigo)  discrepancias.push({ campo: 'codigo',  valorDeclarado: doc.datosDeclarados.codigo!,  valorExtraido: codigo });
       if (version && !versionsEqual(version, doc.datosDeclarados.version!)) discrepancias.push({ campo: 'version', valorDeclarado: doc.datosDeclarados.version!, valorExtraido: version });
 
@@ -574,6 +589,57 @@ export class TypologiesService implements OnModuleInit {
     return doc;
   }
 
+  /**
+   * Resolves the reviewCycleEnabled policy that applies *today* to a workflow
+   * created against `id` — called by workflow-service at final approval.
+   * Unlike findByIdPublic(), this deliberately does NOT filter out
+   * soft-deleted typologies: a workflow keeps pointing at the exact version
+   * it was created with, and that version may since have been superseded
+   * (ARCHIVED) and then deleted while the workflow was still mid-approval.
+   * Rejecting it here used to 404 the last approver's approve() and leave the
+   * workflow permanently stuck.
+   *
+   * When the referenced version is no longer the live one, the flag comes
+   * from the current ACTIVE version with the same codigo — that's the
+   * typology's current policy, consistent with approve() picking up flag
+   * changes made while a workflow is mid-approval (MGESTDOC-58). If there's
+   * no ACTIVE version anymore, the referenced version's own flag is used.
+   */
+  async resolveReviewCycleEnabled(
+    orgId: string,
+    id: string,
+  ): Promise<{ resolvedTypologyId: string; reviewCycleEnabled: boolean }> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException({ message: 'Invalid typology ID', errorCode: 'TYPOLOGY_INVALID_ID' });
+    }
+    const doc = await this.model.findOne({ _id: id, orgId }).exec();
+    if (!doc) {
+      throw new NotFoundException({ message: `Typology ${id} not found`, errorCode: 'TYPOLOGY_NOT_FOUND', params: { id } });
+    }
+
+    const isLive = doc.typologyStatus === TypologyStatus.ACTIVE && !doc.deletedAt;
+    const codigo = doc.datosDeclarados?.codigo;
+    if (!isLive && codigo) {
+      const active = await this.model.findOne({
+        orgId,
+        'datosDeclarados.codigo': codigo,
+        typologyStatus: TypologyStatus.ACTIVE,
+        deletedAt: null,
+      }).exec();
+      if (active) {
+        return {
+          resolvedTypologyId: (active._id as Types.ObjectId).toString(),
+          reviewCycleEnabled: active.reviewCycleEnabled ?? false,
+        };
+      }
+    }
+
+    return {
+      resolvedTypologyId: (doc._id as Types.ObjectId).toString(),
+      reviewCycleEnabled: doc.reviewCycleEnabled ?? false,
+    };
+  }
+
   /** Called when user resolves discrepancy or confirms extracted values */
   async resolveDiscrepancy(orgId: string, id: string, dto: ResolveDiscrepancyDto, actorId?: string): Promise<TypologyDocument> {
     const doc = await this.findOne(orgId, id);
@@ -613,7 +679,7 @@ export class TypologiesService implements OnModuleInit {
       const extracted = doc.metadataExtraida;
       const declared = doc.datosDeclarados;
       const mismatchedFields: string[] = [];
-      if (extracted.nombre  && extracted.nombre  !== declared.nombre)  mismatchedFields.push('nombre');
+      if (extracted.nombre  && !namesEqual(extracted.nombre, declared.nombre))  mismatchedFields.push('nombre');
       if (extracted.codigo  && extracted.codigo  !== declared.codigo)  mismatchedFields.push('codigo');
       if (extracted.version && !versionsEqual(extracted.version, declared.version)) mismatchedFields.push('version');
 

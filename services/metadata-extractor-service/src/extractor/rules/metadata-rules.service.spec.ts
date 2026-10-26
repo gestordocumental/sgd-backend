@@ -93,6 +93,36 @@ describe('MetadataRulesService', () => {
       });
       expect(result.version).toBeNull();
     });
+
+    // Regression: "Microsoft Print to PDF" of an Excel form emits the table
+    // body before the header, so a supplier address "AV 22" came first in the
+    // text and was extracted as version 22 instead of the header's "Versión: 08".
+    it('prefers an explicit "Versión:" label over an earlier "AV 22" address in the body', () => {
+      const result = rules.extract({
+        text: [
+          '3 8909006089ALMACENES EXITO S.A.AV 22 NO 41 43BOGOTÁ5707032',
+          'FEV-199335.000,00$           NOSIEFECTIVOSI',
+          'Formato para reembolso/legalización de gastos caja menor, anticipos, viáticos y transportes',
+          'Código: F-F-002',
+          'Versión: 08',
+          'Fecha. 14/10/2026',
+        ].join('\n'),
+      });
+      expect(result.version).toBe('08');
+      expect(result.codigo).toBe('F-F-002');
+    });
+
+    it('does not take a "v" inside a word as the shorthand (AV 22, FEV-1993)', () => {
+      const result = rules.extract({
+        text: 'ALMACENES EXITO S.A.AV 22 NO 41 43\nFEV-1993 35.000',
+      });
+      expect(result.version).toBeNull();
+    });
+
+    it('still extracts the "v 2" / "V.3" shorthand when it is a standalone word and no label exists', () => {
+      expect(rules.extract({ text: 'Manual de calidad v 2' }).version).toBe('2');
+      expect(rules.extract({ text: 'Manual de calidad V.3' }).version).toBe('3');
+    });
   });
 
   // ── nombre ───────────────────────────────────────────────────────────────────
